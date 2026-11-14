@@ -22,6 +22,9 @@ container with no operands. LD and OUT also accept typed `TemporaryRelay`
 operands TR0..TR15. A TR operand is separate from a general memory bit or word;
 other Boolean instructions reject it. This is instruction encoding only:
 logic-block depth, TR lifetime and IL/ILC pairing require program validation.
+The [selected-rung compiler](../compiler/README.md) now performs initial checks
+for these rules and composes qualified containers; whole-project lowering and
+image generation are still pending.
 
 `Profile{Model: CJ1MCPU21}` and `Profile{Model: CJ1HCPU65}` currently describe
 observed library-default configurations. Unit-version-specific profiles are

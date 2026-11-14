@@ -53,6 +53,7 @@ jobs:
         run: |
           go test ./omron/um -fuzz FuzzParseN1 -fuzztime 5s -parallel 2 -timeout 60s
           go test ./omron/codec -fuzz FuzzDecodeInstruction -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/compiler -fuzz FuzzCompileRungs -fuzztime 5s -parallel 2 -timeout 60s
       - name: Linux ARM64 cross-build (execution not qualified here)
         env:
           GOOS: linux

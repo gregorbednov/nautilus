@@ -1,5 +1,31 @@
 # Native encoding findings from the installed Windows compiler
 
+## Selected-rung structure and code-body compilation
+
+Independent `omron/compiler` composes qualified containers after checking
+explicit network boundaries, condition depth, TR definitions and IL/ILC regions.
+It returns source spans and no partial body on any error. It does not insert END;
+an explicit END must be terminal. CNT/CNTX require count/reset conditions and
+terminate their selected block; continuation from counter inputs is unqualified.
+Multiple ILs sharing one ILC are accepted with a diagnostic, not treated as a
+nested one-to-one stack. Logic depth is bounded at8; duplicate TR stores inside
+a block and references across network/new-block boundaries are rejected.
+
+The CXP adapter reparses current textual instructions, refuses graphical FBs,
+and never relies on stale cached Parsed instructions. CLI `omron compile-rungs`
+requires explicit model and contiguous selected rungs in one native program,
+retaining project order. Its report contains bare big-endian containers, source
+hash, source spans and false full-project/hardware qualification fields.
+
+Controlled first-rung replacements in the two original CXP fixtures match the
+first two task containers in the saved H-baseline/M-input-bit N1 images using
+the respective CPU profiles. The actual CLI compiled the existing M-input-bit
+experiment to e205e00ffa05e001 with sourceSHA
+becb4b4c39cad9f8a336ecc61a91957923e69ee46c990effca9125b9eb49badf.
+Complex structure rules have manual/test coverage, not a new whole-program
+CX ProgramCheck capture. Graph lowering, symbols, FB allocation and complete
+native images remain outstanding. See [compiler scope](../../omron/compiler/README.md).
+
 ## Differentiated bit instructions
 
 A new454-input-per-CPU capsule records908 observations: Go matches496 supported
@@ -62,8 +88,9 @@ fails in this library context; no substitute encoding is inferred.
 
 Existing full-project captures corroborate ten ANDLD containers, three ORLD
 containers and eight LD/OUT TR0/TR1 containers in each image. These are numeric
-anchors; this does not validate an arbitrary branch graph. IL/ILC pairing,
-block-depth and TR lifetime validation are still outstanding. W474 describes
+anchors; this does not validate an arbitrary branch graph. The selected-rung
+compiler now checks initial IL/ILC, block-depth and TR lifetime rules; complete
+project context and graph lowering remain outstanding. W474 describes
 AND/OR block combination and restricts TR0..TR15 to LD/OUT; see
 [Omron W474](https://assets.omron.eu/downloads/latest/manual/en/w474_cs_cj_nsj-series_plc%2C_sysmac_one_nsj_series_reference_manual_en.pdf?v=9).
 

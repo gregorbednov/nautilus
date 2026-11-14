@@ -22,6 +22,10 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   Six input instructions and SET/RSET also support qualified @/% differentiation,
   verified against908 additional observations. OUT differentiation stays rejected
   according to the documented instruction variations.
+* `compiler`: structured compilation of explicitly selected textual rungs, with
+  logic-block/TR/interlock checks, atomic errors, source maps and big-endian
+  instruction bodies. The CLI selects contiguous rungs in one CXP/CXT program;
+  graphical FBs and unknown instructions fail. See [scope and usage](compiler/README.md).
 * `fins`: UDP and TCP with node negotiation, strict response correlation,
   direct Host Link FA framing and Linux serial configuration; identity,
   CPU status, raw memory reads and bounded opaque user-memory backups.
@@ -32,7 +36,7 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   data and all input bytes are preserved. Supported layout is verified against
   matching CJ1M/CJ1H compiler captures; this is not a full native decompiler.
 
-**There is no native CJ1 executable compiler or deploy command yet.** Import
+**There is no full-project CJ1 executable compiler or deploy command yet.** Import
 bundles are source/research artifacts, not runnable Nautilus projects. The full
 Omron instruction palette, graphical FB lowering, native binary decompiler and
 deployment verification are still required. No physical controller has been
@@ -75,6 +79,18 @@ this command. A rewritten CXP uses valid, unoptimized DCL literal tokens, so it
 can be larger than the original. Its DCL stream has been checked against the
 independent zlib `blast` decoder; CX-Programmer acceptance still needs a Windows
 test. Writing a source container does **not** compile it for a CPU.
+
+Compile the selected rewritten textual rung into a JSON code-body report with:
+
+```sh
+bin/naut omron compile-rungs -model 'CJ1M CPU21' \
+  -rung 'Resource[0].Programs.Program[0].Sections.Sec[0].ProgramData.R[0]' \
+  /tmp/edited.cxp
+```
+
+Add `-timer-mode bcd|binary` for timers/counters. Repeat `-rung` for a contiguous
+selection in one program; project order is preserved. This produces containers
+and source maps, not a full N1 image or PLC transfer. See [compiler limits](compiler/README.md).
 
 ## Read-only commissioning
 

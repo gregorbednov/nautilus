@@ -21,7 +21,7 @@ import (
 	"github.com/joyautomation/nautilus/omron/monitor"
 )
 
-const omronUsage = `naut omron — independent CJ1 source inspection and read-only commissioning
+const omronUsage = `naut omron — independent CJ1 source tools, rung compilation and read-only commissioning
 
   naut omron inspect [-encoding auto|utf-8|windows-1251|windows-1252] FILE
       JSON CPU/source inventory, including graphical and function-block rungs.
@@ -36,6 +36,10 @@ const omronUsage = `naut omron — independent CJ1 source inspection and read-on
   naut omron inspect-image [-format n1] FILE
       Inspect a captured native N1 compiler image: tasks and code sizes.
       Preserve unknown data; does not decompile, compile or deploy it.
+  naut omron compile-rungs -model MODEL [-timer-mode bcd|binary] -rung PATH FILE
+      Compile selected textual CXP/CXT rungs into JSON instruction containers.
+      Repeat -rung for a contiguous selection in one program (project order).
+      Partial code body only; not a complete project, N1 image or PLC payload.
   naut omron status CONNECTION-FLAGS
       Read CPU identity and status; never change its mode.
   naut omron read CONNECTION-FLAGS ADDRESS [COUNT]
@@ -54,7 +58,7 @@ CONNECTION-FLAGS:
   -serial /dev/ttyUSB0 -station 0 -baud 9600 -bits 7 -parity even -stop-bits 2
   -timeout 2s                (per exchange; no automatic retries)
 
-Native executable generation, deploy and full LD editing are not implemented
+Full-project executable generation, deploy and full LD editing are not implemented
 yet. No Windows/vendor DLL dependency; physical hardware is not yet qualified.
 `
 
@@ -69,6 +73,8 @@ func runOmron(args []string) int {
 		err = omronSource(args[0], args[1:])
 	case "inspect-image":
 		err = omronImage(args[1:])
+	case "compile-rungs":
+		err = omronCompileRungs(args[1:])
 	case "status", "read", "upload", "serve":
 		err = omronRead(args[0], args[1:])
 	default:
