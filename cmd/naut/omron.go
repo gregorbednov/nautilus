@@ -41,6 +41,10 @@ const omronUsage = `naut omron — independent CJ1 source tools, rung compilatio
       Repeat -rung for a contiguous selection in one program (project order).
       Resolve exact local/global names and audit their typed address bindings.
       Partial code body only; not a complete project, N1 image or PLC payload.
+  naut omron compile-program-body -model MODEL [-timer-mode bcd|binary] -program PATH FILE
+      Compile every source rung in the named program, requiring terminal END.
+      Validate section/rung counts and order; reject graphical or unknown code.
+      Source body only; native section scaffolding and task image are pending.
   naut omron status CONNECTION-FLAGS
       Read CPU identity and status; never change its mode.
   naut omron read CONNECTION-FLAGS ADDRESS [COUNT]
@@ -74,6 +78,8 @@ func runOmron(args []string) int {
 		err = omronSource(args[0], args[1:])
 	case "inspect-image":
 		err = omronImage(args[1:])
+	case "compile-program-body":
+		err = omronCompileProgramBody(args[1:])
 	case "compile-rungs":
 		err = omronCompileRungs(args[1:])
 	case "status", "read", "upload", "serve":

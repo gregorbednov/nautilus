@@ -31,6 +31,12 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   Exact named operands resolve from program locals over resource globals, with
   typed direct bindings and per-use provenance. Nine original symbolic rungs
   per CPU match complete sequences in the captured native task bodies.
+  `compile-program-body` validates and compiles every declared source rung of
+  one program, requiring terminal END. Both original second programs emit 133
+  containers matching all source-instruction ranges in the saved tasks; six
+  additional captured containers remain unexplained. This is not native task
+  generation. All 41 textual rungs per project compile individually; BLINK calls
+  remain explicit blockers for the first program.
 * `fins`: UDP and TCP with node negotiation, strict response correlation,
   direct Host Link FA framing and Linux serial configuration; identity,
   CPU status, raw memory reads and bounded opaque user-memory backups.

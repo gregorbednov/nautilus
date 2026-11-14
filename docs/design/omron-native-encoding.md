@@ -1,5 +1,37 @@
 # Native encoding findings from the installed Windows compiler
 
+## Whole program source bodies (2026-11-15)
+
+The strict source reader retains declared empty rungs and checks SC/RC counts,
+indexed order, observed language/inline/flags values and unrecognized code fields.
+Summary is an inspection projection, not an exhaustive compiler input. Mixed
+SL/graphics are now preserved in Summary too, so graphics cannot disappear from
+selected-rung compilation. Duplicate SL is rejected by the strict reader.
+
+All 41 nonempty native textual rungs in each original project compile individually
+in BCD mode. Program0 has 21 declared rungs: 16 textual, one graphical BLINK call,
+four empty. Program1 has 28: 25 textual, three empty. Compilation of all program1
+source produces 133 containers for both models, with explicit END. Against the
+unchanged task1 N1 bodies (139 containers), source words 0..131 equal capture
+indices 3..134, and source END equals capture index 138. Capture indices 0..2 and
+135..137 both contain b2400100,6140dead,6540dead. These six words are unknown
+compiler-added scaffolding; their relation to empty sections is only a hypothesis.
+No generic stripping or emission rule is qualified, and they are not a valid
+ordinary MOV form from the qualified codec. Tests compare the precise ranges
+and unknown triples, not a normalized native image.
+
+New API CompileCXPProgramBody and CLI compile-program-body compile the entire
+source body atomically with terminal END. They do not assemble a native task,
+use task scheduling metadata, emit the unknown scaffolding or build an N1 image.
+Program0 refuses the graphical call. Both models retain unknown unit version;
+no new full CX ProgramCheck, vendor capture or PLC execution occurred this stage.
+
+The built Windows CLI emitted the original CJ1M program1 report with 133 source
+spans and 66 audited bindings; nativeTaskCompiled/fullProjectCompiled and
+hardwareQualified remain false. Scoped Omron/research/CLI tests and vet pass.
+The new whole-source compiler fuzz target passed 76,702 executions; the complete
+CLI cross-builds as Linux ARM64. Remote Linux CI and hardware were not run.
+
 ## Zero-operand condition transformers (2026-11-15)
 
 Three fresh disposable-worker runs, default/BCD/binary, give198 observations

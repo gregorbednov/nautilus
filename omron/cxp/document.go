@@ -270,14 +270,14 @@ func (d *Document) Summary() Summary {
 			}
 		}
 		if strings.HasPrefix(f.Name, "R[") || strings.HasPrefix(f.Name, "FBR[") {
+			var graphic []Field
+			for _, e := range f.Fields {
+				if strings.HasPrefix(e.Name, "[") {
+					graphic = append(graphic, e)
+				}
+			}
 			sl, ok := f.Get("SL")
 			if !ok {
-				var graphic []Field
-				for _, e := range f.Fields {
-					if strings.HasPrefix(e.Name, "[") {
-						graphic = append(graphic, e)
-					}
-				}
 				if len(graphic) > 0 {
 					c, _ := f.Get("Com")
 					s.Rungs = append(s.Rungs, Rung{Path: path, Comment: c.Text(), Instructions: []Instruction{}, Graphic: graphic})
@@ -289,9 +289,13 @@ func (d *Document) Summary() Summary {
 				source = sl.Text()
 			}
 			if strings.TrimSpace(source) == "" {
+				if len(graphic) > 0 {
+					c, _ := f.Get("Com")
+					s.Rungs = append(s.Rungs, Rung{Path: path, Comment: c.Text(), Instructions: []Instruction{}, Graphic: graphic})
+				}
 				return
 			}
-			rung := Rung{Path: path, Instructions: []Instruction{}}
+			rung := Rung{Path: path, Instructions: []Instruction{}, Graphic: graphic}
 			if c, ok := f.Get("Com"); ok {
 				rung.Comment = c.Text()
 			}

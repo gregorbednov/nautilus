@@ -14,6 +14,10 @@ import (
 )
 
 func captureOmronCompilation(t *testing.T, args []string) ([]byte, error) {
+	return captureOmronBodyCommand(t, omronCompileRungs, args)
+}
+
+func captureOmronBodyCommand(t *testing.T, command func([]string) error, args []string) ([]byte, error) {
 	t.Helper()
 	read, write, err := os.Pipe()
 	if err != nil {
@@ -22,14 +26,20 @@ func captureOmronCompilation(t *testing.T, args []string) ([]byte, error) {
 	previous := os.Stdout
 	os.Stdout = write
 	defer func() { os.Stdout = previous; read.Close(); write.Close() }()
-	err = omronCompileRungs(args)
+	type captured struct {
+		data []byte
+		err  error
+	}
+	completed := make(chan captured, 1)
+	go func() { data, err := io.ReadAll(read); completed <- captured{data, err} }()
+	err = command(args)
 	write.Close()
 	os.Stdout = previous
-	data, readErr := io.ReadAll(read)
-	if readErr != nil {
-		t.Fatal(readErr)
+	result := <-completed
+	if result.err != nil {
+		t.Fatal(result.err)
 	}
-	return data, err
+	return result.data, err
 }
 
 func TestOmronCompileRungsCLI(t *testing.T) {

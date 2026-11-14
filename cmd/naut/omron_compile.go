@@ -78,6 +78,38 @@ func omronCompileRungs(args []string) error {
 	}
 	// Nothing is emitted until every selected rung has been validated. This
 	// report is intentionally distinct from a complete project/native image.
+	return writeOmronBodyReport("cj1-selected-rung-containers", doc, owner, profile, body)
+}
+
+func omronCompileProgramBody(args []string) error {
+	flags := flag.NewFlagSet("omron compile-program-body", flag.ContinueOnError)
+	model := flags.String("model", "", "explicit codec model: CJ1M CPU21 or CJ1H-H CPU65")
+	mode := flags.String("timer-mode", "", "explicit timer/counter mode: bcd or binary")
+	program := flags.String("program", "", "exact Resource[n].Programs.Program[n] path")
+	encoding := flags.String("encoding", "auto", "CXT text encoding")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 1 || *model == "" || *program == "" {
+		return errors.New("compile-program-body requires -model MODEL, -program PATH and one CXP/CXT filename")
+	}
+	data, err := readOmronFile(flags.Arg(0))
+	if err != nil {
+		return err
+	}
+	doc, err := cxp.ReadEncoding(data, *encoding)
+	if err != nil {
+		return err
+	}
+	profile := codec.Profile{Model: *model, TimerCounterMode: codec.TimerCounterMode(*mode)}
+	body, err := compiler.CompileCXPProgramBody(profile, doc, *program)
+	if err != nil {
+		return err
+	}
+	return writeOmronBodyReport("cj1-program-source-containers", doc, *program, profile, body)
+}
+
+func writeOmronBodyReport(format string, doc *cxp.Document, program string, profile codec.Profile, body *compiler.Body) error {
 	report := struct {
 		Schema              int            `json:"schemaVersion"`
 		Format              string         `json:"format"`
@@ -88,8 +120,9 @@ func omronCompileRungs(args []string) error {
 		Body                *compiler.Body `json:"body"`
 		CodeHex             string         `json:"codeHex"`
 		FullProjectCompiled bool           `json:"fullProjectCompiled"`
+		NativeTaskCompiled  bool           `json:"nativeTaskCompiled"`
 		HardwareQualified   bool           `json:"hardwareQualified"`
-	}{Schema: 1, Format: "cj1-selected-rung-containers", SourceSHA256: doc.SHA256, Program: owner, Model: *model, TimerMode: *timerMode, Body: body, CodeHex: hex.EncodeToString(body.Bytes())}
+	}{Schema: 1, Format: format, SourceSHA256: doc.SHA256, Program: program, Model: profile.Model, TimerMode: string(profile.TimerCounterMode), Body: body, CodeHex: hex.EncodeToString(body.Bytes())}
 	output := json.NewEncoder(os.Stdout)
 	output.SetIndent("", "  ")
 	return output.Encode(report)

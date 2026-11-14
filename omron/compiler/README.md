@@ -59,6 +59,33 @@ must be terminal. The compiler never adds END automatically.
 
 ## CLI
 
+`CompileCXPProgramBody(profile, document, programPath)` compiles every declared
+source rung in the selected program, including empty rung boundaries, and
+requires an explicit terminal END. `cxp.SourceForProgram` checks the observed
+FileType2, non-inline, IEC1131Type11/SecType0 layout, exact SC/RC counts and
+indexed order. Unknown code fields, duplicate SL and unqualified flags fail;
+graphics remain visible even alongside SL. Inspection Summary is not used as
+an exhaustive program source. Scheduling metadata is not compiled by this API.
+
+```sh
+bin/naut omron compile-program-body -model 'CJ1M CPU21' -timer-mode bcd \
+  -program 'Resource[0].Programs.Program[1]' omron/cxp/testdata/cj1m.cxp
+```
+
+The JSON format is `cj1-program-source-containers`, with `nativeTaskCompiled`,
+`fullProjectCompiled` and `hardwareQualified` all false. Both original second
+programs compile to 133 source containers. All 132 non-END containers match saved
+task1 code indices 3..134, and END matches index 138. The two intervening triples
+at indices 0..2 and 135..137 are b2400100,6140dead,6540dead. Their meaning and
+generation rules remain unknown; production code neither emits nor removes them.
+This is a whole source body, not a native task or N1 image. The first programs
+fail on the graphical BLINK call without returning a partial body.
+
+Regression inventory covers all 41 nonempty textual rungs plus one graphical call
+per original project; all 41 textual rungs compile individually in BCD mode.
+Program0 has 21 declared rungs including four empty; program1 has 28 including
+three empty. Neither API treats those source counts as native code sizes.
+
 Compile an unchanged supported symbolic rung from the supplied project with:
 
 ```sh
