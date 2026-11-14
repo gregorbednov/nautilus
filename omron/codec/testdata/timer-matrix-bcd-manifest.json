@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "e7fab8b1e11299c5f2a6f4f53b442b7b7c26f7d7e0b805fcc057e48a650f6e47",
+  "programType": 0,
+  "unitVersion": null,
+  "timerCounterMode": "bcd",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "artifacts": {
+    "cases": {
+      "path": "timer-matrix-bcd-cases.json",
+      "sha256": "e7fab8b1e11299c5f2a6f4f53b442b7b7c26f7d7e0b805fcc057e48a650f6e47",
+      "bytes": 24666
+    },
+    "events": {
+      "path": "timer-matrix-bcd-events.jsonl.gz",
+      "sha256": "692b0a91c937b59bfe0a0b5e6ccbf63906f13b45466874e68cb295a48a446d4c",
+      "bytes": 6745,
+      "encoding": "gzip",
+      "decodedSHA256": "d14d188c57b5275e6bb153e7c3fe7292cf19ca031856ddc4aff3a91748f3c77b"
+    },
+    "script": {
+      "path": "timer-matrix-bcd-run.js.gz",
+      "sha256": "919ff9d5b9422d2073b685eda9b4cd5f1353898a316885743c522f9353c812a5",
+      "bytes": 3724,
+      "encoding": "gzip",
+      "decodedSHA256": "15d9bde3581aa43b190daf0ebe34db5631fedb95e7ca3821ac63ad0f7bd42deb"
+    },
+    "template": {
+      "path": "timer-matrix-bcd-template.js",
+      "sha256": "b70d99c337a424c126ee0912e3221242b6e19cb0aaa8e1a9f8bbc0c4309ed928",
+      "bytes": 5476
+    },
+    "worker": {
+      "path": "timer-matrix-bcd-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    }
+  }
+}

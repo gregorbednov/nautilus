@@ -15,9 +15,19 @@ var ErrUnqualifiedInstruction = errors.New("unqualified native instruction form"
 // Only the two listed models with unknown unit version are currently covered.
 // Specific unit versions require separate qualification before deployment.
 type Profile struct {
-	Model       string
-	UnitVersion string
+	Model            string
+	UnitVersion      string
+	TimerCounterMode TimerCounterMode
 }
+
+// TimerCounterMode is required for timer/counter instructions. The zero value
+// leaves their interpretation unknown, even when library defaults were binary.
+type TimerCounterMode string
+
+const (
+	TimerModeBCD    TimerCounterMode = "bcd"
+	TimerModeBinary TimerCounterMode = "binary"
+)
 
 const (
 	CJ1MCPU21 = "CJ1M CPU21"
@@ -26,6 +36,9 @@ const (
 
 func (profile Profile) validate() error {
 	if profile.UnitVersion != "" || (profile.Model != CJ1MCPU21 && profile.Model != CJ1HCPU65) {
+		return ErrUnqualifiedProfile
+	}
+	if profile.TimerCounterMode != "" && profile.TimerCounterMode != TimerModeBCD && profile.TimerCounterMode != TimerModeBinary {
 		return ErrUnqualifiedProfile
 	}
 	return nil
@@ -58,6 +71,14 @@ func qualifierAllowed(mnemonic, label string) bool {
 		return label == "000"
 	case "MOV":
 		return label == "021" || label == "21"
+	case "TIMH":
+		return label == "015"
+	case "TIMX":
+		return label == "550"
+	case "TIMHX":
+		return label == "551"
+	case "CNTX":
+		return label == "546"
 	}
 	return false
 }
@@ -72,6 +93,11 @@ func EncodeInstruction(profile Profile, instruction il.Instruction) ([]uint32, e
 	mnemonic := strings.ToUpper(instruction.Mnemonic)
 	if instruction.Modifier != "" || !qualifierAllowed(mnemonic, instruction.Function) {
 		return nil, ErrUnqualifiedInstruction
+	}
+	for _, definition := range timerInstructions {
+		if mnemonic == definition.bcd || mnemonic == definition.binary {
+			return encodeTimer(profile, definition, mnemonic, instruction.Operands)
+		}
 	}
 	if mnemonic == "MOV" {
 		return encodeMOV(instruction.Operands)
@@ -117,6 +143,19 @@ func DecodeInstruction(profile Profile, words []uint32) (il.Instruction, int, er
 	}
 	var source string
 	consumed := 1
+	for _, definition := range timerInstructions {
+		if words[0] == definition.opcode {
+			source, err := decodeTimer(profile, definition, words)
+			if err != nil {
+				return fail(err)
+			}
+			instruction, err := il.Parse(source)
+			if err != nil {
+				return fail(err)
+			}
+			return instruction, 3, nil
+		}
+	}
 	switch words[0] {
 	case 0xb2400140:
 		var err error

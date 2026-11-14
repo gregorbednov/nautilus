@@ -1,5 +1,32 @@
 # Native encoding findings from the installed Windows compiler
 
+## Explicit timer/counter instruction codec
+
+The next operand matrix contains210 inputs per CPU in each explicit mode:
+840 observations. Independent Go matches252 encodings, rejects540 invalid or
+wrong-mode forms, and leaves48 indirect cases unqualified. `Profile` now exposes
+`TimerCounterMode`: empty rejects timer/counter encode/decode rather than guessing
+the meaning from a shared opcode. Unknown mode strings fail profile validation.
+
+| BCD spelling | Binary spelling | First container | Slot container |
+| --- | --- | --- | --- |
+| TIM | TIMX(550) | bb4000c0 | 5000e000 + index |
+| TIMH(015) | TIMHX(551) | bb4000c1 | 5000e000 + index |
+| CNT | CNTX(546) | bb4000d0 | 5000f000 + index |
+
+Indices span0..4095; a matching T/C prefix is accepted. The third container is
+`65400000 | #literal`, `65440000 | &literal` (binary mode only), or
+`64000000 | direct-word-address`. BCD #literal digits must each be0..9, so #ABCD
+fails although the binary form accepts it. Direct preset addresses use the MOV
+word-address fields below, including read-only A words as sources. Truncated,
+wrong-slot, reserved-tag and unsupported indirect forms consume zero on decode.
+
+Seven numeric timer sequences are also present in each existing N1 task capture,
+including `bb4000c0,5000e000,65400100` and
+`bb4000c1,5000e006,65400050`. This corroborates emitted containers but does not
+establish the captured project's timer mode. FB-relative sequences such as
+`bb4000c1,513c0000,653c3001` remain opaque; no allocation or FB lowering is implied.
+
 ## R1/R2 continuation: MOV and recovered timer context
 
 The separate MOV capsule records 185 inputs for each CPU: 288 supported outputs
@@ -40,7 +67,8 @@ portable capsules preserve84 probes: measured default equals binary; TIM,
 TIMH(015), CNT initialize only in BCD, while TIMX(550), TIMHX(551), CNTX(546)
 initialize only in binary. BCD forms reject &decimal presets in this probe.
 The MOV #/& controls remain unchanged across modes. This resolves the earlier
-initialization failure but does not implement or qualify production timers.
+initialization failure. These initial configuration probes preceded the operand
+matrix and timer codec described above; they alone did not qualify timer forms.
 
 ## R1: instruction-unit oracle and initial independent codec
 

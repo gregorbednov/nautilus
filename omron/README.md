@@ -11,9 +11,11 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   malformed instructions remain in the report. Parsing does not establish CPU
   support, operand validity or machine encoding.
 * `codec`: initial native encoding/decoding for ten plain Boolean instruction
-  forms plus NOP/END and direct-word/literal MOV, with distinct typed bit/word
+  forms plus NOP/END, direct-word/literal MOV, and six mode-aware timer/counter
+  forms, with distinct typed bit/word
   addresses and radix-preserving literals. Verified against 430 initial and
-  370 MOV library observations and existing project anchors. It handles individual
+  370 MOV library observations, 840 timer operand observations and existing
+  project anchors. Timers require explicit BCD/binary mode. It handles individual
   containers under library-default profiles; full program compilation and
   unit-version qualification remain outstanding. See [codec limits](codec/README.md).
 * `fins`: UDP and TCP with node negotiation, strict response correlation,

@@ -69,7 +69,7 @@ func TestNativeAddressSemantics(t *testing.T) {
 }
 
 func FuzzDecodeInstruction(f *testing.F) {
-	for _, words := range [][]uint32{{0xe205e000}, {0xfa05e001}, {0xbb800001}, {0xb2400140}, {0xe205a000}, {0}, {0xb2400140, 0x61400001, 0x54010000}, {0xb2400140, 0x6000e000, 0x5400f000, 0xbb800001}} {
+	for _, words := range [][]uint32{{0xe205e000}, {0xfa05e001}, {0xbb800001}, {0xb2400140}, {0xe205a000}, {0}, {0xb2400140, 0x61400001, 0x54010000}, {0xb2400140, 0x6000e000, 0x5400f000, 0xbb800001}, {0xbb4000c0, 0x5000e000, 0x65400010}, {0xbb4000c1, 0x5000efff, 0x6544ffff}, {0xbb4000d0, 0x5000f000, 0x6400b840}, {0xbb4000c0, 0x5000e000, 0x6540abcd}} {
 		var data []byte
 		for _, word := range words {
 			data = binary.BigEndian.AppendUint32(data, word)
@@ -85,17 +85,19 @@ func FuzzDecodeInstruction(f *testing.F) {
 			words = append(words, binary.BigEndian.Uint32(data))
 			data = data[4:]
 		}
-		profile := codec.Profile{Model: codec.CJ1MCPU21}
-		instruction, count, err := codec.DecodeInstruction(profile, words)
-		if err != nil {
-			if count != 0 {
-				t.Fatal("failed decode consumed input")
+		for _, mode := range []codec.TimerCounterMode{"", codec.TimerModeBCD, codec.TimerModeBinary} {
+			profile := codec.Profile{Model: codec.CJ1MCPU21, TimerCounterMode: mode}
+			instruction, count, err := codec.DecodeInstruction(profile, words)
+			if err != nil {
+				if count != 0 {
+					t.Fatal("failed decode consumed input")
+				}
+				continue
 			}
-			return
-		}
-		encoded, err := codec.EncodeInstruction(profile, instruction)
-		if err != nil || count <= 0 || count > len(words) || !reflect.DeepEqual(encoded, words[:count]) {
-			t.Fatal("decoder changed native container")
+			encoded, err := codec.EncodeInstruction(profile, instruction)
+			if err != nil || count <= 0 || count > len(words) || !reflect.DeepEqual(encoded, words[:count]) {
+				t.Fatal("decoder changed native container")
+			}
 		}
 	})
 }

@@ -53,3 +53,11 @@ Raw directories: `E:\cx-proger\research\cj1-oracle\timer-mode-01-{MODE}`.
 All manifests retain unknown unit version and false full-program/hardware
 qualification. Tests verify artifact hashes, exact injected literals, event
 order, profile selection and completion before using any observed results.
+
+`timer-matrix-{bcd,binary}-manifest.json` pin 210 inputs for each CPU and mode
+(840 observations total), with the same artifact roles and configuration checks.
+The common input SHA-256 is
+`e7fab8b1e11299c5f2a6f4f53b442b7b7c26f7d7e0b805fcc057e48a650f6e47`.
+Raw directories are `E:\cx-proger\research\cj1-oracle\timer-library-02-{MODE}`.
+Cases cover all six spellings, numeric/T/C indices, index boundaries, literal
+boundaries, invalid BCD digits, direct preset areas and indirect negative controls.

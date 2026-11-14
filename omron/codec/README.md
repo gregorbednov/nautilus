@@ -14,7 +14,9 @@ and unqualified function-label spellings fail explicitly.
 observed library-default configurations. Unit-version-specific profiles are
 unqualified and rejected. These profiles do not authorize deployment or assert
 hardware compatibility. Unit version and timer mode must be qualified before
-the whole-project compiler is enabled.
+the whole-project compiler is enabled. `TimerCounterMode: TimerModeBCD` or
+`TimerModeBinary` selects the explicit measured mode for individual instructions.
+Omitting it leaves timer/counter interpretation unknown and rejects these forms.
 
 ```go
 instruction, err := il.Parse("LD W1.15")
@@ -29,6 +31,14 @@ zero words and return an error, allowing a caller to preserve opaque input.
 Decoded source is canonical; original symbols and spelling cannot be recovered
 from a machine operand alone. MOV consumes three containers; Boolean forms,
 NOP and END consume one.
+
+Timers/counters also consume three containers. BCD mode supports TIM, TIMH(015)
+and CNT; binary mode supports TIMX(550), TIMHX(551) and CNTX(546). Bare names
+are accepted for these six forms. Indices span0..4095; numeric indices and a
+matching T/C prefix designate the same slot. Presets are direct word addresses
+or literals. BCD requires #hex with every nibble0..9; binary accepts unsigned
+#hex and &decimal. The decoder uses the explicit mode because the same numeric
+containers can mean TIM or TIMX. Indirect and FB-relative operands remain opaque.
 
 MOV supports direct word sources/destinations in numeric CIO, W, H, A, D,
 T and C, and unsigned 16-bit `#` hexadecimal or `&` decimal sources. The radix
@@ -67,7 +77,12 @@ The previous TIM/TIMH initialization failures are now explained by the measured
 binary timer default. Three new mode capsules (84 observations) verify normal
 BCD/binary setters and getter readback: TIM/TIMH/CNT initialize in BCD mode;
 TIMX/TIMHX/CNTX initialize in binary mode. MOV controls are unchanged. These
-probes do not yet qualify a production timer codec or a unit-version profile.
+probes establish research configuration. A subsequent 840-observation operand
+matrix now qualifies the six direct timer/counter forms: 252 encodings match,
+540 invalid or wrong-mode forms fail and 48 indirect observations remain
+unqualified. Seven numeric timer sequences also match each existing full-project
+N1 capture; that corroborates containers, not the source's mode or hardware.
+Unit-version profiles and full-program behavior remain unqualified.
 
 Native IL spelling differs from monitoring addresses: numeric `0.00` is CIO;
 the oracle rejects `CIO0.00`. Bare T/C in Boolean instructions mean completion flags;
