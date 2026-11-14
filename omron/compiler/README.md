@@ -6,6 +6,24 @@ adapts selected textual CXP/CXT rungs, preserving their native path/line numbers
 It reparses actual instruction text rather than trusting cached `Parsed` fields.
 No Windows, vendor library, network or PLC is used by either API.
 
+`CompileCXPProgramRungs(profile, document, programPath, rungs)` also resolves
+exact operand names using that program's locals and its resource's globals.
+Locals override globals, including when the local binding is unqualified: there
+is no fallback to a differently typed/addressed global. The low-level APIs above
+remain direct-operand-only. Unknown symbols and mismatched scopes fail atomically.
+
+Supported bindings are explicit BOOL bit addresses and addressed16-bit
+CHANNEL/WORD/INT/UINT/UINT_BCD operands. Native access bounds and CJ1 restrictions
+still apply after substitution. Flags, auxiliary type metadata, automatic
+addresses, alias chains, FB/array/structure bindings and NUMBER constants remain
+unqualified. NUMBER conversion is context-dependent in CX-Programmer, especially
+for BCD; it is not equivalent to copying an address or prefixing every value.
+Lookup preserves exact name case. Case-variant collisions and names colliding
+with native operand syntax are rejected pending qualification. No case folding,
+substring replacement, member/index evaluation or implicit allocation is used.
+Successful `Body.Bindings` audit each use's name, resolved address/type, lexical
+scope, declaration line and source operand index (zero-based).
+
 The compiler checks pending condition depth (maximum8), ANDLD/ORLD underflow,
 unjoined blocks and outputs without their required conditions. Ordinary output
 instructions need one condition; CNT/CNTX need count and reset conditions.
@@ -13,8 +31,10 @@ Counter continuation from either input is not qualified here: the counter ends
 its block and a following operation must start its own condition.
 
 TR must be defined before restore and may be assigned once per instruction
-block. Normal LD after an output starts a fresh block; LD TR restores an existing
-branch point. TR definitions and condition stacks cannot cross explicit rung
+block. Normal LD after an output starts a fresh block; LD TR after an output
+restores a branch point. LD TR while a condition is pending pushes another block
+for ANDLD/ORLD instead of discarding the pending condition. TR saves retain the
+current condition without consuming it. TR definitions and stacks cannot cross explicit rung
 boundaries. AND/OR/NOT after an output refine the current condition. This covers
 multiple outputs and branch restores without treating every LD as a new rung.
 
@@ -39,12 +59,12 @@ must be terminal. The compiler never adds END automatically.
 
 ## CLI
 
-After rewriting a rung to supported direct-address mnemonics, compile it with:
+Compile an unchanged supported symbolic rung from the supplied project with:
 
 ```sh
-bin/naut omron compile-rungs -model 'CJ1M CPU21' \
-  -rung 'Resource[0].Programs.Program[0].Sections.Sec[0].ProgramData.R[0]' \
-  /tmp/edited.cxp
+bin/naut omron compile-rungs -model 'CJ1M CPU21' -timer-mode bcd \
+  -rung 'Resource[0].Programs.Program[0].Sections.Sec[0].ProgramData.R[3]' \
+  omron/cxp/testdata/cj1m.cxp
 ```
 
 Use `-timer-mode bcd` or `binary` when the selection contains timers/counters.
@@ -58,6 +78,10 @@ The report format is `cj1-selected-rung-containers`, with source SHA-256, progra
 path, model/mode, body/source map and `codeHex`. `fullProjectCompiled` and
 `hardwareQualified` are false. There is no download option or PLC connection.
 
+The CLI automatically reads the selected program's symbol tables. It validates
+declaration counts, uniqueness and list structure. Comments are opaque: their
+quotes/commas and multiline raw blocks cannot become extra declarations.
+
 ## Verification and remaining work
 
 Controlled first-rung replacements in both original CXP fixtures produce the
@@ -70,12 +94,23 @@ instructions, source/codec errors, refusal of graphical FBs and CLI selection.
 Fuzzing checks atomic failure, bounded spans, exact source correspondence and
 codec round trips. Complex flow checks have manual/test coverage, not a newly
 captured full-program CX ProgramCheck result or hardware execution result.
+
+Seven unchanged symbolic rungs per original project now match complete contiguous
+sequences in the respective saved N1 task bodies: five from program0, including
+two complex TR networks, and two from program1. This exposed and corrected the
+pending-condition LD TR rule above. The actual CLI compiled the original CJ1M
+section0/rung3 to eight containers with four audited symbol uses; its original
+project SHA-256 remains
+`b819ef1bbc3e7179dccb021b382410b807e164d4fd5c1c07ac14e356ff4dcef0`.
+The original first rung still fails on unqualified UP(521); resolving its names
+does not silently remove that instruction. These are existing capture comparisons,
+not new live CX ProgramCheck or hardware results.
 The scoped Omron CLI tests pass. The broader Windows CLI suite still hits
 previously recorded executable-name/path-separator failures and a stdout-capture
 timeout outside the Omron tests; it is not a passing whole-application check.
 
 This emits a selected instruction body only. Nautilus LD graph lowering,
-symbol/type allocation, full palette, graphical FB lowering, task wrappers,
+general symbol/type allocation, full palette, graphical FB lowering, task wrappers,
 native image generation and deployment remain unfinished. It cannot compile
 either complete supplied project yet and does not silently omit their unknown
 instructions or graphical FBs.

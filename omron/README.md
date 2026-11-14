@@ -5,6 +5,8 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
 * `cxp`: bounded PKWARE DCL decoding; complete CXP/CXT assignment trees;
   Windows-1251, Windows-1252 and UTF-8; lossless original/CXT preservation;
   canonical CXT writing and literal-token CXP packing; textual rung edits.
+  Program-scoped symbol inventories retain global/local declaration types,
+  addresses and locations, including unqualified auto/FB entries.
 * `il`: independent lexical instruction model: source spelling, mnemonic,
   leading `@`/`%`, decimal function label and opaque operands (including quoted
   text). `inspect` exposes parsed instructions and source-located syntax errors;
@@ -26,6 +28,9 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   logic-block/TR/interlock checks, atomic errors, source maps and big-endian
   instruction bodies. The CLI selects contiguous rungs in one CXP/CXT program;
   graphical FBs and unknown instructions fail. See [scope and usage](compiler/README.md).
+  Exact named operands resolve from program locals over resource globals, with
+  typed direct bindings and per-use provenance. Seven original symbolic rungs
+  per CPU match complete sequences in the captured native task bodies.
 * `fins`: UDP and TCP with node negotiation, strict response correlation,
   direct Host Link FA framing and Linux serial configuration; identity,
   CPU status, raw memory reads and bounded opaque user-memory backups.
@@ -91,6 +96,10 @@ bin/naut omron compile-rungs -model 'CJ1M CPU21' \
 Add `-timer-mode bcd|binary` for timers/counters. Repeat `-rung` for a contiguous
 selection in one program; project order is preserved. This produces containers
 and source maps, not a full N1 image or PLC transfer. See [compiler limits](compiler/README.md).
+The command also accepts unchanged supported symbolic rungs; for example select
+section0/rung3 from the original CJ1M fixture with `-timer-mode bcd`. Symbol
+bindings are audited in the report. Unqualified instructions such as UP(521)
+and graphical FBs still fail instead of being skipped.
 
 ## Read-only commissioning
 

@@ -151,3 +151,34 @@ func TestOmronCompileRungsCLI(t *testing.T) {
 		t.Fatal("invalid flow emitted code", err)
 	}
 }
+
+func TestOmronCompileOriginalSymbolicRung(t *testing.T) {
+	const path = "Resource[0].Programs.Program[0].Sections.Sec[0].ProgramData.R[3]"
+	args := []string{"-model", "CJ1M CPU21", "-timer-mode", "bcd", "-rung", path, "../../omron/cxp/testdata/cj1m.cxp"}
+	output, err := captureOmronCompilation(t, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report struct {
+		Body                compiler.Body
+		CodeHex             string
+		SourceSHA256        string
+		FullProjectCompiled bool
+		HardwareQualified   bool
+	}
+	if err := json.Unmarshal(output, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.CodeHex != "e225e000e265e001e244004ebb4000c05000e00065400100e243e000f064004e" || len(report.Body.Bindings) != 4 || report.SourceSHA256 != "b819ef1bbc3e7179dccb021b382410b807e164d4fd5c1c07ac14e356ff4dcef0" || report.FullProjectCompiled || report.HardwareQualified {
+		t.Fatalf("unexpected original symbolic compilation %s", output)
+	}
+	if report.Body.Bindings[0].Scope != "Resource[0]" || report.Body.Bindings[2].Scope != "Resource[0].Programs.Program[0]" {
+		t.Fatal("scope provenance missing", report.Body.Bindings)
+	}
+	// The initial original rung still contains unqualified UP(521). Resolving
+	// its variable names must not silently drop the unsupported instruction.
+	args[5] = "Resource[0].Programs.Program[0].Sections.Sec[0].ProgramData.R[0]"
+	if output, err := captureOmronCompilation(t, args); err == nil || len(output) != 0 || !strings.Contains(err.Error(), "UP") {
+		t.Fatal("unsupported instruction was skipped", err)
+	}
+}

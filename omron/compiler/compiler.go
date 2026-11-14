@@ -65,6 +65,7 @@ type Body struct {
 	Warnings      []Diagnostic `json:"warnings"`
 	MaxLogicDepth int          `json:"maxLogicDepth"`
 	HasEnd        bool         `json:"hasEnd"`
+	Bindings      []BindingUse `json:"bindings,omitempty"`
 }
 
 // Bytes returns big-endian containers, matching observed N1 code serialization.
@@ -86,6 +87,12 @@ func failure(where Diagnostic, code, message string, cause error) error {
 // instruction or reorders a rung. END is optional for a selected body fragment;
 // if present it must be terminal. Interlocks must close within this selection.
 func CompileRungs(profile codec.Profile, rungs []Rung) (*Body, error) {
+	return compileRungs(profile, rungs, nil)
+}
+
+type resolveInstruction func(il.Instruction, Diagnostic) (il.Instruction, []BindingUse, error)
+
+func compileRungs(profile codec.Profile, rungs []Rung, resolve resolveInstruction) (*Body, error) {
 	if _, err := codec.EncodeInstruction(profile, il.Instruction{Mnemonic: "NOP"}); err != nil {
 		return nil, failure(Diagnostic{}, "profile", err.Error(), err)
 	}
@@ -141,9 +148,17 @@ func CompileRungs(profile codec.Profile, rungs []Rung) (*Body, error) {
 			// The lexical model preserves spelling; flow rules, like the codec,
 			// match mnemonics case-insensitively. Operand/symbol case is retained.
 			instruction.Mnemonic = strings.ToUpper(instruction.Mnemonic)
+			if resolve != nil {
+				var uses []BindingUse
+				instruction, uses, err = resolve(instruction, where)
+				if err != nil {
+					return nil, failure(where, "symbol", err.Error(), err)
+				}
+				body.Bindings = append(body.Bindings, uses...)
+			}
 			words, err := codec.EncodeInstruction(profile, instruction)
 			if err != nil {
-				return nil, failure(where, "instruction", err.Error(), err)
+				return nil, failure(where, "instruction", fmt.Sprintf("%s: %v", line.Text, err), err)
 			}
 			switch instruction.Mnemonic {
 			case "IL":
@@ -236,8 +251,12 @@ func (flow *rungFlow) apply(where Diagnostic, instruction il.Instruction) error 
 			if flow.relays&(1<<relay) == 0 {
 				return failure(where, "tr-undefined", "temporary relay has no definition in this block", ErrStructure)
 			}
-			if flow.depth != 1 {
-				return failure(where, "tr-context", "TR restore cannot discard uncombined blocks", ErrStructure)
+			if flow.afterOutput {
+				flow.depth = 0
+			}
+			flow.depth++
+			if flow.depth > MaxLogicDepth {
+				return failure(where, "logic-overflow", "more than eight pending execution conditions", ErrStructure)
 			}
 			flow.afterOutput = false
 			return nil
@@ -263,8 +282,8 @@ func (flow *rungFlow) apply(where Diagnostic, instruction il.Instruction) error 
 		flow.afterOutput = false
 	case "OUT":
 		if strings.HasPrefix(strings.ToUpper(instruction.Operands[0]), "TR") {
-			if flow.depth != 1 {
-				return failure(where, "tr-context", "TR save requires one complete execution condition", ErrStructure)
+			if flow.depth == 0 {
+				return failure(where, "tr-context", "TR save requires an execution condition", ErrStructure)
 			}
 			relay, err := codec.ParseTemporaryRelay(instruction.Operands[0])
 			if err != nil {

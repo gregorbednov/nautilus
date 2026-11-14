@@ -72,7 +72,7 @@ func omronCompileRungs(args []string) error {
 		}
 	}
 	profile := codec.Profile{Model: *model, TimerCounterMode: codec.TimerCounterMode(*timerMode)}
-	body, err := compiler.CompileCXPRungs(profile, selected)
+	body, err := compiler.CompileCXPProgramRungs(profile, doc, owner, selected)
 	if err != nil {
 		return err
 	}

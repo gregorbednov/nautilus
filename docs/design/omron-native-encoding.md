@@ -1,5 +1,42 @@
 # Native encoding findings from the installed Windows compiler
 
+## Scoped CXP symbols and unchanged native rung comparisons
+
+Both original projects have16 resource-global declaration rows (including two
+unnamed address annotations and two auto-addressed BLINK instances),10 locals
+in program0 and31 locals in program1. The supported VariableList record has five
+comma-separated declaration columns (name,address,type,auxiliary type,flags),
+then an opaque comment. Quoted declaration fields use doubled quotes; comment
+quotes/commas are literal, and detached comments use paired raw markers. A plain
+CSV parser would misread these comments. The independent reader verifies row
+counts, duplicate names and exact scope paths without merging FB PouVarList data.
+
+The compiler now substitutes exact named operands with typed explicit addresses,
+using locals over resource globals. Successful bodies audit each binding's
+address, type, lexical scope and declaration/use locations. Native syntax,
+modifiers, read-only bounds and CJ1 DM-bit restrictions remain enforced after
+substitution. Unknown, auto, flagged, auxiliary, alias-chain and unsupported-type
+bindings fail; local failure never falls back to a global. Case-variant name
+collisions remain unqualified and lookup does not case-fold. NUMBER constants
+are not guessed: CX's BCD-dependent conversion differs from address substitution.
+Scope precedence and NUMBER semantics are described by
+[Omron W446-E1-23](https://www.omron-ap.com/data_pdf/mnu/w446-e1-23_cx-programmer.pdf?id=1605).
+
+Seven unchanged symbolic rungs in each original CXP compile to complete matching
+subsequences of the saved N1 task bodies: program0 sec0 R3/R5, sec1 R0/R3, sec2 R3;
+program1 sec1 R0/R1. These cover locals/globals, timers, nested block joins and TR.
+The TR chains expose a prior structural-check bug: LD TR after a pending condition
+must push another block for a later join, while LD TR after an output restores
+the saved branch. TR saves retain the current condition, even with other pending
+blocks. The corrected rules preserve both TR-bearing source chains exactly.
+
+Actual CLI compilation of original CJ1M sec0 R3 produces eight containers:
+e225e000,e265e001,e244004e,bb4000c0,5000e000,65400100,e243e000,f064004e,
+with four audited bindings and unchanged original source SHA
+b819ef1bbc3e7179dccb021b382410b807e164d4fd5c1c07ac14e356ff4dcef0.
+Full-project/hardware qualification remain false. No new native ProgramCheck
+capture or PLC execution was performed; these comparisons reuse existing images.
+
 ## Selected-rung structure and code-body compilation
 
 Independent `omron/compiler` composes qualified containers after checking

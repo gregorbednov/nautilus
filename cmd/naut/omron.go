@@ -39,6 +39,7 @@ const omronUsage = `naut omron — independent CJ1 source tools, rung compilatio
   naut omron compile-rungs -model MODEL [-timer-mode bcd|binary] -rung PATH FILE
       Compile selected textual CXP/CXT rungs into JSON instruction containers.
       Repeat -rung for a contiguous selection in one program (project order).
+      Resolve exact local/global names and audit their typed address bindings.
       Partial code body only; not a complete project, N1 image or PLC payload.
   naut omron status CONNECTION-FLAGS
       Read CPU identity and status; never change its mode.
