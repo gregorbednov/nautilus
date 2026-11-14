@@ -18,7 +18,7 @@ $inputCases=@(Get-Content -LiteralPath $casesPath -Raw | ConvertFrom-Json)
 if($inputCases.Count -eq 0 -or $inputCases.Count -gt 512){throw 'Invalid case count'}
 $ids=@{}
 foreach($case in $inputCases){
- if(-not $case.id -or $ids.ContainsKey($case.id) -or $case.mnemonic -notmatch '^[A-Za-z@%][A-Za-z0-9@%()]*$' -or @($case.operands).Count -gt 8){throw 'Invalid/duplicate instruction case'}
+ if(-not $case.id -or $ids.ContainsKey($case.id) -or $case.mnemonic -notmatch '^[A-Za-z@%][A-Za-z0-9@%()]*$' -or $case.operands -isnot [array] -or @($case.operands).Count -gt 8){throw 'Invalid/duplicate instruction case'}
  $ids[$case.id]=$true
  foreach($operand in $case.operands){if($operand -isnot [string] -or $operand.Length -gt 128 -or $operand.Contains([char]0)){throw 'Invalid operand input'}}
 }

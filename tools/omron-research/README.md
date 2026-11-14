@@ -74,6 +74,11 @@ The output preserves input cases, exact injected script/template/worker,
 event stream, stderr and provenance hashes. The portable capsule used by Go
 tests is under `omron/codec/testdata` and needs no vendor software to verify.
 
+Each case's `operands` must be a JSON array, including `[]` for zero operands.
+Null, missing and scalar operand collections are rejected before output creation
+or worker launch. A PowerShell conditional producing no pipeline values can
+serialize as null; explicitly assign `@()` when generating zero-operand cases.
+
 `-TimerCounterMode library-default|bcd|binary` optionally invokes the reviewed
 normal timer-mode setter after each SetPLC and records both getter results.
 The default leaves the library setting unchanged (measured binary in the saved
