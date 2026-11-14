@@ -1,5 +1,35 @@
 # Native encoding findings from the installed Windows compiler
 
+## Zero-operand condition transformers (2026-11-15)
+
+Three fresh disposable-worker runs, default/BCD/binary, give198 observations
+for both CJ1M CPU21 and CJ1H-H CPU65. Exact sequences:
+
+* UP/UP(521): e2d20000,cb800000,c2525002.
+* DOWN/DOWN(522): e2d20000,cba00000,c3000000,c2525002.
+* NOT(520): e3000000 (same as existing bare NOT).
+
+The four-container DOWN form must not be inferred from differentiated contacts.
+The internal0x120000 field remains unknown; only the complete measured macros
+are recognized before generic modifier decoding. Truncated/altered macros fail
+without consumption. Modified UP/DOWN and function999 are rejected despite
+low-level library output. Zero operands and no @/% variations follow
+[Omron W474](https://www.omron-ap.com/data_pdf/mnu/w474-e1-13_cs_cj_nsj.pdf?id=2045).
+The compiler treats UP/DOWN as condition transformers and requires an output.
+
+All raw cases, injected scripts, source templates, workers and event streams
+are hash-pinned under codec/testdata/condition*-manifest.json. Each run has
+10 qualified encodings,20 invalid-arity cases and36 outside supported spellings.
+Original program0 sec0 R1/R2 now compile with symbols and match exactly once in
+each saved task0; total intact symbolic-rung anchors rise from14 to18. Original
+R0 compiles to e2040008,e2d20000,cb800000,c2525002,f045e010 but was edited in the
+saved N1; that complete sequence has no saved project anchor. No new full-project
+ProgramCheck, native-image generation, hardware execution or deployment occurred.
+
+Validation: all Omron and research Go tests, scoped Omron CLI tests and vet pass.
+Bounded decoder/compiler fuzzing passes; the full CLI cross-build is verified
+as Linux ARM64 ELF. Linux execution and hardware behavior remain untested here.
+
 ## Scoped CXP symbols and unchanged native rung comparisons
 
 Both original projects have16 resource-global declaration rows (including two
@@ -22,8 +52,8 @@ are not guessed: CX's BCD-dependent conversion differs from address substitution
 Scope precedence and NUMBER semantics are described by
 [Omron W446-E1-23](https://www.omron-ap.com/data_pdf/mnu/w446-e1-23_cx-programmer.pdf?id=1605).
 
-Seven unchanged symbolic rungs in each original CXP compile to complete matching
-subsequences of the saved N1 task bodies: program0 sec0 R3/R5, sec1 R0/R3, sec2 R3;
+Nine unchanged symbolic rungs in each original CXP compile to complete matching
+subsequences of the saved N1 task bodies: program0 sec0 R1/R2/R3/R5, sec1 R0/R3, sec2 R3;
 program1 sec1 R0/R1. These cover locals/globals, timers, nested block joins and TR.
 The TR chains expose a prior structural-check bug: LD TR after a pending condition
 must push another block for a later join, while LD TR after an output restores

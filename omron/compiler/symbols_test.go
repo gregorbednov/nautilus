@@ -132,7 +132,7 @@ func TestOriginalSymbolicRungsMatchCapturedImages(t *testing.T) {
 		found := 0
 		for _, network := range doc.Summary().Rungs {
 			otherProgram := "Resource[0].Programs.Program[1]"
-			if network.Path != symbolProgram+".Sections.Sec[0].ProgramData.R[3]" && network.Path != symbolProgram+".Sections.Sec[0].ProgramData.R[5]" && network.Path != symbolProgram+".Sections.Sec[1].ProgramData.R[0]" && network.Path != symbolProgram+".Sections.Sec[1].ProgramData.R[3]" && network.Path != symbolProgram+".Sections.Sec[2].ProgramData.R[3]" && network.Path != otherProgram+".Sections.Sec[1].ProgramData.R[0]" && network.Path != otherProgram+".Sections.Sec[1].ProgramData.R[1]" {
+			if network.Path != symbolProgram+".Sections.Sec[0].ProgramData.R[1]" && network.Path != symbolProgram+".Sections.Sec[0].ProgramData.R[2]" && network.Path != symbolProgram+".Sections.Sec[0].ProgramData.R[3]" && network.Path != symbolProgram+".Sections.Sec[0].ProgramData.R[5]" && network.Path != symbolProgram+".Sections.Sec[1].ProgramData.R[0]" && network.Path != symbolProgram+".Sections.Sec[1].ProgramData.R[3]" && network.Path != symbolProgram+".Sections.Sec[2].ProgramData.R[3]" && network.Path != otherProgram+".Sections.Sec[1].ProgramData.R[0]" && network.Path != otherProgram+".Sections.Sec[1].ProgramData.R[1]" {
 				continue
 			}
 			owner, taskIndex := symbolProgram, 0
@@ -157,7 +157,7 @@ func TestOriginalSymbolicRungsMatchCapturedImages(t *testing.T) {
 			}
 			found++
 		}
-		if found != 7 {
+		if found != 9 {
 			t.Fatal("missing original symbolic rung controls", found)
 		}
 	}

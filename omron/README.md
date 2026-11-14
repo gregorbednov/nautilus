@@ -29,7 +29,7 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   instruction bodies. The CLI selects contiguous rungs in one CXP/CXT program;
   graphical FBs and unknown instructions fail. See [scope and usage](compiler/README.md).
   Exact named operands resolve from program locals over resource globals, with
-  typed direct bindings and per-use provenance. Seven original symbolic rungs
+  typed direct bindings and per-use provenance. Nine original symbolic rungs
   per CPU match complete sequences in the captured native task bodies.
 * `fins`: UDP and TCP with node negotiation, strict response correlation,
   direct Host Link FA framing and Linux serial configuration; identity,
@@ -98,8 +98,9 @@ selection in one program; project order is preserved. This produces containers
 and source maps, not a full N1 image or PLC transfer. See [compiler limits](compiler/README.md).
 The command also accepts unchanged supported symbolic rungs; for example select
 section0/rung3 from the original CJ1M fixture with `-timer-mode bcd`. Symbol
-bindings are audited in the report. Unqualified instructions such as UP(521)
-and graphical FBs still fail instead of being skipped.
+bindings are audited in the report. UP(521), DOWN(522) and NOT(520) are also
+supported; UP/DOWN have198 additional library observations. Unqualified
+instructions and graphical FBs still fail instead of being skipped.
 
 ## Read-only commissioning
 

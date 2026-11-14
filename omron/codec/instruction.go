@@ -3,6 +3,7 @@ package codec
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/joyautomation/nautilus/omron/il"
@@ -83,6 +84,12 @@ func qualifierAllowed(mnemonic, label string) bool {
 		return label == "002"
 	case "ILC":
 		return label == "003"
+	case "NOT":
+		return label == "520"
+	case "UP":
+		return label == "521"
+	case "DOWN":
+		return label == "522"
 	}
 	return false
 }
@@ -108,6 +115,14 @@ func EncodeInstruction(profile Profile, instruction il.Instruction) ([]uint32, e
 	}
 	if mnemonic == "MOV" {
 		return encodeMOV(instruction.Operands)
+	}
+	for _, definition := range conditionInstructions {
+		if mnemonic == definition.name {
+			if len(instruction.Operands) != 0 {
+				return nil, ErrUnqualifiedInstruction
+			}
+			return slices.Clone(definition.words), nil
+		}
 	}
 	for _, definition := range branchInstructions {
 		if mnemonic != definition.name {
@@ -171,6 +186,17 @@ func DecodeInstruction(profile Profile, words []uint32) (il.Instruction, int, er
 	}
 	if len(words) == 0 {
 		return fail(ErrUnqualifiedInstruction)
+	}
+	// Recognize only complete measured macros before the generic differentiated
+	// contact decoder. Do not expose their internal field as a memory operand.
+	for _, definition := range conditionInstructions {
+		if len(words) >= len(definition.words) && slices.Equal(words[:len(definition.words)], definition.words) {
+			instruction, err := il.Parse(definition.name)
+			if err != nil {
+				return fail(err)
+			}
+			return instruction, len(definition.words), nil
+		}
 	}
 	if words[0]&0xffe00000 == 0xe2c00000 || words[0] == 0xfac00000 || words[0] == 0xfae00000 {
 		return decodeModified(profile, words)

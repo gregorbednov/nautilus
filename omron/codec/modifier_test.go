@@ -94,7 +94,7 @@ func TestModifiersRejectMalformedContainers(t *testing.T) {
 	}
 }
 
-func TestModifierProjectHelpersPreserveOpaqueOperands(t *testing.T) {
+func TestConditionUPMatchesCapturedProjectHelpers(t *testing.T) {
 	for _, name := range []string{"cj1h-baseline.n1", "cj1m-input-bit.n1"} {
 		data, err := os.ReadFile(filepath.Join("..", "um", "testdata", name))
 		if err != nil {
@@ -113,8 +113,8 @@ func TestModifierProjectHelpersPreserveOpaqueOperands(t *testing.T) {
 		found := 0
 		for _, task := range image.Tasks {
 			for i := 0; i+3 <= len(task.Code); i++ {
-				// The captured operand 0x120000 is not a qualified direct address.
-				// Its fixed helper/suffix corroborate the pattern, not that operand.
+				// Only the complete UP macro is now qualified; its internal
+				// field remains unavailable as a generic direct address.
 				if task.Code[i] != 0xe2d20000 {
 					continue
 				}
@@ -122,8 +122,8 @@ func TestModifierProjectHelpersPreserveOpaqueOperands(t *testing.T) {
 				if !reflect.DeepEqual(triple[1:], words[1:]) {
 					t.Fatal("project helper/suffix differs from oracle")
 				}
-				if _, count, err := codec.DecodeInstruction(profile, triple); err == nil || count != 0 {
-					t.Fatal("decoded unqualified project flag operand")
+				if decoded, count, err := codec.DecodeInstruction(profile, triple); err != nil || count != 3 || decoded.Mnemonic != "UP" || len(decoded.Operands) != 0 {
+					t.Fatal("captured UP macro did not decode", err)
 				}
 				found++
 			}

@@ -175,10 +175,16 @@ func TestOmronCompileOriginalSymbolicRung(t *testing.T) {
 	if report.Body.Bindings[0].Scope != "Resource[0]" || report.Body.Bindings[2].Scope != "Resource[0].Programs.Program[0]" {
 		t.Fatal("scope provenance missing", report.Body.Bindings)
 	}
-	// The initial original rung still contains unqualified UP(521). Resolving
-	// its variable names must not silently drop the unsupported instruction.
+	// UP occupies three containers and must remain present after binding.
 	args[5] = "Resource[0].Programs.Program[0].Sections.Sec[0].ProgramData.R[0]"
-	if output, err := captureOmronCompilation(t, args); err == nil || len(output) != 0 || !strings.Contains(err.Error(), "UP") {
-		t.Fatal("unsupported instruction was skipped", err)
+	output, err = captureOmronCompilation(t, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(output, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.CodeHex != "e2040008e2d20000cb800000c2525002f045e010" || len(report.Body.Bindings) != 2 || len(report.Body.Spans) != 3 || report.Body.Spans[1].LengthWords != 3 || report.FullProjectCompiled || report.HardwareQualified {
+		t.Fatalf("original UP rung changed: %s", output)
 	}
 }

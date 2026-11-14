@@ -269,7 +269,7 @@ func (flow *rungFlow) apply(where Diagnostic, instruction il.Instruction) error 
 			return failure(where, "logic-overflow", "more than eight pending execution conditions", ErrStructure)
 		}
 		flow.afterOutput = false
-	case "AND", "ANDNOT", "OR", "ORNOT", "NOT":
+	case "AND", "ANDNOT", "OR", "ORNOT", "NOT", "UP", "DOWN":
 		if flow.depth == 0 {
 			return failure(where, "logic-underflow", "input instruction has no LD condition", ErrStructure)
 		}

@@ -95,15 +95,19 @@ Fuzzing checks atomic failure, bounded spans, exact source correspondence and
 codec round trips. Complex flow checks have manual/test coverage, not a newly
 captured full-program CX ProgramCheck result or hardware execution result.
 
-Seven unchanged symbolic rungs per original project now match complete contiguous
-sequences in the respective saved N1 task bodies: five from program0, including
+Nine unchanged symbolic rungs per original project now match complete contiguous
+sequences in the respective saved N1 task bodies: seven from program0, including
 two complex TR networks, and two from program1. This exposed and corrected the
 pending-condition LD TR rule above. The actual CLI compiled the original CJ1M
 section0/rung3 to eight containers with four audited symbol uses; its original
 project SHA-256 remains
 `b819ef1bbc3e7179dccb021b382410b807e164d4fd5c1c07ac14e356ff4dcef0`.
-The original first rung still fails on unqualified UP(521); resolving its names
-does not silently remove that instruction. These are existing capture comparisons,
+UP/UP(521) and DOWN/DOWN(522) transform an existing condition without changing
+stack depth and require a subsequent output. Their three/four-container macros
+have independent library-oracle coverage. The original first rung now compiles
+to five containers with two bindings; its UP occupies three of them. That first
+rung was edited in the saved N1 and is not a complete original-source anchor.
+Two other intact UP-bearing rungs now match the saved images. These are existing capture comparisons,
 not new live CX ProgramCheck or hardware results.
 The scoped Omron CLI tests pass. The broader Windows CLI suite still hits
 previously recorded executable-name/path-separator failures and a stdout-capture

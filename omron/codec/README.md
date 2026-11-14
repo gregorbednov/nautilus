@@ -17,7 +17,7 @@ two. Modified TR operands, OUT/OUTNOT, branch forms, MOV and timers remain
 unqualified. In particular, low-level `%OUT` output does not qualify that form:
 W474 lists only immediate-refresh variations for OUT/OUTNOT.
 
-Branch forms are ANDLD, ORLD, NOT, IL/IL(002) and ILC/ILC(003), each one
+Branch forms are ANDLD, ORLD, NOT/NOT(520), IL/IL(002) and ILC/ILC(003), each one
 container with no operands. LD and OUT also accept typed `TemporaryRelay`
 operands TR0..TR15. A TR operand is separate from a general memory bit or word;
 other Boolean instructions reject it. This is instruction encoding only:
@@ -25,6 +25,12 @@ logic-block depth, TR lifetime and IL/ILC pairing require program validation.
 The [selected-rung compiler](../compiler/README.md) now performs initial checks
 for these rules and composes qualified containers; whole-project lowering and
 image generation are still pending.
+
+UP/UP(521) and DOWN/DOWN(522) are zero-operand condition transformers,
+consuming three and four containers respectively. Their exact macros are
+qualified; the internal field0x120000 is not a public bit address. Modified
+forms and incorrect function labels are rejected even when the library emits
+containers. The compiler requires both an incoming condition and a later output.
 
 `Profile{Model: CJ1MCPU21}` and `Profile{Model: CJ1HCPU65}` currently describe
 observed library-default configurations. Unit-version-specific profiles are
@@ -97,8 +103,18 @@ results match, 176 invalid cases fail and236 forms remain outside the documented
 CPU or qualified operand/instruction scope. All492 common results match a prior
 complete cold run. Actual Ghidra assembly/pseudocode for120662e3 and120c8ec7
 corroborate the fixed helper literals. Existing N1 captures contain the input
-helper/suffix with an unqualified internal operand0x120000; tests preserve that
-whole triple as opaque. It is not a full modified-instruction project anchor.
+helper/suffix with internal operand0x120000. The exact triple is now separately
+qualified as UP(521), not as a differentiated direct address. Other uses of that
+internal field remain opaque. It is not a modified-contact project anchor.
+
+Three condition capsules (`condition`, `condition-bcd`, `condition-binary`)
+preserve198 observations across both CPUs and all three mode configurations.
+Each has10 qualified matches,20 invalid-arity refusals and36 observations outside
+the supported spellings. DOWN includes the extra c3000000 container. Two intact
+UP-bearing symbolic rungs per original project match complete saved N1 sequences;
+the original first rung also compiles but was edited in those saved images.
+Instruction signatures and lack of @/% variations follow
+[Omron W474](https://www.omron-ap.com/data_pdf/mnu/w474-e1-13_cs_cj_nsj.pdf?id=2045).
 
 The oracle calls the installed compiler's normal constructors, SetPLC,
 Initialise, OperandEncode and EncodeFunction in a disposable x86 worker.
