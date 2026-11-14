@@ -76,15 +76,36 @@ The JSON format is `cj1-program-source-containers`, with `nativeTaskCompiled`,
 `fullProjectCompiled` and `hardwareQualified` all false. Both original second
 programs compile to 133 source containers. All 132 non-END containers match saved
 task1 code indices 3..134, and END matches index 138. The two intervening triples
-at indices 0..2 and 135..137 are b2400100,6140dead,6540dead. Their meaning and
-generation rules remain unknown; production code neither emits nor removes them.
-This is a whole source body, not a native task or N1 image. The first programs
+at indices 0..2 and 135..137 are b2400100,6140dead,6540dead. These have been
+identified as the section separators below. The default source-only API excludes
+them; the sectioned API generates them explicitly and never strips captured data.
+The default remains a whole source body, not a native task or N1 image. The first programs
 fail on the graphical BLINK call without returning a partial body.
 
 Regression inventory covers all 41 nonempty textual rungs plus one graphical call
 per original project; all 41 textual rungs compile individually in BCD mode.
 Program0 has 21 declared rungs including four empty; program1 has 28 including
 three empty. Neither API treats those source counts as native code sizes.
+
+`CompileCXPSectionedProgramBody` and CLI `compile-program-body -section-markers`
+add CMP(020) #DEAD #DEAD before each noninitial section. The pinned library's
+GetSLForSectionSeperator factory explicitly returns CMP with those two operands
+for the measured selector8 profile. This produces all 139 captured task1 code
+containers exactly, for both original models. The report format becomes
+`cj1-sectioned-program-containers`; task/project/hardware qualification remain
+false because headers, entry/exit wrappers and N1 metadata are still absent.
+
+`Body.Generated` attributes each separator to a section with its own container
+offset/length; normal `Spans` retain only actual source instructions with adjusted
+offsets. Every emitted word is covered once. User-written CMP still requires
+an execution condition; a generated boundary is a separate lowering operation.
+Empty sections after the first and interlocks crossing a section boundary fail
+atomically pending more qualification. A single section needs no separator;
+an initial empty section is covered by the original task1 captures.
+
+The exact Ghidra factory/recognition exports under `testdata` are hash-pinned by
+tests and require no vendor tools to inspect. They corroborate the signature;
+the CMP library capsule and complete N1 task-code comparisons validate words.
 
 Compile an unchanged supported symbolic rung from the supplied project with:
 

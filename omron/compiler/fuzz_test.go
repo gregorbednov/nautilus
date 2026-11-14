@@ -20,6 +20,8 @@ func FuzzCompileRungs(f *testing.F) {
 		"@LD W0.00\n%SET W0.01\nMOV #1 D0\nTIM 0 #0010",
 		"LD W0.00\nLD W0.01\nCNT 0 #1",
 		"LD W0.00\nUP(521)\nSET W1.00",
+		"LD W0.00\nCMP(020) #DEAD #DEAD",
+		"LD W0.00\nCMP A0 D0\nOUT W1.00",
 		"LD W0.00\nDOWN(522)\nNOT(520)\nOUT W1.00",
 		"UP(521)\nOUT W1.00", "LD W0.00\nDOWN(522)",
 		"LD TR0\nOUT W0.00", "ANDLD", "END\nNOP", "",

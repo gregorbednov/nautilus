@@ -53,6 +53,21 @@ $?St$Bk?_#[1]
 		f.Fatal("invalid mutation seed", err)
 	}
 	f.Add(text)
+	sectionStart := strings.Index(string(text), "Sec[0]:=")
+	parents := strings.Repeat("END;\n", 4)
+	section := strings.TrimSuffix(string(text)[sectionStart:], parents)
+	first := strings.Replace(section, "END(001)\n", "", 1)
+	second := strings.Replace(section, "Sec[0]", "Sec[1]", 1)
+	second = strings.Replace(second, "LD W0.00\nUP(521)\nOUT W1.00\n", "", 1)
+	twoSections := []byte(strings.Replace(string(text)[:sectionStart], "SC:=1;", "SC:=2;", 1) + first + second + parents)
+	seed, err := cxp.ReadEncoding(twoSections, "utf-8")
+	if err != nil {
+		f.Fatal(err)
+	}
+	if body, err := compiler.CompileCXPSectionedProgramBody(profile(), seed, "Resource[0].Programs.Program[1]"); err != nil || len(body.Generated) != 1 {
+		f.Fatal("invalid sectioned seed", err)
+	}
+	f.Add(twoSections)
 	f.Add([]byte("CXProgVer:=\"1.8\";\n"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) > 128<<10 {
@@ -62,33 +77,51 @@ $?St$Bk?_#[1]
 		if err != nil {
 			return
 		}
-		body, err := compiler.CompileCXPProgramBody(profile(), doc, "Resource[0].Programs.Program[1]")
-		if err != nil {
-			if body != nil {
-				t.Fatal("partial program body")
+		for _, compile := range []func(codec.Profile, *cxp.Document, string) (*compiler.Body, error){compiler.CompileCXPProgramBody, compiler.CompileCXPSectionedProgramBody} {
+			body, err := compile(profile(), doc, "Resource[0].Programs.Program[1]")
+			if err != nil {
+				if body != nil {
+					t.Fatal("partial program body")
+				}
+				continue
 			}
-			return
-		}
-		if !body.HasEnd || len(body.Spans) == 0 || len(body.Spans) > compiler.MaxInstructions {
-			t.Fatal("incomplete program accepted")
-		}
-		next := 0
-		for _, span := range body.Spans {
-			if span.OffsetWords != next || span.LengthWords <= 0 || span.LengthWords > len(body.Words)-next {
-				t.Fatal("invalid program source span")
+			if !body.HasEnd || len(body.Spans) == 0 || len(body.Spans) > compiler.MaxInstructions {
+				t.Fatal("incomplete program accepted")
 			}
-			instruction, n, err := codec.DecodeInstruction(profile(), body.Words[next:])
-			if err != nil || n != span.LengthWords {
-				t.Fatal("program instruction cannot decode", err)
+			covered := make([]bool, len(body.Words))
+			mark := func(offset, length int) {
+				if offset < 0 || length <= 0 || offset > len(covered) || length > len(covered)-offset {
+					t.Fatal("invalid span bounds")
+				}
+				for i := offset; i < offset+length; i++ {
+					if covered[i] {
+						t.Fatal("overlapping source/generated spans")
+					}
+					covered[i] = true
+				}
 			}
-			again, err := codec.EncodeInstruction(profile(), instruction)
-			if err != nil || !reflect.DeepEqual(again, body.Words[next:next+n]) {
-				t.Fatal("program instruction changed")
+			for _, span := range body.Generated {
+				if span.Kind != "section-separator" || span.LengthWords != 3 {
+					t.Fatal("unknown generated form")
+				}
+				mark(span.OffsetWords, span.LengthWords)
 			}
-			next += n
-		}
-		if next != len(body.Words) {
-			t.Fatal("program source map has gaps")
+			for _, span := range body.Spans {
+				mark(span.OffsetWords, span.LengthWords)
+				instruction, n, err := codec.DecodeInstruction(profile(), body.Words[span.OffsetWords:])
+				if err != nil || n != span.LengthWords {
+					t.Fatal("program instruction cannot decode", err)
+				}
+				again, err := codec.EncodeInstruction(profile(), instruction)
+				if err != nil || !reflect.DeepEqual(again, body.Words[span.OffsetWords:span.OffsetWords+n]) {
+					t.Fatal("program instruction changed")
+				}
+			}
+			for _, yes := range covered {
+				if !yes {
+					t.Fatal("program source map has gaps")
+				}
+			}
 		}
 	})
 }

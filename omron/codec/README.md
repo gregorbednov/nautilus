@@ -10,6 +10,16 @@ W, H, A and T/C completion flags. Address bounds and read/write restrictions are
 of the network protocol. Symbols, indirect operands, unqualified modifiers/families
 and unqualified function-label spellings fail explicitly.
 
+CMP/CMP(020)/CMP(20) compares two unsigned 16-bit values. Both operands are
+read sources: direct CIO/W/H/A/D/T/C words or #hex/&decimal literals. Read-only
+A0..447 and constants are valid in the second position. T/C here are present
+values, not completion flags. Three containers preserve operand position and
+literal radix. Indirection, @/% and immediate refresh remain unqualified.
+The 212-observation capsule gives 96 exact encodings, 84 invalid-form refusals
+and 32 observations outside qualified scope. The saved section separators decode
+as ordinary CMP(020) #DEAD #DEAD. Signatures and variations follow
+[Omron W474](https://files.omron.eu/downloads/latest/manual/en/w474_cs_cj_nsj-series_plc%2C_sysmac_one_nsj_series_reference_manual_en.pdf?v=1).
+
 Rising (`@`) and falling (`%`) differentiation is supported for LD/LDNOT,
 AND/ANDNOT, OR/ORNOT and SET/RSET with the same direct memory constraints as
 their plain forms. Input variants use three containers; SET/RSET variants use

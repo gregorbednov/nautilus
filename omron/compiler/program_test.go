@@ -66,8 +66,8 @@ func TestOriginalProgramSourceBodyAgainstCapturedTask(t *testing.T) {
 			t.Fatal(err)
 		}
 		captured := image.Tasks[1].Code
-		// Compare all source instructions in two explicitly anchored ranges.
-		// Do not strip unknown sequences generically or emit them in production.
+		// The source-only API excludes the separately qualified section separators.
+		// Compare fixed ranges without normalizing away captured instructions.
 		marker := []uint32{0xb2400100, 0x6140dead, 0x6540dead}
 		if len(captured) != 139 || !reflect.DeepEqual(captured[:3], marker) || !reflect.DeepEqual(captured[135:138], marker) || !reflect.DeepEqual(body.Words[:132], captured[3:135]) || !reflect.DeepEqual(body.Words[132:], captured[138:]) {
 			t.Fatal("source program differs from captured task", spec.project)

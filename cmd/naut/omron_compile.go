@@ -86,6 +86,7 @@ func omronCompileProgramBody(args []string) error {
 	model := flags.String("model", "", "explicit codec model: CJ1M CPU21 or CJ1H-H CPU65")
 	mode := flags.String("timer-mode", "", "explicit timer/counter mode: bcd or binary")
 	program := flags.String("program", "", "exact Resource[n].Programs.Program[n] path")
+	sectionMarkers := flags.Bool("section-markers", false, "include qualified CJ1 section separators; still not a task image")
 	encoding := flags.String("encoding", "auto", "CXT text encoding")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -102,11 +103,17 @@ func omronCompileProgramBody(args []string) error {
 		return err
 	}
 	profile := codec.Profile{Model: *model, TimerCounterMode: codec.TimerCounterMode(*mode)}
-	body, err := compiler.CompileCXPProgramBody(profile, doc, *program)
+	compile := compiler.CompileCXPProgramBody
+	format := "cj1-program-source-containers"
+	if *sectionMarkers {
+		compile = compiler.CompileCXPSectionedProgramBody
+		format = "cj1-sectioned-program-containers"
+	}
+	body, err := compile(profile, doc, *program)
 	if err != nil {
 		return err
 	}
-	return writeOmronBodyReport("cj1-program-source-containers", doc, *program, profile, body)
+	return writeOmronBodyReport(format, doc, *program, profile, body)
 }
 
 func writeOmronBodyReport(format string, doc *cxp.Document, program string, profile codec.Profile, body *compiler.Body) error {

@@ -64,7 +64,7 @@ func operandKind(name string, index int) string {
 	switch name {
 	case "LD", "LDNOT", "AND", "ANDNOT", "OR", "ORNOT", "OUT", "OUTNOT", "SET", "RSET":
 		return "bit"
-	case "MOV":
+	case "MOV", "CMP":
 		return "word"
 	case "TIM", "TIMH", "TIMX", "TIMHX", "CNT", "CNTX":
 		if index == 1 {

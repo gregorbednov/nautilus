@@ -34,9 +34,14 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   `compile-program-body` validates and compiles every declared source rung of
   one program, requiring terminal END. Both original second programs emit 133
   containers matching all source-instruction ranges in the saved tasks; six
-  additional captured containers remain unexplained. This is not native task
+  additional captured containers were initially unexplained. This is not native task
   generation. All 41 textual rungs per project compile individually; BLINK calls
   remain explicit blockers for the first program.
+  They are now qualified section separators: `-section-markers` emits all 139
+  containers matching the second task's complete code, with generated-word
+  provenance. Task headers/wrappers and complete N1 generation remain pending.
+  The codec also supports plain unsigned-word CMP with two read operands,
+  verified against 212 new library observations.
 * `fins`: UDP and TCP with node negotiation, strict response correlation,
   direct Host Link FA framing and Linux serial configuration; identity,
   CPU status, raw memory reads and bounded opaque user-memory backups.

@@ -60,12 +60,22 @@ type Span struct {
 }
 
 type Body struct {
-	Words         []uint32     `json:"words"`
-	Spans         []Span       `json:"spans"`
-	Warnings      []Diagnostic `json:"warnings"`
-	MaxLogicDepth int          `json:"maxLogicDepth"`
-	HasEnd        bool         `json:"hasEnd"`
-	Bindings      []BindingUse `json:"bindings,omitempty"`
+	Words         []uint32        `json:"words"`
+	Spans         []Span          `json:"spans"`
+	Warnings      []Diagnostic    `json:"warnings"`
+	MaxLogicDepth int             `json:"maxLogicDepth"`
+	HasEnd        bool            `json:"hasEnd"`
+	Bindings      []BindingUse    `json:"bindings,omitempty"`
+	Generated     []GeneratedSpan `json:"generated,omitempty"`
+}
+
+// GeneratedSpan accounts for compiler-generated containers without assigning
+// them a fictitious source instruction or line number.
+type GeneratedSpan struct {
+	Kind        string `json:"kind"`
+	Section     string `json:"section"`
+	OffsetWords int    `json:"offsetWords"`
+	LengthWords int    `json:"lengthWords"`
 }
 
 // Bytes returns big-endian containers, matching observed N1 code serialization.
@@ -297,7 +307,7 @@ func (flow *rungFlow) apply(where Diagnostic, instruction il.Instruction) error 
 			return nil
 		}
 		return flow.output(where, 1)
-	case "OUTNOT", "SET", "RSET", "MOV", "TIM", "TIMH", "TIMX", "TIMHX":
+	case "OUTNOT", "SET", "RSET", "MOV", "CMP", "TIM", "TIMH", "TIMX", "TIMHX":
 		return flow.output(where, 1)
 	case "CNT", "CNTX":
 		if err := flow.output(where, 2); err != nil {

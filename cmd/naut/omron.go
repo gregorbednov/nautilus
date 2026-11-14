@@ -44,7 +44,9 @@ const omronUsage = `naut omron — independent CJ1 source tools, rung compilatio
   naut omron compile-program-body -model MODEL [-timer-mode bcd|binary] -program PATH FILE
       Compile every source rung in the named program, requiring terminal END.
       Validate section/rung counts and order; reject graphical or unknown code.
-      Source body only; native section scaffolding and task image are pending.
+      Default output contains source instructions only.
+      Add -section-markers for qualified separators, with generated-word spans.
+      Task headers, wrappers and the complete N1 image remain pending.
   naut omron status CONNECTION-FLAGS
       Read CPU identity and status; never change its mode.
   naut omron read CONNECTION-FLAGS ADDRESS [COUNT]

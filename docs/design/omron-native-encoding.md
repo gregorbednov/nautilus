@@ -1,5 +1,53 @@
 # Native encoding findings from the installed Windows compiler
 
+## Section separators and unsigned CMP (2026-11-15)
+
+The former six unknown containers in task1 are two CMP(020) #DEAD #DEAD section
+separators. Pinned CX-Pdata.dll export GetSLForSectionSeperator at121cb520 sets
+isotope7 for selector8, returns CMP and fills both operands with #DEAD. Literal
+strings are at122a8d48/122a8d58/122a8d60. Actual Ghidra12.1.4 exports are preserved
+in omron/compiler/testdata/section-marker-ghidra.json; the corresponding
+recognizers121ebe62/1220c77b are in section-recognition-ghidra.json. The former
+recognizer checks two constant operands0xDEAD and sets flag0x800000 at object
+offset0x8c; the full object type has not been recovered.
+These are comparisons, not writes of the sentinel. Assembly and hashes are
+retained; incomplete inferred types are not treated as a recovered ABI.
+
+A fresh 212-observation instruction run confirms CMP/CMP(020)/CMP(20), both
+read operand positions, direct CIO/W/H/A/D/T/C words and unsigned16-bit
+#hex/&decimal literals. Operand1 uses60000000/61400000/61440000; operand2
+uses64000000/65400000/65440000, with opcode b2400100. Read-only A words and
+constants are accepted in both positions. Capsule compare-manifest.json pins
+all inputs/events/scripts:96 qualified matches,84 invalid forms,32 outside
+scope (including indirection, bad function999 and @/%). Low-level success for
+modified forms does not establish support. Instruction semantics and variations:
+[Omron W474](https://files.omron.eu/downloads/latest/manual/en/w474_cs_cj_nsj-series_plc%2C_sysmac_one_nsj_series_reference_manual_en.pdf?v=1).
+
+CompileCXPSectionedProgramBody / compile-program-body -section-markers insert
+the qualified separator before each noninitial section. Both original program1
+results equal the entire139-container captured task1 Code, with no stripping or
+copied opaque data. Generated spans identify the two insertions at0 and135;
+133 original source spans keep their true line locations. Task headers/wrappers,
+full N1, unit-version and hardware qualification remain open. Empty noninitial
+sections and cross-section interlocks explicitly fail. No new whole-project
+CX capture or physical PLC operation occurred; complete-code anchors reuse the
+previous captures, while the CMP inputs are new controlled library calls.
+
+BLINK research: the original FB definition has seven PouVarList rows, six
+graphical FBR rungs and TaskID1024. Its definition cells use comma-separated
+records, while the program call uses DC1-delimited records. Private TIMER_1,
+TIMER_2, ON, inputs PV/PN/IN, output OUT and implicit EN are present. Raw type
+codes and cell flags must be qualified before storage allocation or native
+lowering; they are not general program VariableList declarations. Relative
+operand relocation, timers and call ABI remain pending. No FB was flattened
+or silently omitted by this stage.
+
+Validation: scoped Omron/research/CLI tests and vet pass. Bounded decoder,
+rung-compiler and source/sectioned-program fuzzing pass. The built CLI emitted
+139 words,133 source spans,66 bindings and two generated spans; the complete
+CLI cross-build was verified as Linux ARM64 ELF. Linux execution and hardware
+checks were not performed.
+
 ## Whole program source bodies (2026-11-15)
 
 The strict source reader retains declared empty rungs and checks SC/RC counts,

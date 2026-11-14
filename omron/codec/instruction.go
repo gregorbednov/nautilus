@@ -72,6 +72,8 @@ func qualifierAllowed(mnemonic, label string) bool {
 		return label == "000"
 	case "MOV":
 		return label == "021" || label == "21"
+	case "CMP":
+		return label == "020" || label == "20"
 	case "TIMH":
 		return label == "015"
 	case "TIMX":
@@ -115,6 +117,9 @@ func EncodeInstruction(profile Profile, instruction il.Instruction) ([]uint32, e
 	}
 	if mnemonic == "MOV" {
 		return encodeMOV(instruction.Operands)
+	}
+	if mnemonic == "CMP" {
+		return encodeCMP(instruction.Operands)
 	}
 	for _, definition := range conditionInstructions {
 		if mnemonic == definition.name {
@@ -226,6 +231,13 @@ func DecodeInstruction(profile Profile, words []uint32) (il.Instruction, int, er
 		}
 	}
 	switch words[0] {
+	case 0xb2400100:
+		var err error
+		source, err = decodeCMP(words)
+		if err != nil {
+			return fail(err)
+		}
+		consumed = 3
 	case 0xb2400140:
 		var err error
 		source, err = decodeMOV(words)
