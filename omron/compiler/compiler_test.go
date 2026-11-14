@@ -81,6 +81,22 @@ func TestCompilesStructuredRungsAndSourceMap(t *testing.T) {
 	}
 }
 
+func TestMnemonicCaseDoesNotChangeFlow(t *testing.T) {
+	upper := []compiler.Rung{rung("open", "LD W0.00\nIL(002)"), rung("body", "LD W0.01\nLD W0.02\nORLD\nOUT W0.03"), rung("close", "ILC(003)\nEND")}
+	lower := []compiler.Rung{rung("open", "ld W0.00\nil(002)"), rung("body", "ld W0.01\nld W0.02\norld\nout W0.03"), rung("close", "ilc(003)\nend")}
+	want, err := compiler.CompileRungs(profile(), upper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := compiler.CompileRungs(profile(), lower)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatal("mnemonic spelling changed body or source map")
+	}
+}
+
 func TestStructuralErrorsAreAtomicAndLocated(t *testing.T) {
 	for _, test := range []struct {
 		source, code string

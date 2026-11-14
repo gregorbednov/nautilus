@@ -138,6 +138,9 @@ func CompileRungs(profile codec.Profile, rungs []Rung) (*Body, error) {
 			if err != nil {
 				return nil, failure(where, "syntax", err.Error(), err)
 			}
+			// The lexical model preserves spelling; flow rules, like the codec,
+			// match mnemonics case-insensitively. Operand/symbol case is retained.
+			instruction.Mnemonic = strings.ToUpper(instruction.Mnemonic)
 			words, err := codec.EncodeInstruction(profile, instruction)
 			if err != nil {
 				return nil, failure(where, "instruction", err.Error(), err)
