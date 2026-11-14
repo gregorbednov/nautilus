@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "0e0fd67a737c8b95b10c374e11fab4d55c542bc99c040a0bc80d1176ef3f1f58",
+  "programType": 0,
+  "unitVersion": null,
+  "timerCounterMode": "library-default",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "artifacts": {
+    "cases": {
+      "path": "mov-cases.json",
+      "sha256": "0e0fd67a737c8b95b10c374e11fab4d55c542bc99c040a0bc80d1176ef3f1f58",
+      "bytes": 21588
+    },
+    "events": {
+      "path": "mov-events.jsonl.gz",
+      "sha256": "4449a2bd45cb17608e38a8fd8531aff9f2b603ff89c4f30f98be62746417cd17",
+      "bytes": 7909,
+      "encoding": "gzip",
+      "decodedSHA256": "cfa0259eadce5f48a3e2064ef2df8734f024b32084a997d5a87dbfa559ad0c9d"
+    },
+    "script": {
+      "path": "mov-run.js.gz",
+      "sha256": "a4c2fd6e177d9245356fbe6bc08989c9d922e441605bf435ff6b35fd49ea16d1",
+      "bytes": 3397,
+      "encoding": "gzip",
+      "decodedSHA256": "422d299ebf5ba5fe39488697f65825b00f65934d5081afec4c07a95a8aa81ac4"
+    },
+    "template": {
+      "path": "mov-template.js",
+      "sha256": "b87973b039ae7141809f896b541b5c4bb0240ce0639808e282eaa4b7104500c4",
+      "bytes": 4761
+    },
+    "worker": {
+      "path": "mov-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    }
+  }
+}

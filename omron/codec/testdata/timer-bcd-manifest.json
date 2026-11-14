@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "7b6cdd65bf51e3de001cc886eac62e9010aa84e987213a7b0b9647fecfa550f5",
+  "programType": 0,
+  "unitVersion": null,
+  "timerCounterMode": "bcd",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "artifacts": {
+    "cases": {
+      "path": "timer-bcd-cases.json",
+      "sha256": "7b6cdd65bf51e3de001cc886eac62e9010aa84e987213a7b0b9647fecfa550f5",
+      "bytes": 1596
+    },
+    "events": {
+      "path": "timer-bcd-events.jsonl.gz",
+      "sha256": "b3f333e272ce78d92bb1267b6884c95bde7849175d0827c78f3555d005adfd6f",
+      "bytes": 1052,
+      "encoding": "gzip",
+      "decodedSHA256": "1280107dc22bd960779d6a001d81c299e67a55ba9029c23c6acdfa4e4a9506cf"
+    },
+    "script": {
+      "path": "timer-bcd-run.js.gz",
+      "sha256": "4e68ef1d7e46538de429b7f3c0123e2b8a8594e3706af67cc17ac5ae55c5fa7d",
+      "bytes": 2363,
+      "encoding": "gzip",
+      "decodedSHA256": "09014bc14b53992b18667d3418ca7d6506209187eea0dd3e74a77e8770741e0a"
+    },
+    "template": {
+      "path": "timer-bcd-template.js",
+      "sha256": "b70d99c337a424c126ee0912e3221242b6e19cb0aaa8e1a9f8bbc0c4309ed928",
+      "bytes": 5476
+    },
+    "worker": {
+      "path": "timer-bcd-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    }
+  }
+}

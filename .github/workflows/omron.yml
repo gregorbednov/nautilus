@@ -1,0 +1,63 @@
+name: Omron foundation
+
+on:
+  push:
+    branches: [main]
+    paths: ['omron/**', 'tools/omron-research/**', 'cmd/naut/**', 'io/**', 'go.mod', 'go.sum', '.github/workflows/omron.yml']
+  pull_request:
+    paths: ['omron/**', 'tools/omron-research/**', 'cmd/naut/**', 'io/**', 'go.mod', 'go.sum', '.github/workflows/omron.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Prepare module dependencies
+        run: go mod download
+      - name: Offline build, tests and portable evidence
+        env:
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          go test ./omron/... ./tools/omron-research/... -timeout 120s
+          go test ./cmd/naut -run Omron -timeout 120s
+          go vet ./omron/... ./tools/omron-research/...
+          mkdir -p bin evidence
+          go build -o bin/cj1-oracle ./tools/omron-research/oracle
+          go build -o bin/naut ./cmd/naut
+          bin/cj1-oracle verify -root . > evidence/omron-corpus.json
+          bin/naut omron inspect-image -format n1 omron/um/testdata/cj1h-baseline.n1 > evidence/omron-n1.json
+      - name: Linux race checks
+        env:
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+          CGO_ENABLED: '1'
+        run: go test -race ./omron/... ./tools/omron-research/oracle -timeout 120s
+      - name: Bounded native-format fuzz checks
+        env:
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          go test ./omron/um -fuzz FuzzParseN1 -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/codec -fuzz FuzzDecodeInstruction -fuzztime 5s -parallel 2 -timeout 60s
+      - name: Linux ARM64 cross-build (execution not qualified here)
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: '0'
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+        run: go build ./omron/... ./tools/omron-research/oracle

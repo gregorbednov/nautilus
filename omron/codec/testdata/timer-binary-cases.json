@@ -1,0 +1,114 @@
+[
+  {
+    "id": "timer-0",
+    "mnemonic": "TIM",
+    "operands": [
+      "0",
+      "#0010"
+    ]
+  },
+  {
+    "id": "timer-1",
+    "mnemonic": "TIM",
+    "operands": [
+      "0",
+      "&10"
+    ]
+  },
+  {
+    "id": "timer-2",
+    "mnemonic": "TIMH(015)",
+    "operands": [
+      "0",
+      "#0010"
+    ]
+  },
+  {
+    "id": "timer-3",
+    "mnemonic": "TIMH(015)",
+    "operands": [
+      "0",
+      "&10"
+    ]
+  },
+  {
+    "id": "timer-4",
+    "mnemonic": "TIMX(550)",
+    "operands": [
+      "0",
+      "#0010"
+    ]
+  },
+  {
+    "id": "timer-5",
+    "mnemonic": "TIMX(550)",
+    "operands": [
+      "0",
+      "&10"
+    ]
+  },
+  {
+    "id": "timer-6",
+    "mnemonic": "TIMHX(551)",
+    "operands": [
+      "0",
+      "#0010"
+    ]
+  },
+  {
+    "id": "timer-7",
+    "mnemonic": "TIMHX(551)",
+    "operands": [
+      "0",
+      "&10"
+    ]
+  },
+  {
+    "id": "timer-8",
+    "mnemonic": "CNT",
+    "operands": [
+      "0",
+      "#0010"
+    ]
+  },
+  {
+    "id": "timer-9",
+    "mnemonic": "CNT",
+    "operands": [
+      "0",
+      "&10"
+    ]
+  },
+  {
+    "id": "timer-10",
+    "mnemonic": "CNTX(546)",
+    "operands": [
+      "0",
+      "#0010"
+    ]
+  },
+  {
+    "id": "timer-11",
+    "mnemonic": "CNTX(546)",
+    "operands": [
+      "0",
+      "&10"
+    ]
+  },
+  {
+    "id": "mov-hex",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#0001",
+      "D0"
+    ]
+  },
+  {
+    "id": "mov-decimal",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "&1",
+      "D0"
+    ]
+  }
+]

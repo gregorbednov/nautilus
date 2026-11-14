@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "166a8ddb286e957a98507f20a28a0604ebdd1873eb198c4269aad9309344ef58",
+  "programType": 0,
+  "unitVersion": null,
+  "timerCounterMode": "library-default",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "artifacts": {
+    "cases": {
+      "path": "library-cases.json",
+      "sha256": "166a8ddb286e957a98507f20a28a0604ebdd1873eb198c4269aad9309344ef58",
+      "bytes": 21516
+    },
+    "events": {
+      "path": "library-events.jsonl.gz",
+      "sha256": "49f1dbac8715b688a4eaf444a7f5af70816f2b48d49b3b45b091b84c871f89fc",
+      "bytes": 8206,
+      "encoding": "gzip",
+      "decodedSHA256": "3acc1304ceb0b6d06ed8d1275ddfbfea467f3d8beabdff52e38ead22caf9806b"
+    },
+    "script": {
+      "path": "library-run.js.gz",
+      "sha256": "17f41940b048452a61bdeee0287b922e61ca355c1b9db61b1aa0f03ff3024541",
+      "bytes": 3513,
+      "encoding": "gzip",
+      "decodedSHA256": "9b6894b30b34cb8e5f5e6e0125e81181c7a4557f2e2719a2e1549e33e1820010"
+    },
+    "template": {
+      "path": "library-template.js",
+      "sha256": "b87973b039ae7141809f896b541b5c4bb0240ce0639808e282eaa4b7104500c4",
+      "bytes": 4761
+    },
+    "worker": {
+      "path": "library-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    }
+  }
+}

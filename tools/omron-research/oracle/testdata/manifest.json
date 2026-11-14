@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "cj1h-baseline",
+      "cpu": "CJ1H-H CPU65",
+      "hardwareUnitVersion": null,
+      "sourceIdentity": "operator-reported",
+      "source": {
+        "original": {
+          "path": "omron/cxp/testdata/cj1h.cxp",
+          "sha256": "4a1c46b3b36696a0f957759d7087ff7f562d154f08ea0d33c5dbbac53fdb236c",
+          "bytes": 15041
+        },
+        "rung": "Resource[0].Programs.Program[0].Sections.Sec[0].ProgramData.R[0]",
+        "source": "LD W0.00\nOUT W0.01",
+        "cxpSHA256": "1fe7d850676d7d0fe19510ceb58c7fe9ab2afd9bee1510f22a5bb8047abbd677",
+        "cxtSHA256": "1df37113657da21d0a9b3f151c64cf9063b222f5b38f32b93b7ea860023b93b6"
+      },
+      "image": {
+        "path": "omron/um/testdata/cj1h-baseline.n1",
+        "sha256": "8a88c6e726542537787cea1419ccc42a1d203a37efb2304218c2a4e1687ce4f3",
+        "bytes": 4592
+      },
+      "capture": {
+        "log": {
+          "path": "tools/omron-research/oracle/testdata/evidence/cj1h-baseline.events.jsonl.gz",
+          "sha256": "65cfc04aaf2336e6dedd1c595b8580d8c0106de86817c8a7420a3f955df543c9",
+          "bytes": 3408
+        },
+        "decodedSHA256": "6b5e5fd6dc6846cfc0afafc8c583be1ae8fa687f1ba9d6d96990d9b13f50acda",
+        "stderr": {
+          "path": "tools/omron-research/oracle/testdata/evidence/empty.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "fileBinding": "operator-copy",
+        "compileSequence": 64,
+        "profile": {
+          "selector": 8,
+          "familyMaskLow": 524288,
+          "familyMaskHigh": 0
+        }
+      },
+      "checkLog": {
+        "path": "tools/omron-research/oracle/testdata/evidence/cj1h-check.txt",
+        "sha256": "c12eaa22933cba0eb3609eb5e8409b4c2faf2aabedaefc9d69fa3077d73e3903",
+        "bytes": 5268
+      },
+      "programCheckUnitVersion": "4.0"
+    },
+    {
+      "id": "cj1m-baseline",
+      "cpu": "CJ1M CPU21",
+      "hardwareUnitVersion": null,
+      "sourceIdentity": "operator-reported",
+      "source": {
+        "original": {
+          "path": "omron/cxp/testdata/cj1m.cxp",
+          "sha256": "b819ef1bbc3e7179dccb021b382410b807e164d4fd5c1c07ac14e356ff4dcef0",
+          "bytes": 15017
+        },
+        "rung": "Resource[0].Programs.Program[0].Sections.Sec[0].ProgramData.R[0]",
+        "source": "LD W0.00\nOUT W0.01",
+        "cxpSHA256": "07b842a8a2a9830f4778ee1ef4ed07111b5b508328adb1fec9055c388903a7c7",
+        "cxtSHA256": "a0fbf658c045d42f68fb4111e5449d075d16f73443c8db5eaceedaec34000b87"
+      },
+      "image": {
+        "path": "omron/um/testdata/cj1h-baseline.n1",
+        "sha256": "8a88c6e726542537787cea1419ccc42a1d203a37efb2304218c2a4e1687ce4f3",
+        "bytes": 4592
+      },
+      "capture": {
+        "log": {
+          "path": "tools/omron-research/oracle/testdata/evidence/cj1m-baseline.events.jsonl.gz",
+          "sha256": "58918c8c7b8e8e2628b0f463e3bb50b2c89a492c05a94a64dbbf582dd184ec23",
+          "bytes": 18757
+        },
+        "decodedSHA256": "cb702ba6bf3e8098033cc5ec5673bc4ffe2eadf37880bb1c72a798fa9c0a5422",
+        "stderr": {
+          "path": "tools/omron-research/oracle/testdata/evidence/empty.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "fileBinding": "embedded-file",
+        "compileSequence": 316,
+        "profile": {
+          "selector": 8,
+          "familyMaskLow": 1024,
+          "familyMaskHigh": 0
+        },
+        "observer": {
+          "path": "tools/omron-research/oracle/testdata/evidence/observer-01f6f692.js",
+          "sha256": "01f6f692061b1793d7b698f54dcc79253f92141dc09a0152bf88956086bfd6d7",
+          "bytes": 8720
+        }
+      },
+      "checkLog": {
+        "path": "tools/omron-research/oracle/testdata/evidence/cj1m-check.txt",
+        "sha256": "34e054c93acbd7fd7333347c32a0d2d44c226a185f99eb158b93b89c0e461a40",
+        "bytes": 5266
+      },
+      "programCheckUnitVersion": "4.0"
+    },
+    {
+      "id": "cj1m-input-bit",
+      "cpu": "CJ1M CPU21",
+      "hardwareUnitVersion": null,
+      "sourceIdentity": "operator-reported",
+      "source": {
+        "original": {
+          "path": "omron/cxp/testdata/cj1m.cxp",
+          "sha256": "b819ef1bbc3e7179dccb021b382410b807e164d4fd5c1c07ac14e356ff4dcef0",
+          "bytes": 15017
+        },
+        "rung": "Resource[0].Programs.Program[0].Sections.Sec[0].ProgramData.R[0]",
+        "source": "LD W0.15\nOUT W0.01",
+        "cxpSHA256": "becb4b4c39cad9f8a336ecc61a91957923e69ee46c990effca9125b9eb49badf",
+        "cxtSHA256": "c1881eb043d9acc409a635410e91db03cc3c109c447e3addd65d632bf1d4234e"
+      },
+      "image": {
+        "path": "omron/um/testdata/cj1m-input-bit.n1",
+        "sha256": "52d783d09159eb2be3a76aa56dcf899bfd7d313da727107bcabe0a416b28eeb5",
+        "bytes": 4592
+      },
+      "capture": {
+        "log": {
+          "path": "tools/omron-research/oracle/testdata/evidence/cj1m-input-bit.events.jsonl.gz",
+          "sha256": "036497726d2135cfe5f93759055e46c953baaf7d0619bd5f94cb6d4282b975f6",
+          "bytes": 18762
+        },
+        "decodedSHA256": "cfb018bd8ee5ba45edf4100661ba68f46ea224bd74ebc243d499451e8f253d7d",
+        "stderr": {
+          "path": "tools/omron-research/oracle/testdata/evidence/empty.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "fileBinding": "embedded-file",
+        "compileSequence": 316,
+        "profile": {
+          "selector": 8,
+          "familyMaskLow": 1024,
+          "familyMaskHigh": 0
+        },
+        "observer": {
+          "path": "tools/omron-research/oracle/testdata/evidence/observer-01f6f692.js",
+          "sha256": "01f6f692061b1793d7b698f54dcc79253f92141dc09a0152bf88956086bfd6d7",
+          "bytes": 8720
+        }
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "left": "cj1h-baseline",
+      "right": "cj1m-baseline",
+      "differences": []
+    },
+    {
+      "left": "cj1m-baseline",
+      "right": "cj1m-input-bit",
+      "differences": [
+        {
+          "offset": 3283,
+          "before": 0,
+          "after": 15
+        }
+      ]
+    }
+  ]
+}
