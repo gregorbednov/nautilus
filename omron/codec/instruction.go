@@ -88,15 +88,18 @@ func qualifierAllowed(mnemonic, label string) bool {
 }
 
 // EncodeInstruction produces numeric 32-bit instruction containers, not an N1
-// image or a wire payload. Modifiers, symbols, other instruction families and
+// image or a wire payload. Unqualified modifiers, symbols, instruction families and
 // unqualified labels fail explicitly. It performs no implicit address allocation.
 func EncodeInstruction(profile Profile, instruction il.Instruction) ([]uint32, error) {
 	if err := profile.validate(); err != nil {
 		return nil, err
 	}
 	mnemonic := strings.ToUpper(instruction.Mnemonic)
-	if instruction.Modifier != "" || !qualifierAllowed(mnemonic, instruction.Function) {
+	if !qualifierAllowed(mnemonic, instruction.Function) {
 		return nil, ErrUnqualifiedInstruction
+	}
+	if instruction.Modifier != "" {
+		return encodeModified(profile, instruction)
 	}
 	for _, definition := range timerInstructions {
 		if mnemonic == definition.bcd || mnemonic == definition.binary {
@@ -168,6 +171,9 @@ func DecodeInstruction(profile Profile, words []uint32) (il.Instruction, int, er
 	}
 	if len(words) == 0 {
 		return fail(ErrUnqualifiedInstruction)
+	}
+	if words[0]&0xffe00000 == 0xe2c00000 || words[0] == 0xfac00000 || words[0] == 0xfae00000 {
+		return decodeModified(profile, words)
 	}
 	var source string
 	consumed := 1

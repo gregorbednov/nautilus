@@ -71,3 +71,15 @@ allowed LD/OUT access, rejected other Boolean access, and zero-operand branch
 instructions. Modifiers and incorrect labels remain unsupported even where the
 low-level library emits containers. No whole-program stack or interlock checks
 were performed by this oracle.
+
+`modifier-manifest.json` pins454 inputs per CPU (908 observations). Input SHA-256:
+`cf38e95f6f31f3b65e9d1a39c8637a12d41596c8507a58c7cb4a3229cf01f05f`.
+The complete raw captures are
+`E:\cx-proger\research\cj1-oracle\edge-library-02` and `edge-library-03`;
+all492 shared results match across these workers. `edge-library-01` is an
+incomplete failed probe and is deliberately not an accepted capsule: two input
+operand collections serialized as null. The launcher now rejects such inputs
+before creating output or starting a worker; zero operands must be `[]`.
+This corpus includes allowed differentiated contacts and SET/RSET, address
+boundaries, read-only A bits, DM/TR exclusions, modified OUT controls and other
+unqualified instruction families. Whole-program checks and execution remain open.

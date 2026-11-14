@@ -7,8 +7,15 @@ instructions, not a complete program, N1 envelope or download payload.
 Supported initial forms are LD/LDNOT, AND/ANDNOT, OR/ORNOT, OUT/OUTNOT, SET/RSET,
 NOP, END and plain MOV/MOV(021)/MOV(21). Direct bit operands cover numeric CIO,
 W, H, A and T/C completion flags. Address bounds and read/write restrictions are checked independently
-of the network protocol. Symbols, indirect operands, modifiers, other families
+of the network protocol. Symbols, indirect operands, unqualified modifiers/families
 and unqualified function-label spellings fail explicitly.
+
+Rising (`@`) and falling (`%`) differentiation is supported for LD/LDNOT,
+AND/ANDNOT, OR/ORNOT and SET/RSET with the same direct memory constraints as
+their plain forms. Input variants use three containers; SET/RSET variants use
+two. Modified TR operands, OUT/OUTNOT, branch forms, MOV and timers remain
+unqualified. In particular, low-level `%OUT` output does not qualify that form:
+W474 lists only immediate-refresh variations for OUT/OUTNOT.
 
 Branch forms are ANDLD, ORLD, NOT, IL/IL(002) and ILC/ILC(003), each one
 container with no operands. LD and OUT also accept typed `TemporaryRelay`
@@ -35,7 +42,7 @@ The decoder handles one qualified instruction and returns its consumed word
 count. Unknown instructions, reserved addresses and unqualified forms consume
 zero words and return an error, allowing a caller to preserve opaque input.
 Decoded source is canonical; original symbols and spelling cannot be recovered
-from a machine operand alone. MOV consumes three containers; Boolean forms,
+from a machine operand alone. MOV consumes three containers; plain Boolean forms,
 NOP and END consume one.
 
 Timers/counters also consume three containers. BCD mode supports TIM, TIMH(015)
@@ -66,8 +73,8 @@ The immutable fixtures in `testdata` contain 215 explicit cases for each CPU:
 430 native library observations. Tests verify the hashes of inputs, exact
 injected script/template/worker snapshots and compressed transcripts, then
 validate lifecycle, profiles and case correlation before comparing Go results.
-284 generated results match the codec, 80 negative cases are rejected and
-66 cases remain outside its current instruction forms or documented CPU limits. Three common forms
+292 generated results match the codec, 80 negative cases are rejected and
+58 cases remain outside its current instruction forms or documented CPU limits. Three common forms
 are also anchored to the separately captured full-project N1 images.
 
 A separate immutable MOV capsule adds 185 cases per CPU (370 observations):
@@ -81,6 +88,14 @@ encodings match, 386 invalid forms fail and52 modified/incorrect-label/foreign
 mnemonic controls remain unsupported. All188 common cold-run results reproduce.
 ANDLD, ORLD and LD/OUT TR0/TR1 also match containers in both existing full-project
 N1 captures. NOT and IL/ILC currently have library-unit evidence only.
+
+The modifier capsule adds454 inputs per CPU (908 observations): 496 generated
+results match, 176 invalid cases fail and236 forms remain outside the documented
+CPU or qualified operand/instruction scope. All492 common results match a prior
+complete cold run. Actual Ghidra assembly/pseudocode for120662e3 and120c8ec7
+corroborate the fixed helper literals. Existing N1 captures contain the input
+helper/suffix with an unqualified internal operand0x120000; tests preserve that
+whole triple as opaque. It is not a full modified-instruction project anchor.
 
 The oracle calls the installed compiler's normal constructors, SetPLC,
 Initialise, OperandEncode and EncodeFunction in a disposable x86 worker.

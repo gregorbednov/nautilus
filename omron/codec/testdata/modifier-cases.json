@@ -1,0 +1,3180 @@
+[
+  {
+    "id": "edge-0",
+    "mnemonic": "@LD",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-1",
+    "mnemonic": "@LD",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-2",
+    "mnemonic": "@LD",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-3",
+    "mnemonic": "@LD",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-4",
+    "mnemonic": "@LD",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-5",
+    "mnemonic": "@LD",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-6",
+    "mnemonic": "@LD",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-7",
+    "mnemonic": "@LD",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-8",
+    "mnemonic": "@LD",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-9",
+    "mnemonic": "@LD",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-10",
+    "mnemonic": "@LD",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-11",
+    "mnemonic": "@LD",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-12",
+    "mnemonic": "%LD",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-13",
+    "mnemonic": "%LD",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-14",
+    "mnemonic": "%LD",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-15",
+    "mnemonic": "%LD",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-16",
+    "mnemonic": "%LD",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-17",
+    "mnemonic": "%LD",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-18",
+    "mnemonic": "%LD",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-19",
+    "mnemonic": "%LD",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-20",
+    "mnemonic": "%LD",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-21",
+    "mnemonic": "%LD",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-22",
+    "mnemonic": "%LD",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-23",
+    "mnemonic": "%LD",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-24",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-25",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-26",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-27",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-28",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-29",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-30",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-31",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-32",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-33",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-34",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-35",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-36",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-37",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-38",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-39",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-40",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-41",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-42",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-43",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-44",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-45",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-46",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-47",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-48",
+    "mnemonic": "@AND",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-49",
+    "mnemonic": "@AND",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-50",
+    "mnemonic": "@AND",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-51",
+    "mnemonic": "@AND",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-52",
+    "mnemonic": "@AND",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-53",
+    "mnemonic": "@AND",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-54",
+    "mnemonic": "@AND",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-55",
+    "mnemonic": "@AND",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-56",
+    "mnemonic": "@AND",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-57",
+    "mnemonic": "@AND",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-58",
+    "mnemonic": "@AND",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-59",
+    "mnemonic": "@AND",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-60",
+    "mnemonic": "%AND",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-61",
+    "mnemonic": "%AND",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-62",
+    "mnemonic": "%AND",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-63",
+    "mnemonic": "%AND",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-64",
+    "mnemonic": "%AND",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-65",
+    "mnemonic": "%AND",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-66",
+    "mnemonic": "%AND",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-67",
+    "mnemonic": "%AND",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-68",
+    "mnemonic": "%AND",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-69",
+    "mnemonic": "%AND",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-70",
+    "mnemonic": "%AND",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-71",
+    "mnemonic": "%AND",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-72",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-73",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-74",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-75",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-76",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-77",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-78",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-79",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-80",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-81",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-82",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-83",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-84",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-85",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-86",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-87",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-88",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-89",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-90",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-91",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-92",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-93",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-94",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-95",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-96",
+    "mnemonic": "@OR",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-97",
+    "mnemonic": "@OR",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-98",
+    "mnemonic": "@OR",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-99",
+    "mnemonic": "@OR",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-100",
+    "mnemonic": "@OR",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-101",
+    "mnemonic": "@OR",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-102",
+    "mnemonic": "@OR",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-103",
+    "mnemonic": "@OR",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-104",
+    "mnemonic": "@OR",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-105",
+    "mnemonic": "@OR",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-106",
+    "mnemonic": "@OR",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-107",
+    "mnemonic": "@OR",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-108",
+    "mnemonic": "%OR",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-109",
+    "mnemonic": "%OR",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-110",
+    "mnemonic": "%OR",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-111",
+    "mnemonic": "%OR",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-112",
+    "mnemonic": "%OR",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-113",
+    "mnemonic": "%OR",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-114",
+    "mnemonic": "%OR",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-115",
+    "mnemonic": "%OR",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-116",
+    "mnemonic": "%OR",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-117",
+    "mnemonic": "%OR",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-118",
+    "mnemonic": "%OR",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-119",
+    "mnemonic": "%OR",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-120",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-121",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-122",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-123",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-124",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-125",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-126",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-127",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-128",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-129",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-130",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-131",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-132",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-133",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-134",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-135",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-136",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-137",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-138",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-139",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-140",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-141",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-142",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-143",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-144",
+    "mnemonic": "@OUT",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-145",
+    "mnemonic": "@OUT",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-146",
+    "mnemonic": "@OUT",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-147",
+    "mnemonic": "@OUT",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-148",
+    "mnemonic": "@OUT",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-149",
+    "mnemonic": "@OUT",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-150",
+    "mnemonic": "@OUT",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-151",
+    "mnemonic": "@OUT",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-152",
+    "mnemonic": "@OUT",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-153",
+    "mnemonic": "@OUT",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-154",
+    "mnemonic": "@OUT",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-155",
+    "mnemonic": "@OUT",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-156",
+    "mnemonic": "%OUT",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-157",
+    "mnemonic": "%OUT",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-158",
+    "mnemonic": "%OUT",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-159",
+    "mnemonic": "%OUT",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-160",
+    "mnemonic": "%OUT",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-161",
+    "mnemonic": "%OUT",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-162",
+    "mnemonic": "%OUT",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-163",
+    "mnemonic": "%OUT",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-164",
+    "mnemonic": "%OUT",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-165",
+    "mnemonic": "%OUT",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-166",
+    "mnemonic": "%OUT",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-167",
+    "mnemonic": "%OUT",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-168",
+    "mnemonic": "@OUTNOT",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-169",
+    "mnemonic": "@OUTNOT",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-170",
+    "mnemonic": "@OUTNOT",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-171",
+    "mnemonic": "@OUTNOT",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-172",
+    "mnemonic": "@OUTNOT",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-173",
+    "mnemonic": "@OUTNOT",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-174",
+    "mnemonic": "@OUTNOT",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-175",
+    "mnemonic": "@OUTNOT",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-176",
+    "mnemonic": "@OUTNOT",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-177",
+    "mnemonic": "@OUTNOT",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-178",
+    "mnemonic": "@OUTNOT",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-179",
+    "mnemonic": "@OUTNOT",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-180",
+    "mnemonic": "%OUTNOT",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-181",
+    "mnemonic": "%OUTNOT",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-182",
+    "mnemonic": "%OUTNOT",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-183",
+    "mnemonic": "%OUTNOT",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-184",
+    "mnemonic": "%OUTNOT",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-185",
+    "mnemonic": "%OUTNOT",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-186",
+    "mnemonic": "%OUTNOT",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-187",
+    "mnemonic": "%OUTNOT",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-188",
+    "mnemonic": "%OUTNOT",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-189",
+    "mnemonic": "%OUTNOT",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-190",
+    "mnemonic": "%OUTNOT",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-191",
+    "mnemonic": "%OUTNOT",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-192",
+    "mnemonic": "@SET",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-193",
+    "mnemonic": "@SET",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-194",
+    "mnemonic": "@SET",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-195",
+    "mnemonic": "@SET",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-196",
+    "mnemonic": "@SET",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-197",
+    "mnemonic": "@SET",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-198",
+    "mnemonic": "@SET",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-199",
+    "mnemonic": "@SET",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-200",
+    "mnemonic": "@SET",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-201",
+    "mnemonic": "@SET",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-202",
+    "mnemonic": "@SET",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-203",
+    "mnemonic": "@SET",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-204",
+    "mnemonic": "%SET",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-205",
+    "mnemonic": "%SET",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-206",
+    "mnemonic": "%SET",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-207",
+    "mnemonic": "%SET",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-208",
+    "mnemonic": "%SET",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-209",
+    "mnemonic": "%SET",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-210",
+    "mnemonic": "%SET",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-211",
+    "mnemonic": "%SET",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-212",
+    "mnemonic": "%SET",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-213",
+    "mnemonic": "%SET",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-214",
+    "mnemonic": "%SET",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-215",
+    "mnemonic": "%SET",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-216",
+    "mnemonic": "@RSET",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-217",
+    "mnemonic": "@RSET",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-218",
+    "mnemonic": "@RSET",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-219",
+    "mnemonic": "@RSET",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-220",
+    "mnemonic": "@RSET",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-221",
+    "mnemonic": "@RSET",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-222",
+    "mnemonic": "@RSET",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-223",
+    "mnemonic": "@RSET",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-224",
+    "mnemonic": "@RSET",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-225",
+    "mnemonic": "@RSET",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-226",
+    "mnemonic": "@RSET",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-227",
+    "mnemonic": "@RSET",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "edge-228",
+    "mnemonic": "%RSET",
+    "operands": [
+      "0.00"
+    ]
+  },
+  {
+    "id": "edge-229",
+    "mnemonic": "%RSET",
+    "operands": [
+      "6143.15"
+    ]
+  },
+  {
+    "id": "edge-230",
+    "mnemonic": "%RSET",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "edge-231",
+    "mnemonic": "%RSET",
+    "operands": [
+      "W511.15"
+    ]
+  },
+  {
+    "id": "edge-232",
+    "mnemonic": "%RSET",
+    "operands": [
+      "H511.15"
+    ]
+  },
+  {
+    "id": "edge-233",
+    "mnemonic": "%RSET",
+    "operands": [
+      "A0.00"
+    ]
+  },
+  {
+    "id": "edge-234",
+    "mnemonic": "%RSET",
+    "operands": [
+      "A448.00"
+    ]
+  },
+  {
+    "id": "edge-235",
+    "mnemonic": "%RSET",
+    "operands": [
+      "D0.00"
+    ]
+  },
+  {
+    "id": "edge-236",
+    "mnemonic": "%RSET",
+    "operands": [
+      "T0"
+    ]
+  },
+  {
+    "id": "edge-237",
+    "mnemonic": "%RSET",
+    "operands": [
+      "C4095"
+    ]
+  },
+  {
+    "id": "edge-238",
+    "mnemonic": "%RSET",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "edge-239",
+    "mnemonic": "%RSET",
+    "operands": [
+      "W512.00"
+    ]
+  },
+  {
+    "id": "control-240",
+    "mnemonic": "@MOV(021)",
+    "operands": [
+      "#1",
+      "D0"
+    ]
+  },
+  {
+    "id": "control-241",
+    "mnemonic": "%MOV(021)",
+    "operands": [
+      "#1",
+      "D0"
+    ]
+  },
+  {
+    "id": "control-242",
+    "mnemonic": "@ANDLD",
+    "operands": []
+  },
+  {
+    "id": "control-243",
+    "mnemonic": "%ANDLD",
+    "operands": []
+  },
+  {
+    "id": "control-244",
+    "mnemonic": "@TIMH(015)",
+    "operands": [
+      "0",
+      "#0010"
+    ]
+  },
+  {
+    "id": "control-245",
+    "mnemonic": "%TIMH(015)",
+    "operands": [
+      "0",
+      "#0010"
+    ]
+  },
+  {
+    "id": "boundary-246",
+    "mnemonic": "@LD",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-247",
+    "mnemonic": "@LD",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-248",
+    "mnemonic": "@LD",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-249",
+    "mnemonic": "@LD",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-250",
+    "mnemonic": "@LD",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-251",
+    "mnemonic": "@LD",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-252",
+    "mnemonic": "@LD",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-253",
+    "mnemonic": "@LD",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-254",
+    "mnemonic": "@LD",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-255",
+    "mnemonic": "@LD",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-256",
+    "mnemonic": "@LD",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-257",
+    "mnemonic": "@LD",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-258",
+    "mnemonic": "@LD",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-259",
+    "mnemonic": "%LD",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-260",
+    "mnemonic": "%LD",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-261",
+    "mnemonic": "%LD",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-262",
+    "mnemonic": "%LD",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-263",
+    "mnemonic": "%LD",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-264",
+    "mnemonic": "%LD",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-265",
+    "mnemonic": "%LD",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-266",
+    "mnemonic": "%LD",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-267",
+    "mnemonic": "%LD",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-268",
+    "mnemonic": "%LD",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-269",
+    "mnemonic": "%LD",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-270",
+    "mnemonic": "%LD",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-271",
+    "mnemonic": "%LD",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-272",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-273",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-274",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-275",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-276",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-277",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-278",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-279",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-280",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-281",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-282",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-283",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-284",
+    "mnemonic": "@LDNOT",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-285",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-286",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-287",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-288",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-289",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-290",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-291",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-292",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-293",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-294",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-295",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-296",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-297",
+    "mnemonic": "%LDNOT",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-298",
+    "mnemonic": "@AND",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-299",
+    "mnemonic": "@AND",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-300",
+    "mnemonic": "@AND",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-301",
+    "mnemonic": "@AND",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-302",
+    "mnemonic": "@AND",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-303",
+    "mnemonic": "@AND",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-304",
+    "mnemonic": "@AND",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-305",
+    "mnemonic": "@AND",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-306",
+    "mnemonic": "@AND",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-307",
+    "mnemonic": "@AND",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-308",
+    "mnemonic": "@AND",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-309",
+    "mnemonic": "@AND",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-310",
+    "mnemonic": "@AND",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-311",
+    "mnemonic": "%AND",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-312",
+    "mnemonic": "%AND",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-313",
+    "mnemonic": "%AND",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-314",
+    "mnemonic": "%AND",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-315",
+    "mnemonic": "%AND",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-316",
+    "mnemonic": "%AND",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-317",
+    "mnemonic": "%AND",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-318",
+    "mnemonic": "%AND",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-319",
+    "mnemonic": "%AND",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-320",
+    "mnemonic": "%AND",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-321",
+    "mnemonic": "%AND",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-322",
+    "mnemonic": "%AND",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-323",
+    "mnemonic": "%AND",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-324",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-325",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-326",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-327",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-328",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-329",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-330",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-331",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-332",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-333",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-334",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-335",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-336",
+    "mnemonic": "@ANDNOT",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-337",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-338",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-339",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-340",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-341",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-342",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-343",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-344",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-345",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-346",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-347",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-348",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-349",
+    "mnemonic": "%ANDNOT",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-350",
+    "mnemonic": "@OR",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-351",
+    "mnemonic": "@OR",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-352",
+    "mnemonic": "@OR",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-353",
+    "mnemonic": "@OR",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-354",
+    "mnemonic": "@OR",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-355",
+    "mnemonic": "@OR",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-356",
+    "mnemonic": "@OR",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-357",
+    "mnemonic": "@OR",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-358",
+    "mnemonic": "@OR",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-359",
+    "mnemonic": "@OR",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-360",
+    "mnemonic": "@OR",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-361",
+    "mnemonic": "@OR",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-362",
+    "mnemonic": "@OR",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-363",
+    "mnemonic": "%OR",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-364",
+    "mnemonic": "%OR",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-365",
+    "mnemonic": "%OR",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-366",
+    "mnemonic": "%OR",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-367",
+    "mnemonic": "%OR",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-368",
+    "mnemonic": "%OR",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-369",
+    "mnemonic": "%OR",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-370",
+    "mnemonic": "%OR",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-371",
+    "mnemonic": "%OR",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-372",
+    "mnemonic": "%OR",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-373",
+    "mnemonic": "%OR",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-374",
+    "mnemonic": "%OR",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-375",
+    "mnemonic": "%OR",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-376",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-377",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-378",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-379",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-380",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-381",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-382",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-383",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-384",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-385",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-386",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-387",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-388",
+    "mnemonic": "@ORNOT",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-389",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-390",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-391",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-392",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-393",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-394",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-395",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-396",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-397",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-398",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-399",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-400",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-401",
+    "mnemonic": "%ORNOT",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-402",
+    "mnemonic": "@SET",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-403",
+    "mnemonic": "@SET",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-404",
+    "mnemonic": "@SET",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-405",
+    "mnemonic": "@SET",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-406",
+    "mnemonic": "@SET",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-407",
+    "mnemonic": "@SET",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-408",
+    "mnemonic": "@SET",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-409",
+    "mnemonic": "@SET",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-410",
+    "mnemonic": "@SET",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-411",
+    "mnemonic": "@SET",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-412",
+    "mnemonic": "@SET",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-413",
+    "mnemonic": "@SET",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-414",
+    "mnemonic": "@SET",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-415",
+    "mnemonic": "%SET",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-416",
+    "mnemonic": "%SET",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-417",
+    "mnemonic": "%SET",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-418",
+    "mnemonic": "%SET",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-419",
+    "mnemonic": "%SET",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-420",
+    "mnemonic": "%SET",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-421",
+    "mnemonic": "%SET",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-422",
+    "mnemonic": "%SET",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-423",
+    "mnemonic": "%SET",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-424",
+    "mnemonic": "%SET",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-425",
+    "mnemonic": "%SET",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-426",
+    "mnemonic": "%SET",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-427",
+    "mnemonic": "%SET",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-428",
+    "mnemonic": "@RSET",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-429",
+    "mnemonic": "@RSET",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-430",
+    "mnemonic": "@RSET",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-431",
+    "mnemonic": "@RSET",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-432",
+    "mnemonic": "@RSET",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-433",
+    "mnemonic": "@RSET",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-434",
+    "mnemonic": "@RSET",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-435",
+    "mnemonic": "@RSET",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-436",
+    "mnemonic": "@RSET",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-437",
+    "mnemonic": "@RSET",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-438",
+    "mnemonic": "@RSET",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-439",
+    "mnemonic": "@RSET",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-440",
+    "mnemonic": "@RSET",
+    "operands": [
+      "Symbol"
+    ]
+  },
+  {
+    "id": "boundary-441",
+    "mnemonic": "%RSET",
+    "operands": [
+      "1.15"
+    ]
+  },
+  {
+    "id": "boundary-442",
+    "mnemonic": "%RSET",
+    "operands": [
+      "W0.15"
+    ]
+  },
+  {
+    "id": "boundary-443",
+    "mnemonic": "%RSET",
+    "operands": [
+      "W1.00"
+    ]
+  },
+  {
+    "id": "boundary-444",
+    "mnemonic": "%RSET",
+    "operands": [
+      "H0.00"
+    ]
+  },
+  {
+    "id": "boundary-445",
+    "mnemonic": "%RSET",
+    "operands": [
+      "A447.15"
+    ]
+  },
+  {
+    "id": "boundary-446",
+    "mnemonic": "%RSET",
+    "operands": [
+      "A959.15"
+    ]
+  },
+  {
+    "id": "boundary-447",
+    "mnemonic": "%RSET",
+    "operands": [
+      "A960.00"
+    ]
+  },
+  {
+    "id": "boundary-448",
+    "mnemonic": "%RSET",
+    "operands": [
+      "T4095"
+    ]
+  },
+  {
+    "id": "boundary-449",
+    "mnemonic": "%RSET",
+    "operands": [
+      "C0"
+    ]
+  },
+  {
+    "id": "boundary-450",
+    "mnemonic": "%RSET",
+    "operands": [
+      "TR15"
+    ]
+  },
+  {
+    "id": "boundary-451",
+    "mnemonic": "%RSET",
+    "operands": [
+      "TR16"
+    ]
+  },
+  {
+    "id": "boundary-452",
+    "mnemonic": "%RSET",
+    "operands": [
+      "*D0"
+    ]
+  },
+  {
+    "id": "boundary-453",
+    "mnemonic": "%RSET",
+    "operands": [
+      "Symbol"
+    ]
+  }
+]

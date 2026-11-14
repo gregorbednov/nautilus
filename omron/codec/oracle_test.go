@@ -257,7 +257,7 @@ func loadLibraryResults(t *testing.T, manifestName string, expected int) []nativ
 
 func qualifiedForm(mnemonic string) bool {
 	switch mnemonic {
-	case "LD", "LDNOT", "AND", "ANDNOT", "OR", "ORNOT", "OUT", "OUTNOT", "SET", "RSET", "LD(000)", "END", "END(001)", "END(1)", "NOP", "NOP(000)", "MOV(021)":
+	case "LD", "LDNOT", "AND", "ANDNOT", "OR", "ORNOT", "OUT", "OUTNOT", "SET", "RSET", "LD(000)", "END", "END(001)", "END(1)", "NOP", "NOP(000)", "MOV(021)", "@LD", "%LD", "@SET", "%SET":
 		return true
 	}
 	return false

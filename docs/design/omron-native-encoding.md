@@ -1,5 +1,40 @@
 # Native encoding findings from the installed Windows compiler
 
+## Differentiated bit instructions
+
+A new454-input-per-CPU capsule records908 observations: Go matches496 supported
+encodings, rejects176 invalid cases and leaves236 forms outside documented CPU
+or qualified operand/instruction scope. All492 common results reproduce in the
+previous complete cold worker. Supported forms are @/% LD, LDNOT, AND, ANDNOT,
+OR, ORNOT, SET and RSET; existing direct-address access and CJ1 DM-bit exclusions
+are reused rather than bypassed by the modifier path.
+
+Input variants use `e2c00000 | bit-field`, then `cb800000` for @ or `cba00000`
+for %, then a fixed suffix: LD=c2125002, LDNOT=c2325002, AND=c2525002,
+ANDNOT=c2725002, OR=c2925002, ORNOT=c2b25002. SET/RSET use prefixfac00000 (@)
+orfae00000 (%) and second containerd4400000|field (SET) ord4600000|field (RSET).
+Lengths/tags/suffixes are exact; malformed or unqualified forms consume zero.
+
+The reviewed actual Ghidra artifact `research/cj1-oracle/ghidra-n2.json` includes
+input encoder120662e3 and output encoder120c8ec7. Assembly explicitly writes
+cb800000 at12066773, cba00000 at12066761, and temporary operand125002 at12066838;
+output prefixes are written at120c9031 and120c905a. These are fixed literals,
+not a caller-selected allocation field in the qualified direct forms.
+Separate investigation artifacts `ghidra-edge-encode.json` and
+`ghidra-edge-handler.json` cover dispatch and a decoder; do not confuse decoder
+120660c0 (constructor argument39) with the encoder at argument40.
+
+Whole-project captures contain two e2d20000,cb800000,c2525002 triples each.
+Only their helper/suffix corroborate this pattern: operand120000 is an unknown
+internal field, not a qualified CIO/W/H/A/T/C address. The entire triple stays
+opaque on decoding; no full modified-instruction project anchor is claimed.
+
+W474 lists @/% contacts and SET/RSET, but only immediate-refresh variations for
+OUT/OUT NOT. The low-level library still emits %OUT and @/%OUTNOT, so all edge
+OUT forms remain rejected. Modified TR, MOV, timers and branch forms remain
+unqualified; in particular %MOV and %ANDLD can silently emit their plain form.
+Source: [Omron W474](https://assets.omron.eu/downloads/latest/manual/en/w474_cs_cj_nsj-series_plc%2C_sysmac_one_nsj_series_reference_manual_en.pdf?v=9).
+
 ## Branch and temporary-relay containers
 
 The branch capsule records262 inputs per CPU (524 observations): independent Go
@@ -38,8 +73,9 @@ W474-E1-13 sections3-3-1..3-3-6,3-4-1 and3-4-8 restrict direct DM/EM bit operand
 in ordinary Boolean instructions to CJ2. CX-Pdata's instruction-unit path still
 emits DM bit containers for CJ1M/CJ1H. Encode/decode now reject DM bit operands
 for all ten ordinary Boolean forms; DM word MOV and timer presets are unaffected.
-The immutable first430-observation capsule now yields284 accepted encodings,
-80 invalid cases and66 outside the supported forms or documented CPU limits.
+After the DM-bit exclusion the first430-observation capsule gave284 accepted
+encodings,80 invalid cases and66 outside supported forms or CPU limits. With
+the qualified differentiation forms added it now gives292/80/58 respectively.
 The Data bit-field entry below records a library representation, not permission
 to use that address in CJ1 Boolean instructions. `ParseBitAddress` preserves this
 representation for research but instruction encoding enforces the CPU limit.

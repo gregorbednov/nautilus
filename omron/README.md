@@ -19,6 +19,9 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   project anchors. Timers require explicit BCD/binary mode. It handles individual
   containers under library-default profiles; full program compilation and
   unit-version qualification remain outstanding. See [codec limits](codec/README.md).
+  Six input instructions and SET/RSET also support qualified @/% differentiation,
+  verified against908 additional observations. OUT differentiation stays rejected
+  according to the documented instruction variations.
 * `fins`: UDP and TCP with node negotiation, strict response correlation,
   direct Host Link FA framing and Linux serial configuration; identity,
   CPU status, raw memory reads and bounded opaque user-memory backups.
