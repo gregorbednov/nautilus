@@ -1,5 +1,18 @@
 # Native encoding findings from the installed Windows compiler
 
+## CPU restrictions override low-level library success
+
+W474-E1-13 sections3-3-1..3-3-6,3-4-1 and3-4-8 restrict direct DM/EM bit operands
+in ordinary Boolean instructions to CJ2. CX-Pdata's instruction-unit path still
+emits DM bit containers for CJ1M/CJ1H. Encode/decode now reject DM bit operands
+for all ten ordinary Boolean forms; DM word MOV and timer presets are unaffected.
+The immutable first430-observation capsule now yields284 accepted encodings,
+80 invalid cases and66 outside the supported forms or documented CPU limits.
+The Data bit-field entry below records a library representation, not permission
+to use that address in CJ1 Boolean instructions. `ParseBitAddress` preserves this
+representation for research but instruction encoding enforces the CPU limit.
+Source: [Omron W474-E1-13](https://assets.omron.eu/downloads/latest/manual/en/w474_cs_cj_nsj-series_plc%2C_sysmac_one_nsj_series_reference_manual_en.pdf?v=9).
+
 ## Explicit timer/counter instruction codec
 
 The next operand matrix contains210 inputs per CPU in each explicit mode:

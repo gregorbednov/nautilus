@@ -122,6 +122,11 @@ func EncodeInstruction(profile Profile, instruction il.Instruction) ([]uint32, e
 		if err != nil {
 			return nil, err
 		}
+		// W474 restricts direct DM bit operands in these forms to CJ2. The
+		// instruction-unit library still emits them for CJ1 without ProgramCheck.
+		if address.Area == Data {
+			return nil, ErrUnqualifiedInstruction
+		}
 		bits, err := address.operandBits(definition.write)
 		if err != nil {
 			return nil, err
@@ -179,6 +184,9 @@ func DecodeInstruction(profile Profile, words []uint32) (il.Instruction, int, er
 			}
 			if err := address.validate(definition.write); err != nil {
 				return fail(err)
+			}
+			if address.Area == Data {
+				return fail(ErrUnqualifiedInstruction)
 			}
 			source = definition.name + " " + address.String()
 			break

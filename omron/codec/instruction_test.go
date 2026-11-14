@@ -68,6 +68,30 @@ func TestNativeAddressSemantics(t *testing.T) {
 	}
 }
 
+func TestCJ1RejectsDirectDMBitInstructions(t *testing.T) {
+	for _, model := range []string{codec.CJ1MCPU21, codec.CJ1HCPU65} {
+		profile := codec.Profile{Model: model}
+		for _, name := range []string{"LD", "LDNOT", "AND", "ANDNOT", "OR", "ORNOT", "OUT", "OUTNOT", "SET", "RSET"} {
+			instruction, err := il.Parse(name + " D0.00")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if words, err := codec.EncodeInstruction(profile, instruction); !errors.Is(err, codec.ErrUnqualifiedInstruction) || len(words) != 0 {
+				t.Fatalf("emitted CJ2-only DM bit form: %s", name)
+			}
+		}
+		for _, word := range []uint32{0xe2080000, 0xe2280000, 0xe2480000, 0xe2680000, 0xe2880000, 0xe2a80000, 0xfa080000, 0xfa280000, 0xf0480000, 0xf0680000} {
+			if _, count, err := codec.DecodeInstruction(profile, []uint32{word}); !errors.Is(err, codec.ErrUnqualifiedInstruction) || count != 0 {
+				t.Fatalf("decoded CJ2-only DM bit form %x", word)
+			}
+		}
+		instruction, _ := il.Parse("MOV D0 D1")
+		if _, err := codec.EncodeInstruction(profile, instruction); err != nil {
+			t.Fatal("blocked valid DM word transfer", err)
+		}
+	}
+}
+
 func FuzzDecodeInstruction(f *testing.F) {
 	for _, words := range [][]uint32{{0xe205e000}, {0xfa05e001}, {0xbb800001}, {0xb2400140}, {0xe205a000}, {0}, {0xb2400140, 0x61400001, 0x54010000}, {0xb2400140, 0x6000e000, 0x5400f000, 0xbb800001}, {0xbb4000c0, 0x5000e000, 0x65400010}, {0xbb4000c1, 0x5000efff, 0x6544ffff}, {0xbb4000d0, 0x5000f000, 0x6400b840}, {0xbb4000c0, 0x5000e000, 0x6540abcd}} {
 		var data []byte

@@ -6,7 +6,7 @@ instructions, not a complete program, N1 envelope or download payload.
 
 Supported initial forms are LD/LDNOT, AND/ANDNOT, OR/ORNOT, OUT/OUTNOT, SET/RSET,
 NOP, END and plain MOV/MOV(021)/MOV(21). Direct bit operands cover numeric CIO,
-W, H, A, D and T/C completion flags. Address bounds and read/write restrictions are checked independently
+W, H, A and T/C completion flags. Address bounds and read/write restrictions are checked independently
 of the network protocol. Symbols, indirect operands, modifiers, other families
 and unqualified function-label spellings fail explicitly.
 
@@ -49,12 +49,19 @@ by this measured MOV form. `WordAddress` and `Literal16` expose these distinctio
 
 ## Evidence
 
+The library emits direct DM bit operands even for the CJ1 profiles. W474-E1-13
+sections3-3-1..3-3-6,3-4-1 and3-4-8 reserve these forms for CJ2, so the codec
+rejects them in both directions. `ParseBitAddress` can still represent their
+numeric address fields for research; that does not permit instruction encoding.
+DM word transfers and timer presets remain supported. Source:
+[Omron W474](https://assets.omron.eu/downloads/latest/manual/en/w474_cs_cj_nsj-series_plc%2C_sysmac_one_nsj_series_reference_manual_en.pdf?v=9).
+
 The immutable fixtures in `testdata` contain 215 explicit cases for each CPU:
 430 native library observations. Tests verify the hashes of inputs, exact
 injected script/template/worker snapshots and compressed transcripts, then
 validate lifecycle, profiles and case correlation before comparing Go results.
-326 generated results match the codec, 82 negative cases are rejected and
-22 cases remain outside its current instruction forms. Three common forms
+284 generated results match the codec, 80 negative cases are rejected and
+66 cases remain outside its current instruction forms or documented CPU limits. Three common forms
 are also anchored to the separately captured full-project N1 images.
 
 A separate immutable MOV capsule adds 185 cases per CPU (370 observations):
