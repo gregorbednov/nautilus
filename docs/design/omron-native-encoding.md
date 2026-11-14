@@ -1,5 +1,37 @@
 # Native encoding findings from the installed Windows compiler
 
+## Branch and temporary-relay containers
+
+The branch capsule records262 inputs per CPU (524 observations): independent Go
+matches86 supported outputs, rejects386 invalid forms and leaves52 modified,
+incorrect-label or foreign-mnemonic controls unsupported. All188 common results
+from the earlier cold run reproduce, including accepted status, initialization,
+operand errors and generated words.
+
+| Form | Numeric container |
+| --- | --- |
+| NOT | e3000000 |
+| ANDLD | e3200000 |
+| ORLD | e3400000 |
+| IL / IL(002) | b1000002 |
+| ILC / ILC(003) | bb000003 |
+| LD TRn | e2122000 + n |
+| OUT TRn | fa122000 + n |
+
+All five branch/interlock instructions take zero operands. TemporaryRelay is
+a separate Go operand type, with indices0..15, accepted only by LD and OUT.
+All16 slots and invalid access forms were measured; TR16 and dotted TR operands
+fail. Decoder rejects reserved relay fields, wrong operations and altered
+zero-operand containers without consuming input. MPS/MRD/MPP initialization
+fails in this library context; no substitute encoding is inferred.
+
+Existing full-project captures corroborate ten ANDLD containers, three ORLD
+containers and eight LD/OUT TR0/TR1 containers in each image. These are numeric
+anchors; this does not validate an arbitrary branch graph. IL/ILC pairing,
+block-depth and TR lifetime validation are still outstanding. W474 describes
+AND/OR block combination and restricts TR0..TR15 to LD/OUT; see
+[Omron W474](https://assets.omron.eu/downloads/latest/manual/en/w474_cs_cj_nsj-series_plc%2C_sysmac_one_nsj_series_reference_manual_en.pdf?v=9).
+
 ## CPU restrictions override low-level library success
 
 W474-E1-13 sections3-3-1..3-3-6,3-4-1 and3-4-8 restrict direct DM/EM bit operands
@@ -110,7 +142,7 @@ Measured direct-bit address ranges use these low operand fields:
 | W | 0x5e000 | word 0..511, bit 0..15 |
 | H | 0x58000 | word 0..511, bit 0..15 |
 | A | 0x38400 | word 0..959; words below448 reject writes in measured forms |
-| D | 0x80000 | word 0..32767, bit 0..15 |
+| D | 0x80000 | library field only; ordinary CJ1 Boolean forms reject DM bits |
 | T completion | 0x3e000 | index 0..4095; read operands |
 | C completion | 0x3f000 | index 0..4095; read operands |
 

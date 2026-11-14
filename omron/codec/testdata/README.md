@@ -61,3 +61,13 @@ The common input SHA-256 is
 Raw directories are `E:\cx-proger\research\cj1-oracle\timer-library-02-{MODE}`.
 Cases cover all six spellings, numeric/T/C indices, index boundaries, literal
 boundaries, invalid BCD digits, direct preset areas and indirect negative controls.
+
+`branch-manifest.json` pins262 inputs per CPU (524 observations) and matching
+script/template/worker snapshots. Raw captures are
+`E:\cx-proger\research\cj1-oracle\branch-library-01` and `branch-library-02`;
+all188 common results match across these separate workers. Tests cover all16 TR
+slots, leading-zero/lowercase spellings, missing/out-of-range/malformed relays,
+allowed LD/OUT access, rejected other Boolean access, and zero-operand branch
+instructions. Modifiers and incorrect labels remain unsupported even where the
+low-level library emits containers. No whole-program stack or interlock checks
+were performed by this oracle.

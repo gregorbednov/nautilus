@@ -79,6 +79,10 @@ func qualifierAllowed(mnemonic, label string) bool {
 		return label == "551"
 	case "CNTX":
 		return label == "546"
+	case "IL":
+		return label == "002"
+	case "ILC":
+		return label == "003"
 	}
 	return false
 }
@@ -102,6 +106,15 @@ func EncodeInstruction(profile Profile, instruction il.Instruction) ([]uint32, e
 	if mnemonic == "MOV" {
 		return encodeMOV(instruction.Operands)
 	}
+	for _, definition := range branchInstructions {
+		if mnemonic != definition.name {
+			continue
+		}
+		if len(instruction.Operands) != 0 {
+			return nil, ErrUnqualifiedInstruction
+		}
+		return []uint32{definition.opcode}, nil
+	}
 	if mnemonic == "END" || mnemonic == "NOP" {
 		if len(instruction.Operands) != 0 {
 			return nil, ErrUnqualifiedInstruction
@@ -117,6 +130,16 @@ func EncodeInstruction(profile Profile, instruction il.Instruction) ([]uint32, e
 		}
 		if len(instruction.Operands) != 1 {
 			return nil, ErrUnqualifiedInstruction
+		}
+		if strings.HasPrefix(strings.ToUpper(instruction.Operands[0]), "TR") {
+			if mnemonic != "LD" && mnemonic != "OUT" {
+				return nil, ErrUnqualifiedInstruction
+			}
+			relay, err := ParseTemporaryRelay(instruction.Operands[0])
+			if err != nil {
+				return nil, err
+			}
+			return []uint32{definition.opcode | 0x122000 | uint32(relay)}, nil
 		}
 		address, err := ParseBitAddress(instruction.Operands[0])
 		if err != nil {
@@ -148,6 +171,15 @@ func DecodeInstruction(profile Profile, words []uint32) (il.Instruction, int, er
 	}
 	var source string
 	consumed := 1
+	for _, definition := range branchInstructions {
+		if words[0] == definition.opcode {
+			instruction, err := il.Parse(definition.name)
+			if err != nil {
+				return fail(err)
+			}
+			return instruction, 1, nil
+		}
+	}
 	for _, definition := range timerInstructions {
 		if words[0] == definition.opcode {
 			source, err := decodeTimer(profile, definition, words)
@@ -177,6 +209,13 @@ func DecodeInstruction(profile Profile, words []uint32) (il.Instruction, int, er
 		for _, definition := range bitInstructions {
 			if words[0]&0xffe00000 != definition.opcode {
 				continue
+			}
+			if field := words[0] & 0x1fffff; field&0x1ffff0 == 0x122000 {
+				if definition.name != "LD" && definition.name != "OUT" {
+					return fail(ErrUnqualifiedInstruction)
+				}
+				source = definition.name + " " + TemporaryRelay(field&15).String()
+				break
 			}
 			address, err := addressFromBits(words[0] & 0x1fffff)
 			if err != nil {

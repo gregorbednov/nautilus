@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "215a1663c516509719b15deb2be9f844e8fb6914b424aeb9c9f9e6bacf2a56e0",
+  "programType": 0,
+  "unitVersion": null,
+  "timerCounterMode": "library-default",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "artifacts": {
+    "cases": {
+      "path": "branch-cases.json",
+      "sha256": "215a1663c516509719b15deb2be9f844e8fb6914b424aeb9c9f9e6bacf2a56e0",
+      "bytes": 25722
+    },
+    "events": {
+      "path": "branch-events.jsonl.gz",
+      "sha256": "c014c56c26ff03b790a36fdd3bc62241ef773c522874fd30f04a6d500c5e4ca6",
+      "bytes": 7478,
+      "encoding": "gzip",
+      "decodedSHA256": "f4963a4838eae61be18a320d1d9c0c02bf6806a155b2b8e432c174fc1f2f5950"
+    },
+    "script": {
+      "path": "branch-run.js.gz",
+      "sha256": "fb65cca2db5e54f4dc8e90a15338a4dd341f451332961e10eb257d87303aabbc",
+      "bytes": 3942,
+      "encoding": "gzip",
+      "decodedSHA256": "c216ffdf6899d17145b3cb70c85a83529ca3f870a9999c5a477473b7370c0695"
+    },
+    "template": {
+      "path": "branch-template.js",
+      "sha256": "b70d99c337a424c126ee0912e3221242b6e19cb0aaa8e1a9f8bbc0c4309ed928",
+      "bytes": 5476
+    },
+    "worker": {
+      "path": "branch-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    }
+  }
+}

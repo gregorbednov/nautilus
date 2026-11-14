@@ -10,6 +10,12 @@ W, H, A and T/C completion flags. Address bounds and read/write restrictions are
 of the network protocol. Symbols, indirect operands, modifiers, other families
 and unqualified function-label spellings fail explicitly.
 
+Branch forms are ANDLD, ORLD, NOT, IL/IL(002) and ILC/ILC(003), each one
+container with no operands. LD and OUT also accept typed `TemporaryRelay`
+operands TR0..TR15. A TR operand is separate from a general memory bit or word;
+other Boolean instructions reject it. This is instruction encoding only:
+logic-block depth, TR lifetime and IL/ILC pairing require program validation.
+
 `Profile{Model: CJ1MCPU21}` and `Profile{Model: CJ1HCPU65}` currently describe
 observed library-default configurations. Unit-version-specific profiles are
 unqualified and rejected. These profiles do not authorize deployment or assert
@@ -69,6 +75,12 @@ A separate immutable MOV capsule adds 185 cases per CPU (370 observations):
 cases remain explicitly outside the codec. It covers all seven direct word
 areas, area-pair combinations, range boundaries and literal boundaries. All
 174 common results from an earlier cold run reproduce in this expanded capture.
+
+The branch capsule adds262 inputs per CPU (524 observations): 86 supported
+encodings match, 386 invalid forms fail and52 modified/incorrect-label/foreign
+mnemonic controls remain unsupported. All188 common cold-run results reproduce.
+ANDLD, ORLD and LD/OUT TR0/TR1 also match containers in both existing full-project
+N1 captures. NOT and IL/ILC currently have library-unit evidence only.
 
 The oracle calls the installed compiler's normal constructors, SetPLC,
 Initialise, OperandEncode and EncodeFunction in a disposable x86 worker.
