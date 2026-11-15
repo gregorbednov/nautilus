@@ -1,5 +1,19 @@
 # Selected native rung compiler
 
+`CompileCXPMixedProgramBody(profile, document, programPath, sectionMarkers)`
+adds explicit opt-in composition of text rungs and at most one qualified
+seven-cell scalar FB call. CLI: `compile-program-body -fb-calls -timer-mode bcd`
+with optional `-section-markers`. Interlocks must close before calls and section
+boundaries. It preserves generated/source spans and bindings, requires terminal
+END and fails atomically for unsupported graphs or repeated calls.
+
+The reconstructed native source recipes reproduce all151 code words of the
+first task on both CPUs. Original unchanged CXP emits154 words because its
+first rung contains UP/SET instead of the capture's two-instruction replacement;
+the remaining149 words agree exactly. The second task still gives133/139 words.
+This generates no task header/wrapper, FB records, initial storage or full N1.
+The existing textual-only APIs retain their graphic rejection behavior.
+
 `CompileRungs(profile, []Rung)` validates explicitly bounded mnemonic networks
 and emits the qualified codec containers in source order. `CompileCXPRungs`
 adapts selected textual CXP/CXT rungs, preserving their native path/line numbers.

@@ -10,6 +10,39 @@ in the big-endian N1 file; event buffers instead contain x86 little-endian words
 
 ## Prefix records
 
+### Complete mixed program bodies
+
+`compiler.CompileCXPMixedProgramBody(profile, doc, program, sectionMarkers)`
+and CLI `compile-program-body -model MODEL -program PATH -timer-mode bcd
+-fb-calls -section-markers FILE` now compose textual rungs with the qualified
+seven-cell scalar FB call. The original textual-only APIs still reject graphics.
+Scope is at most one FB call per program, explicit BCD and interlocks closed at
+each call and section boundary. Repeated FB calls, other graphs and cross-boundary
+interlocks require separate native qualification. FB records remain separate.
+
+All151 words of the first native task's code now match on both CPUs, including
+the complete invocation and three section separators. The test reconstructs the
+exact source recipe from the existing portable oracle manifest: first rung
+`LD W0.15 / OUT W0.01` for CJ1M input-bit, `LD W0.00 / OUT W0.01` for CJ1H baseline.
+Reconstructed CXT SHA-256 equals the manifest's c1881eb043d9acc409a635410e91db03cc3c109c447e3addd65d632bf1d4234e
+and1df37113657da21d0a9b3f151c64cf9063b222f5b38f32b93b7ea860023b93b6 respectively.
+This reuses the saved captures and their declared source identity; it is not
+a new native full-project capture or stronger operator/file identity proof.
+
+The original CXP first rung is LD L1_Key_start / UP / SET ON. It produces154
+words; only its first five words differ from the two-word capture recipe.
+The remaining149 words agree exactly. Do not label the unmodified original's
+154 words as identical to the151-word native task. The second program remains
+133 source words or139 with separators, unchanged through the mixed entry point.
+
+Composition shifts both source and generated spans, retaining bindings and
+maximum logic depth. Every word is covered exactly once. Calls/markers after
+END, missing END, unsupported graphs/versions/profiles and active interlocks
+fail atomically. This qualifies the observed invocation inside a whole task
+body without an additional surrounding-code rewrite for these two captures;
+other caller contexts still need controlled examples. The32-word task header,
+four-word entry, one-word return and N1/task linking are not generated here.
+
 ### Definition section and combined FB fragment
 
 `compiler.CompileCXPFBDefinitionSection(profile, doc, resource, numbers)`

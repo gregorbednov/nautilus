@@ -87,6 +87,7 @@ func omronCompileProgramBody(args []string) error {
 	mode := flags.String("timer-mode", "", "explicit timer/counter mode: bcd or binary")
 	program := flags.String("program", "", "exact Resource[n].Programs.Program[n] path")
 	sectionMarkers := flags.Bool("section-markers", false, "include qualified CJ1 section separators; still not a task image")
+	fbCalls := flags.Bool("fb-calls", false, "enable only the qualified scalar seven-cell FB call layout; explicit BCD required")
 	encoding := flags.String("encoding", "auto", "CXT text encoding")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -109,7 +110,16 @@ func omronCompileProgramBody(args []string) error {
 		compile = compiler.CompileCXPSectionedProgramBody
 		format = "cj1-sectioned-program-containers"
 	}
-	body, err := compile(profile, doc, *program)
+	var body *compiler.Body
+	if *fbCalls {
+		body, err = compiler.CompileCXPMixedProgramBody(profile, doc, *program, *sectionMarkers)
+		format = "cj1-mixed-program-containers"
+		if *sectionMarkers {
+			format = "cj1-mixed-sectioned-program-containers"
+		}
+	} else {
+		body, err = compile(profile, doc, *program)
+	}
 	if err != nil {
 		return err
 	}

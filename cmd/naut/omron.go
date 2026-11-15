@@ -80,6 +80,8 @@ const omronUsage = `naut omron — independent CJ1 source tools, rung compilatio
       Default output contains source instructions only.
       Add -section-markers for qualified separators, with generated-word spans.
       Task headers, wrappers and the complete N1 image remain pending.
+      Add -fb-calls -timer-mode bcd for at most one qualified scalar FB call.
+      Interlocks must close before calls and sections; FB records remain separate.
   naut omron status CONNECTION-FLAGS
       Read CPU identity and status; never change its mode.
   naut omron read CONNECTION-FLAGS ADDRESS [COUNT]

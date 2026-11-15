@@ -15,6 +15,23 @@
 
 ## Что уже реализовано
 
+Последний этап: `CompileCXPMixedProgramBody(profile,doc,program,sectionMarkers)`
+и CLI `compile-program-body ... -timer-mode bcd -fb-calls -section-markers FILE`
+собирают все текстовые цепочки и одну подтверждённую7-cell scalar FB цепочку.
+Все151 слово кода первой задачи совпадают с обоими N1 после восстановления
+первой цепочки по portable oracle manifest: M LD W0.15/OUT W0.01, H LD W0.00/
+OUT W0.01. Проверяются точные CXT хеши из manifest. Это старые captures,
+не новая native компиляция и не усиление sourceIdentity operator-reported.
+Исходный CXP содержит LD L1_Key_start/UP/SET ON и даёт154 слова; его первые5
+слов заменяют2 слова эталонной цепочки. Все последующие149 совпадают.
+Вторая программа через новую API сохраняет133/139 слов. Source/generated spans
+и bindings перенесены со сдвигами, покрытие каждого слова ровно1 раз.
+Только explicitBCD, не более1FBcall/программу; IL должен закрываться до FB и
+конца каждой секции, даже без markers. Старые API без opt-in отвергают графику.
+END обязателен/терминален, ошибочный source/context не выдаёт частичного тела.
+Доказывает сборку151-word code вместе с FB, не task header/wrapper/полныйN1.
+Следующее:32 слова task header +4 entry +1 return, связывание задач и image.
+
 Последний этап: `SourceForFBDefinitions` читает все определения ресурса,
 отклоняет неоднозначные имена/TaskID. `CompileCXPFBDefinitionSection` выдаёт
 count+3zero+записи: все50 слов совпадают с обоими N1 (330..379). Номера записей

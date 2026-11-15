@@ -2,6 +2,14 @@
 
 The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
 
+`compile-program-body -fb-calls -timer-mode bcd -section-markers` now composes
+the observed scalar FB invocation with all textual rungs in one program.
+With first-rung source recipes reconstructed and hash-checked from the oracle
+manifest, all151 first-task code words match both native captures. Unchanged
+original CXP gives154 words due to its different first rung. At most one FB call
+is qualified per program; IL must close before calls and section boundaries.
+Task headers/wrappers, FB records and complete images remain separate.
+
 `naut omron compile-fb-definition-section -model MODEL -resource PATH -timer-mode
 bcd -number BLINK=0 FILE` generates the complete observed definition section,
 matching all50 words on both CPU fixtures. Repeat `-number NAME=N` for every
