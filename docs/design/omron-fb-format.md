@@ -10,6 +10,39 @@ in the big-endian N1 file; event buffers instead contain x86 little-endian words
 
 ## Prefix records
 
+### Resource-wide instance identity and placement audit
+
+`compiler.CompileCXPFBInstances` / CLI `compile-fb-instances -model MODEL
+-resource 'Resource[0]' -timer-mode bcd FILE` compile the complete saved global
+instance set in source order, after an atomic audit. Every POUInstances row
+must match exactly one global FUNCTION BLOCK symbol by name and definition,
+with address `[Auto]` and flags `A`. Orphan FB symbols, case-ambiguous globals/definitions,
+local FB symbols/records and local names shadowing these instances fail. Local
+variable tables and local POUInstances lists must use the observed format.
+The independent single-instance API intentionally retains its narrower scope.
+
+After each frame's size/capacity validation, nonempty T/BR0 and H/BR3 intervals
+are checked for pairwise overlap across instances. Bounds are half-open absolute
+word ranges: the examples occupy T[3072,3074), T[3074,3076), H[512,515) and
+H[515,518). Adjacent ranges pass; memory order may differ from source order.
+Shared zero-sized C/BR1, BR2 and H/BR4 bindings occupy no interval. Errors return
+no partial record set. Every generated record still matches the complete native
+record on both CPU fixtures. Mutation tests cover overlap, late failure,
+misbound symbols, orphan declarations, local instances and empty sets.
+
+JSON distinguishes instanceIdentityAudited/instanceOverlapAudited=true from
+globalPlacementAudited=false. This audit does not check scalar symbol/operand
+collisions with private memory, all callers, task links, CPU-wide resources,
+initial values or other resources. An empty instance set does not prove that
+the resource contains no unresolved FB calls. It still requires a qualified CPU
+and BCD profile. No new addresses or section header are generated.
+
+The native writer121c28ef writes the instance section's count followed by
+0x1c bytes from KBase+0x2d7c, independently of each instance's seven sizes at
+program+0xf4. Both saved section headers contain seven zeros; their general
+meaning and generation remain unqualified. Do not replace these words with
+summed instance footprints or assume they are always zero.
+
 ### Independent scalar instance record generation
 
 `compiler.CompileCXPFBInstance` and `naut omron compile-fb-instance -model MODEL

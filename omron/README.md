@@ -2,6 +2,13 @@
 
 The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
 
+`naut omron compile-fb-instances -model MODEL -resource PATH -timer-mode bcd FILE`
+compiles all saved global FB instance records after checking their global symbol
+identities and pairwise T/H memory overlap. Local instances and local names
+shadowing these globals fail. The report exposes absolute half-open word ranges.
+It does not audit scalar symbol/operand memory, all callers or task links, and
+does not generate a section header, initial storage or new placement.
+
 `naut omron compile-fb-instance -model MODEL -instance PATH -timer-mode bcd FILE`
 now generates the observed scalar FB runtime frame and ten-word instance header
 from CXP, using saved placement. All54 words match both instances on both CPU

@@ -40,6 +40,9 @@ const omronUsage = `naut omron — independent CJ1 source tools, rung compilatio
   naut omron compile-fb-instance -model MODEL -instance PATH -timer-mode bcd FILE
       Generate the observed scalar runtime frame and its instance record header.
       Uses saved placement; no storage initialization, global placement audit or linking.
+  naut omron compile-fb-instances -model MODEL -resource PATH -timer-mode bcd FILE
+      Compile all global instance records after symbol and pairwise overlap checks.
+      Reject local instances; no section header, storage initialization or linking.
   naut omron compile-fb-call-body -model MODEL -program PATH -rung PATH FILE
       Compile only the observed single-call scalar rung, with source maps.
       Unlinked body: no FB definition/instance generation or complete image.
@@ -111,6 +114,8 @@ func runOmron(args []string) int {
 		err = omronCompileFBDefinitionRecord(args[1:])
 	case "compile-fb-instance":
 		err = omronCompileFBInstance(args[1:])
+	case "compile-fb-instances":
+		err = omronCompileFBInstances(args[1:])
 	case "compile-fb-call-body":
 		err = omronCompileFBCallBody(args[1:])
 	case "compile-program-body":
