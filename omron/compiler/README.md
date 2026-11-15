@@ -1,5 +1,12 @@
 # Selected native rung compiler
 
+`CompileCXPTaskBlock` compiles every qualified task, rejects duplicate IDs/names
+and emits a zero-initialized288-slot directory plus records in TaskID order.
+Directory offsets and aggregate spans are relative to the block. The complete
+652-word native block matches both captures. `CompileCXPResourceBody` adds the
+FB prefix, checks call-to-generated-record links and reproduces all818 words
+after the native global header. Both keep image/configuration generation closed.
+
 `CompileCXPTaskRecord` wraps the mixed sectioned program body in the observed
 zero-flag task record. It reads qualified metadata through `cxp.SourceForTask`,
 requires IDs256..287, startup1, no protection and ASCII identifier names1..24 bytes.

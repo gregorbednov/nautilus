@@ -2,6 +2,14 @@
 
 The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
 
+`compile-task-block` generates the288-word task directory and sorted records;
+all652 words match both native fixtures with their captured source recipes.
+`compile-resource-body -model MODEL -resource PATH -timer-mode bcd -number BLINK=0
+-next-enable 0,0,0,0,0,0,0 FILE` combines this with both FB sections and checks
+FB call links. All818 post-header words match both native images. Unchanged
+original source gives821 words. These fragments have no global N1 header, task
+configuration or initial storage; complete images and hardware remain pending.
+
 `naut omron compile-task-record -model MODEL -program PATH -timer-mode bcd FILE`
 generates a standalone task record, including its32-word header and entry/return.
 All188/176 words match both native tasks on both CPU fixtures with the captured

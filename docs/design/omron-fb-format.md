@@ -10,6 +10,51 @@ in the big-endian N1 file; event buffers instead contain x86 little-endian words
 
 ## Prefix records
 
+### Task directory and complete post-header fragment
+
+`cxp.SourceForTasks` inventories every program, requiring unique TaskIDs and
+case-folded names, with the existing qualified metadata/ID256..287 scope.
+`compiler.CompileCXPTaskBlock` sorts by TaskID, initializes a288-word directory
+to zero and appends generated records. Each occupied slot contains the record's
+word offset from the directory start, not from the file start. Record/source/
+generated spans are block-relative; individual records retain their local maps.
+Writer121c28ef corroborates zeroing288 words, assigning accumulated length+288
+to directory[TaskID], emitting0x480 directory bytes and writing records in
+ascending TaskID order. This uses the existing hash-pinned writer export, with
+no new native full-project capture.
+
+All652 words of the directory+tasks match offsets496..1147 in both saved N1
+images for the reconstructed capture source recipes. Slots256/257 are288/476;
+other slots are zero. Source-order reversal and sparse ID260/287 mutations test
+sorting and relocated offsets. Duplicate IDs/names, malformed counts, unsupported
+metadata, empty task sets and late compilation failures return no partial block.
+
+`compiler.CompileCXPResourceBody(profile, doc, resource, numbers, nextEnable)`
+combines the generated FB prefix and task block. It resolves each graphical FB
+call through the qualified planner, checking instance name/ID, generated
+definition path and body ID, and retains a call-link table. FB body numbers that
+alias task IDs are rejected pending separate qualification; this is a conservative
+scope rule, not a claim that every such alias is forbidden by Omron.
+
+All818 words after the330-word global header match both native images. Fragment
+offsets: definitions0, instances50, task directory166. The directory's entries
+remain directory-relative. Original unmodified CXP produces821 words and slot257
+offset479 because its first task is three words longer. Mutated explicit record
+number9, instance7 and body1025 are reflected in the generated targets/call links.
+
+CLI `compile-task-block -model MODEL -resource PATH -timer-mode bcd FILE` emits
+the task fragment. `compile-resource-body` adds `-number BLINK=0` (repeat for each
+definition) and requires `-next-enable 0,0,0,0,0,0,0`. Current resource composition
+requires nonempty FB definition/instance sections and tasks. Counts, IDs and
+state are not allocated automatically; existing restrictions still apply.
+
+The resource report marks internalReferencesChecked/taskDirectoryGenerated=true,
+but globalHeaderGenerated/taskConfigurationGenerated/storageInitialized/linked/
+hardwareQualified=false. Reference checking covers this fragment's FB targets,
+not arbitrary CPU semantics, memory collisions with scalar operands, concurrency,
+global settings or hardware execution. Neither output is a complete N1 file or
+PLC payload. The next image-generation gate is the global header/configuration.
+
 ### Standalone task record generation
 
 `compiler.CompileCXPTaskRecord` and CLI `compile-task-record -model MODEL

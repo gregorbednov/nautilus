@@ -15,6 +15,26 @@
 
 ## Что уже реализовано
 
+Последний этап: `SourceForTasks` проверяет все программы ресурса, уникальные
+TaskID/имена (casefold), IDs256..287. `CompileCXPTaskBlock` сортирует по ID,
+выдаёт288-word directory + записи; смещения от начала каталога. Все652 слова
+совпадают с обоими N1 (496..1147) для corpus source recipes, slots256/257=288/476.
+Перестановка/разреженность ID, дубли/неверные counts/пустота/ошибки проверены.
+SourceSpans/Generated block-relative, directory покрыт отдельным generated span.
+`CompileCXPResourceBody` объединяет FBprefix+TaskBlock: все818 слов после330-word
+header совпадают с обоими N1. Смещения фрагмента0/50/166 (defs/instances/directory).
+Неизменённый CXP даёт821 слово, directory[257]=479 (другая первая цепочка).
+Проверяет и сохраняет call links: instance name/ID -> generated definition/bodyID;
+body/task number overlap пока отклоняется как неквалифицированный контекст.
+CLI `compile-task-block -model MODEL -resource PATH -timer-mode bcd FILE`;
+`compile-resource-body` дополнительно требует -number BLINK=0 и явный
+-next-enable 0,0,0,0,0,0,0. FB-секции/задачи должны быть непустыми.
+Report internalReferencesChecked/taskDirectoryGenerated=true;globalHeaderGenerated/
+taskConfigurationGenerated/storageInitialized/linked/hardwareQualified=false.
+Нет нового native capture: основание — прежний hash-pinned writer121c28ef и оба N1.
+Далее global header/task configuration: не копировать старые330слов как новый
+генератор. Все программы/FB-секции после заголовка уже генерируются из source.
+
 Последний этап: `cxp.SourceForTask` / `compiler.CompileCXPTaskRecord` / CLI
 `compile-task-record -model MODEL -program PATH -timer-mode bcd FILE` генерирует
 цельную zero-flags запись задачи:32header +4entry +body +1return. Все188/176 слов

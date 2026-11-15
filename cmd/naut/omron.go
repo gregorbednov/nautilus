@@ -85,6 +85,12 @@ const omronUsage = `naut omron — independent CJ1 source tools, rung compilatio
   naut omron compile-task-record -model MODEL -program PATH -timer-mode bcd FILE
       Generate one unprotected task record (IDs256..287), with entry/return.
       No task configuration, directory, global header, initialization or full N1.
+  naut omron compile-task-block -model MODEL -resource PATH -timer-mode bcd FILE
+      Generate the task directory and records sorted by TaskID.
+      No task configuration, global header or complete N1 image.
+  naut omron compile-resource-body -model MODEL -resource PATH -number NAME=N -timer-mode bcd -next-enable 0,0,0,0,0,0,0 FILE
+      Compose both FB sections, task directory and task records; check FB call links.
+      Fragment only: no global header, task configuration, initial data or full N1.
   naut omron status CONNECTION-FLAGS
       Read CPU identity and status; never change its mode.
   naut omron read CONNECTION-FLAGS ADDRESS [COUNT]
@@ -142,6 +148,10 @@ func runOmron(args []string) int {
 		err = omronCompileProgramBody(args[1:])
 	case "compile-task-record":
 		err = omronCompileTaskRecord(args[1:])
+	case "compile-task-block":
+		err = omronCompileTaskBlock(args[1:])
+	case "compile-resource-body":
+		err = omronCompileResourceBody(args[1:])
 	case "compile-rungs":
 		err = omronCompileRungs(args[1:])
 	case "status", "read", "upload", "serve":

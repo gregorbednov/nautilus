@@ -13,13 +13,19 @@ import (
 	"github.com/joyautomation/nautilus/omron/cxp"
 )
 
-func omronCompileFBDefinitionSection(args []string) error { return omronCompileFBSections(args, false) }
-func omronCompileFBPrefix(args []string) error            { return omronCompileFBSections(args, true) }
+func omronCompileFBDefinitionSection(args []string) error {
+	return omronCompileFBSections(args, false, false)
+}
+func omronCompileFBPrefix(args []string) error     { return omronCompileFBSections(args, true, false) }
+func omronCompileResourceBody(args []string) error { return omronCompileFBSections(args, true, true) }
 
-func omronCompileFBSections(args []string, prefix bool) error {
+func omronCompileFBSections(args []string, prefix, resourceBody bool) error {
 	command := "compile-fb-definition-section"
 	if prefix {
 		command = "compile-fb-prefix"
+	}
+	if resourceBody {
+		command = "compile-resource-body"
 	}
 	flags := flag.NewFlagSet("omron "+command, flag.ContinueOnError)
 	model := flags.String("model", "", "explicit qualified CPU model")
@@ -66,7 +72,10 @@ func omronCompileFBSections(args []string, prefix bool) error {
 	profile := codec.Profile{Model: *model, TimerCounterMode: codec.TimerModeBCD}
 	var result any
 	format := "cj1-fb-definition-section-containers"
-	if prefix {
+	if resourceBody {
+		result, err = compiler.CompileCXPResourceBody(profile, doc, *resource, numbers, next)
+		format = "cj1-resource-body-containers"
+	} else if prefix {
 		result, err = compiler.CompileCXPFBPrefix(profile, doc, *resource, numbers, next)
 		format = "cj1-fb-prefix-containers"
 	} else {
@@ -84,12 +93,16 @@ func omronCompileFBSections(args []string, prefix bool) error {
 		DefinitionNumbersExplicit           bool   `json:"definitionNumbersExplicit"`
 		NextEnableExplicit                  bool   `json:"nextEnableExplicit"`
 		InstanceDefinitionReferencesChecked bool   `json:"instanceDefinitionReferencesChecked"`
+		InternalReferencesChecked           bool   `json:"internalReferencesChecked"`
+		TaskDirectoryGenerated              bool   `json:"taskDirectoryGenerated"`
+		GlobalHeaderGenerated               bool   `json:"globalHeaderGenerated"`
+		TaskConfigurationGenerated          bool   `json:"taskConfigurationGenerated"`
 		SavedPlacementUsed                  bool   `json:"savedPlacementUsed"`
 		StorageInitialized                  bool   `json:"storageInitialized"`
 		Linked                              bool   `json:"linked"`
 		HardwareQualified                   bool   `json:"hardwareQualified"`
 		Result                              any    `json:"result"`
-	}{SchemaVersion: 1, Format: format, SourceSHA256: doc.SHA256, Model: *model, TimerCounterMode: *timer, DefinitionNumbersExplicit: true, NextEnableExplicit: prefix, InstanceDefinitionReferencesChecked: prefix, SavedPlacementUsed: prefix, Result: result}
+	}{SchemaVersion: 1, Format: format, SourceSHA256: doc.SHA256, Model: *model, TimerCounterMode: *timer, DefinitionNumbersExplicit: true, NextEnableExplicit: prefix, InstanceDefinitionReferencesChecked: prefix, InternalReferencesChecked: resourceBody, TaskDirectoryGenerated: resourceBody, SavedPlacementUsed: prefix, Result: result}
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(report)

@@ -12,16 +12,26 @@ import (
 )
 
 func omronCompileTaskRecord(args []string) error {
-	flags := flag.NewFlagSet("omron compile-task-record", flag.ContinueOnError)
+	return omronCompileTasks(args, false)
+}
+
+func omronCompileTaskBlock(args []string) error { return omronCompileTasks(args, true) }
+
+func omronCompileTasks(args []string, block bool) error {
+	command, scopeFlag := "compile-task-record", "program"
+	if block {
+		command, scopeFlag = "compile-task-block", "resource"
+	}
+	flags := flag.NewFlagSet("omron "+command, flag.ContinueOnError)
 	model := flags.String("model", "", "explicit qualified CPU model")
-	program := flags.String("program", "", "fully qualified source program path")
+	program := flags.String(scopeFlag, "", "fully qualified source scope")
 	timer := flags.String("timer-mode", "", "explicit BCD timer mode")
 	encoding := flags.String("encoding", "auto", "CXT text encoding")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 1 || *model == "" || *program == "" || *timer != "bcd" {
-		return errors.New("compile-task-record requires -model MODEL -program PATH -timer-mode bcd FILE")
+		return errors.New(command + " requires -model MODEL -" + scopeFlag + " PATH -timer-mode bcd FILE")
 	}
 	data, err := readOmronFile(flags.Arg(0))
 	if err != nil {
@@ -31,23 +41,33 @@ func omronCompileTaskRecord(args []string) error {
 	if err != nil {
 		return err
 	}
-	result, err := compiler.CompileCXPTaskRecord(codec.Profile{Model: *model, TimerCounterMode: codec.TimerModeBCD}, doc, *program)
+	profile := codec.Profile{Model: *model, TimerCounterMode: codec.TimerModeBCD}
+	var result any
+	format := "cj1-task-record-containers"
+	if block {
+		result, err = compiler.CompileCXPTaskBlock(profile, doc, *program)
+		format = "cj1-task-block-containers"
+	} else {
+		result, err = compiler.CompileCXPTaskRecord(profile, doc, *program)
+	}
 	if err != nil {
 		return err
 	}
 	report := struct {
-		SchemaVersion              int                  `json:"schemaVersion"`
-		Format                     string               `json:"format"`
-		SourceSHA256               string               `json:"sourceSHA256"`
-		Model                      string               `json:"model"`
-		TimerCounterMode           string               `json:"timerCounterMode"`
-		TaskRecordGenerated        bool                 `json:"taskRecordGenerated"`
-		TaskConfigurationGenerated bool                 `json:"taskConfigurationGenerated"`
-		StorageInitialized         bool                 `json:"storageInitialized"`
-		Linked                     bool                 `json:"linked"`
-		HardwareQualified          bool                 `json:"hardwareQualified"`
-		Result                     *compiler.TaskRecord `json:"result"`
-	}{SchemaVersion: 1, Format: "cj1-task-record-containers", SourceSHA256: doc.SHA256, Model: *model, TimerCounterMode: *timer, TaskRecordGenerated: true, Result: result}
+		SchemaVersion              int    `json:"schemaVersion"`
+		Format                     string `json:"format"`
+		SourceSHA256               string `json:"sourceSHA256"`
+		Model                      string `json:"model"`
+		TimerCounterMode           string `json:"timerCounterMode"`
+		TaskRecordGenerated        bool   `json:"taskRecordGenerated"`
+		TaskRecordsGenerated       bool   `json:"taskRecordsGenerated"`
+		TaskDirectoryGenerated     bool   `json:"taskDirectoryGenerated"`
+		TaskConfigurationGenerated bool   `json:"taskConfigurationGenerated"`
+		StorageInitialized         bool   `json:"storageInitialized"`
+		Linked                     bool   `json:"linked"`
+		HardwareQualified          bool   `json:"hardwareQualified"`
+		Result                     any    `json:"result"`
+	}{SchemaVersion: 1, Format: format, SourceSHA256: doc.SHA256, Model: *model, TimerCounterMode: *timer, TaskRecordGenerated: !block, TaskRecordsGenerated: block, TaskDirectoryGenerated: block, Result: result}
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(report)
