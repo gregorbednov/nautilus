@@ -2,6 +2,13 @@
 
 The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
 
+`naut omron compile-task-record -model MODEL -program PATH -timer-mode bcd FILE`
+generates a standalone task record, including its32-word header and entry/return.
+All188/176 words match both native tasks on both CPU fixtures with the captured
+source recipes. Scope: IDs256..287, OpStart1, unprotected, ASCII identifier names
+of1..24 bytes, qualified mixed body. Original unchanged first program gives191
+record words. Task configuration/directory, global header and full N1 are absent.
+
 `compile-program-body -fb-calls -timer-mode bcd -section-markers` now composes
 the observed scalar FB invocation with all textual rungs in one program.
 With first-rung source recipes reconstructed and hash-checked from the oracle

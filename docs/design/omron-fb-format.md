@@ -10,6 +10,48 @@ in the big-endian N1 file; event buffers instead contain x86 little-endian words
 
 ## Prefix records
 
+### Standalone task record generation
+
+`compiler.CompileCXPTaskRecord` and CLI `compile-task-record -model MODEL
+-program PATH -timer-mode bcd FILE` generate one zero-flag task record from CXP.
+`cxp.SourceForTask` requires TaskID256..287, OpStart1, Protection.Enabled0 with no
+additional protection fields, and an ASCII identifier name1..24 bytes. Body
+compilation uses the qualified mixed path with section separators, at most one
+scalar FB call and terminal END. Other classes/metadata fail atomically.
+
+All188 words of task256 and176 words of task257 match both native fixtures,
+using the first-rung source recipes described below. Unchanged original CXP
+produces191 words for task256 because its body has154 rather than151 words.
+The task header is32 words: number at0, name at1..8 packed three ASCII bytes per
+word (high byte zero), total record length at26, header size32 at27, other words
+zero in this scope. Entry is `[0, bbc00f43, 61440000+number, 65440000]`, followed
+by body and final `bb800f48`. Length is body+37. Writer121c28ef corroborates all
+these fields and the optional two-word IR/DR prologue only for IDs below256;
+that task class/prologue is not enabled here.
+
+Code keeps body-relative spans. TaskRecord.SourceSpans and Generated are
+record-relative: header0..31, entry32..35, body starting36, return at the final
+word. Every word is covered once. A source mutation to ID287/name24 bytes tests
+number/name emission, including all eight packed name words.
+
+New `task-properties-*` contains34 normal constructor/setter/getter observations
+(17 per CPU), with ordinary NOP encoding separately retained. Program type is0,
+default TaskID256 and descriptor task count288. SetTaskID12215f70 accepts -1
+through289; rejects -2,290,65535, leaving256 unchanged. Thus setter acceptance
+does not establish a valid directory index. All production IDs are below288;
+GetTaskType121ca1ee reports type4 for the qualified256..287 range. Name getters
+retain25 bytes but the writer truncates at24; Go rejects truncation. Protection
+getter follows its setter, while record flags at program+200 remain0 even for
+protection1: do not equate these fields. Protected tasks remain rejected.
+Raw Ghidra `ghidra-task-properties-13.json.gz` is hash-pinned; setter bodies use
+normal native objects, with no forged code or compiled flags.
+
+This is a standalone observed zero-flag record, not full task configuration or
+a fresh native writer capture. OpStart and protection/configuration tables are
+not emitted. The report keeps taskConfigurationGenerated/storageInitialized/
+linked/hardwareQualified=false. Task directory, global N1 header, project-wide
+settings/resources, initial data and deployment remain pending.
+
 ### Complete mixed program bodies
 
 `compiler.CompileCXPMixedProgramBody(profile, doc, program, sectionMarkers)`

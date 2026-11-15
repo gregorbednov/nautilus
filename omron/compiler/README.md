@@ -1,5 +1,12 @@
 # Selected native rung compiler
 
+`CompileCXPTaskRecord` wraps the mixed sectioned program body in the observed
+zero-flag task record. It reads qualified metadata through `cxp.SourceForTask`,
+requires IDs256..287, startup1, no protection and ASCII identifier names1..24 bytes.
+Record spans include header, entry, source/generated body code and return.
+All188/176 words of the two tasks match both native fixtures using the corpus
+source recipes; this is not full task configuration or complete image generation.
+
 `CompileCXPMixedProgramBody(profile, document, programPath, sectionMarkers)`
 adds explicit opt-in composition of text rungs and at most one qualified
 seven-cell scalar FB call. CLI: `compile-program-body -fb-calls -timer-mode bcd`

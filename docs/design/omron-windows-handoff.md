@@ -15,6 +15,24 @@
 
 ## Что уже реализовано
 
+Последний этап: `cxp.SourceForTask` / `compiler.CompileCXPTaskRecord` / CLI
+`compile-task-record -model MODEL -program PATH -timer-mode bcd FILE` генерирует
+цельную zero-flags запись задачи:32header +4entry +body +1return. Все188/176 слов
+обеих задач совпадают с обоими N1 при восстановленной first-rung recipe; исходный
+неизменённый CXP даёт191 слово первой записи. SourceSpans/Generated record-relative,
+Code.Spans остаются body-relative, покрытие всех слов1 раз. Header[0]=ID,[1..8]=
+ASCII по3байта/слово,[26]=length,[27]=32,прочее0. Вход0,bbc00f43,61440000+ID,
+65440000; возвратbb800f48. Тело генерируется mixed API с separators/END.
+Только IDs256..287, OpStart1, Protection.Enabled0, ASCII identifier1..24байт.
+Other classes/IRDRprologue/protection/startup options ещё не квалифицированы.
+Новые task-properties-*34наблюдения normal setters/getters+NOP: defaultID256,
+descriptorCount288; SetTaskID принимает-1..289 (28успехов/6отказов), Go сознательно
+отклоняет288/289 вне каталога. Setter защита отдельно от flags+200, которые0.
+GetTaskType для256..287 =4. NativeGetName25 сохраняет25,writerусекает24,Goотказ.
+Ghidra task-properties-13 hash-pinned. Это не новый полный native writer capture.
+taskConfigurationGenerated/storageInitialized/linked/hardwareQualified=false;
+следующее — каталог задач и global N1 header/linking, настройки/startup/initial data.
+
 Последний этап: `CompileCXPMixedProgramBody(profile,doc,program,sectionMarkers)`
 и CLI `compile-program-body ... -timer-mode bcd -fb-calls -section-markers FILE`
 собирают все текстовые цепочки и одну подтверждённую7-cell scalar FB цепочку.

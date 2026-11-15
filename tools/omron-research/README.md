@@ -6,6 +6,13 @@ a PLC. Keep original projects unchanged; use the generated copies for experiment
 
 ## Portable evidence audit
 
+`Invoke-CJ1InstructionOracle.ps1 -TaskPropertiesProbe -TimerCounterMode bcd`
+accepts NOP cases with `taskProperties:{number,name,protection}`. It uses a normal
+PLC_Program constructor/type0 and task/name/protection setters and getters, then
+records the descriptor count, task type and zero-flag field separately. Ordinary
+NOP acceptance is separate from setter acceptance. The34-row capsule is
+`codec/testdata/task-properties-*`; accepting a number is not directory validity.
+
 `Invoke-CJ1InstructionOracle.ps1 -FBSectionProbe -TimerCounterMode bcd` accepts
 NOP cases with `nextEnable:{index,value}`. It calls normal SetNextEnableAddress,
 records seven words before/after, clears through the same setter and retains

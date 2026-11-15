@@ -82,6 +82,9 @@ const omronUsage = `naut omron — independent CJ1 source tools, rung compilatio
       Task headers, wrappers and the complete N1 image remain pending.
       Add -fb-calls -timer-mode bcd for at most one qualified scalar FB call.
       Interlocks must close before calls and sections; FB records remain separate.
+  naut omron compile-task-record -model MODEL -program PATH -timer-mode bcd FILE
+      Generate one unprotected task record (IDs256..287), with entry/return.
+      No task configuration, directory, global header, initialization or full N1.
   naut omron status CONNECTION-FLAGS
       Read CPU identity and status; never change its mode.
   naut omron read CONNECTION-FLAGS ADDRESS [COUNT]
@@ -137,6 +140,8 @@ func runOmron(args []string) int {
 		err = omronCompileFBCallBody(args[1:])
 	case "compile-program-body":
 		err = omronCompileProgramBody(args[1:])
+	case "compile-task-record":
+		err = omronCompileTaskRecord(args[1:])
 	case "compile-rungs":
 		err = omronCompileRungs(args[1:])
 	case "status", "read", "upload", "serve":

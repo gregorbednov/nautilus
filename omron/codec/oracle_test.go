@@ -19,6 +19,7 @@ import (
 )
 
 type inputCase struct {
+	TaskProperties       *taskPropertiesInput       `json:"taskProperties,omitempty"`
 	NextEnable           *nextEnableInput           `json:"nextEnable,omitempty"`
 	DefinitionProperties *definitionPropertiesInput `json:"definitionProperties,omitempty"`
 	Code                 []uint32                   `json:"code,omitempty"`
@@ -32,6 +33,7 @@ type inputCase struct {
 	Operands             []string                   `json:"operands"`
 }
 type nativeResult struct {
+	TaskProperties     *taskPropertiesResult       `json:"taskProperties"`
 	NextEnable         *nextEnableResult           `json:"nextEnable"`
 	InstanceStages     []controlStage              `json:"instanceStages"`
 	Properties         *definitionPropertiesResult `json:"properties"`
@@ -226,7 +228,7 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 	if probe == "fb-instance-compile-v1" || probe == "fb-instance-decode-v1" {
 		programType = 16
 	}
-	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1" && !decodeProbe && probe != "fb-body-context-v1" && probe != "fb-instruction-compile-v1" && probe != "fb-definition-properties-v1" && probe != "fb-instance-compile-v1" && probe != "fb-section-addresses-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
+	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1" && !decodeProbe && probe != "fb-body-context-v1" && probe != "fb-instruction-compile-v1" && probe != "fb-definition-properties-v1" && probe != "fb-instance-compile-v1" && probe != "fb-section-addresses-v1" && probe != "task-properties-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
 		t.Fatal("unsupported oracle provenance")
 	}
 	assets := map[string][]byte{}
@@ -374,6 +376,25 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				t.Fatal("orphan case")
 			}
 			want := cases[caseIndex]
+			if probe == "task-properties-v1" {
+				if want.TaskProperties == nil || row.TaskProperties == nil || row.Mnemonic != "NOP" || len(row.Operands) != 0 {
+					t.Fatal("missing task properties")
+				}
+				p, r := want.TaskProperties, row.TaskProperties
+				number, returned := 256, 0
+				if p.Number >= -1 && p.Number <= 289 {
+					number, returned = p.Number, 1
+				}
+				protection, protectionResult := p.Protection, 1
+				if number < 0 {
+					protection, protectionResult = 0, 0
+				}
+				if r.Number != number || r.NumberResult != returned || r.Name != p.Name || r.Protection != protection || r.ProtectionResult != protectionResult {
+					t.Fatal("task setter input/readback correlation mismatch")
+				}
+			} else if want.TaskProperties != nil || row.TaskProperties != nil {
+				t.Fatal("unexpected task properties")
+			}
 			if probe == "fb-section-addresses-v1" {
 				if want.NextEnable == nil || row.NextEnable == nil || row.NextEnable.Index != want.NextEnable.Index || row.NextEnable.Value != want.NextEnable.Value || row.Mnemonic != "NOP" || len(row.Operands) != 0 {
 					t.Fatal("next-enable request/result mismatch")
