@@ -1,0 +1,424 @@
+﻿{
+    "schemaVersion":  1,
+    "method":  "oleaut32-LoadTypeLibEx-REGKIND_NONE",
+    "sourceSHA256":  "463eb4402bb6fa00453a5d7a745d77ced6be454d77aa2a683eb67de7e38ba71c",
+    "sourceName":  "PHeadDoc.dll",
+    "pointerBytes":  4,
+    "vendorObjectCreated":  false,
+    "typeNames":  [
+                      "_ICXP_POUHeadDocEvents2:TKIND_DISPATCH",
+                      "PH_CHANGE:TKIND_ENUM",
+                      "CXP_POUHeadDoc2:TKIND_COCLASS",
+                      "ICXP_POUHeadDoc2:TKIND_DISPATCH",
+                      "PH_USAGE_VAR:TKIND_ENUM",
+                      "PH_SORT_FIELD:TKIND_ENUM",
+                      "PH_SORT_DIRECTION:TKIND_ENUM",
+                      "PH_TYPE:TKIND_ENUM",
+                      "PH_BASE:TKIND_ENUM",
+                      "PH_SEARCH_FIELD:TKIND_ENUM",
+                      "PH_TRIGGER:TKIND_ENUM"
+                  ],
+    "functions":  [
+                      "_ICXP_POUHeadDocEvents2.ShowEditDlg(bstr:8,nType:3):25;vtable=0;member=1",
+                      "_ICXP_POUHeadDocEvents2.ShowFindDlg():25;vtable=0;member=2",
+                      "_ICXP_POUHeadDocEvents2.ShowReplaceDlg():25;vtable=0;member=3",
+                      "_ICXP_POUHeadDocEvents2.UpdateView():25;vtable=0;member=4",
+                      "_ICXP_POUHeadDocEvents2.SelectAllRows():25;vtable=0;member=5",
+                      "_ICXP_POUHeadDocEvents2.NotifyChange(bstrName:8,enChange:29):25;vtable=0;member=6",
+                      "_ICXP_POUHeadDocEvents2.ShowSelectedVar(nUsage:3,nIndex:3):25;vtable=0;member=7",
+                      "_ICXP_POUHeadDocEvents2.UndoRedoNotify(enumUsage:3,bstrName:8,enumType:3,nTypeArraySize:3,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3,bstrFBDefinition:8):25;vtable=0;member=8",
+                      "_ICXP_POUHeadDocEvents2.IsVariableReferenced(bstrName:8):3;vtable=0;member=9",
+                      "_ICXP_POUHeadDocEvents2.GetOnlineBOOLMemorySize(nFBMemoryNum:3):3;vtable=0;member=10",
+                      "_ICXP_POUHeadDocEvents2.GetOnlineOTHERMemorySize(nFBMemoryNum:3):3;vtable=0;member=11",
+                      "_ICXP_POUHeadDocEvents2.CursorChangeNotify(bstrVarName:8,bReportCross:3):24;vtable=0;member=12",
+                      "_ICXP_POUHeadDocEvents2.UndoRedoNotify2(enumUsage:3,bstrName:8,enumType:3,bstrArrayDimensions:8,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3,bstrFBDefinition:8):25;vtable=0;member=13",
+                      "ICXP_POUHeadDoc2.QueryInterface(riid:26,ppvObj:26):24;vtable=0;member=1610612736",
+                      "ICXP_POUHeadDoc2.AddRef():19;vtable=4;member=1610612737",
+                      "ICXP_POUHeadDoc2.Release():19;vtable=8;member=1610612738",
+                      "ICXP_POUHeadDoc2.GetTypeInfoCount(pctinfo:26):24;vtable=12;member=1610678272",
+                      "ICXP_POUHeadDoc2.GetTypeInfo(itinfo:23,lcid:19,pptinfo:26):24;vtable=16;member=1610678273",
+                      "ICXP_POUHeadDoc2.GetIDsOfNames(riid:26,rgszNames:26,cNames:23,lcid:19,rgdispid:26):24;vtable=20;member=1610678274",
+                      "ICXP_POUHeadDoc2.Invoke(dispidMember:3,riid:26,lcid:19,wFlags:18,pdispparams:26,pvarResult:26,pexcepinfo:26,puArgErr:26):24;vtable=24;member=1610678275",
+                      "ICXP_POUHeadDoc2.DeleteAll():24;vtable=28;member=1",
+                      "ICXP_POUHeadDoc2.Delete(enumUsage:29,nIndex:3):24;vtable=32;member=2",
+                      "ICXP_POUHeadDoc2.Sort(enUsage:29,enSortField:29,enDirection:29):24;vtable=36;member=3",
+                      "ICXP_POUHeadDoc2.CheckValidName(bstrName:8,pbstrErrorMessage:26):3;vtable=40;member=4",
+                      "ICXP_POUHeadDoc2.GetVarComment(bstrName:8,pbstrComment:26):3;vtable=44;member=5",
+                      "ICXP_POUHeadDoc2.GetNearMatch(bstrNameIn:8,pbstrNameOut:26,pnIndex:26,penumUsage:26):3;vtable=48;member=6",
+                      "ICXP_POUHeadDoc2.EnterVar(bstrName:8,enTyp:29):3;vtable=52;member=7",
+                      "ICXP_POUHeadDoc2.GetAddressOffset(bstrName:26,pbstrOffset:26):3;vtable=56;member=8",
+                      "ICXP_POUHeadDoc2.GetMemorySize(enumBase:29):3;vtable=60;member=9",
+                      "ICXP_POUHeadDoc2.AddVariable(enumUsage:29,bstrName:8,enumType:29,nTypeArraySize:3,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3,bPredefined:3):24;vtable=64;member=10",
+                      "ICXP_POUHeadDoc2.InsertVariable(enumUsage:29,nIndex:3,bstrName:8,enumType:29,nArrayTypeSize:3,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3,bPredefined:3):24;vtable=68;member=11",
+                      "ICXP_POUHeadDoc2.GetVariable(enumUsage:29,nIndex:3,pbstrName:26,penumType:26,pnTypeArraySize:26,pbstrAtAddress:26,pbstrInitial:26,pbstrComment:26,pbRetained:26,pbPredefined:26):3;vtable=72;member=12",
+                      "ICXP_POUHeadDoc2.ReplaceVariable(enumUsage:29,nIndex:3,bstrName:8,enumType:29,nArrayTypeSize:3,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3):24;vtable=76;member=13",
+                      "ICXP_POUHeadDoc2.GetNumberVars(nUsage:29):3;vtable=80;member=14",
+                      "ICXP_POUHeadDoc2.SetKBase(pView:13):24;vtable=84;member=15",
+                      "ICXP_POUHeadDoc2.ShowFindDlg():24;vtable=88;member=16",
+                      "ICXP_POUHeadDoc2.ShowReplaceDlg():24;vtable=92;member=17",
+                      "ICXP_POUHeadDoc2.FindName(bstrName:8,nIndex:26,enumUsage:26,bMatchCase:3):3;vtable=96;member=18",
+                      "ICXP_POUHeadDoc2.GetItem(nIndex:3,pbstrName:26,pnUsage:26,penumType:26,pnTypeArraySize:26,pbstrAtAddress:26,pbstrInitial:26,pbstrComment:26,bRetained:26,pbPredefined:26):3;vtable=100;member=19",
+                      "ICXP_POUHeadDoc2.GetItemCount():3;vtable=104;member=20",
+                      "ICXP_POUHeadDoc2.GetVariableName(nIndex:3,pbstrName:26):3;vtable=108;member=21",
+                      "ICXP_POUHeadDoc2.GetVariableCount():3;vtable=112;member=22",
+                      "ICXP_POUHeadDoc2.GetTypeString(enType:29,pbstrTypeString:26):24;vtable=116;member=23",
+                      "ICXP_POUHeadDoc2.SetVariableTag(nIndex:3,enUsage:29,bSet:3):24;vtable=120;member=24",
+                      "ICXP_POUHeadDoc2.DeleteVariablesWithTagSet():24;vtable=124;member=25",
+                      "ICXP_POUHeadDoc2.ResetAllVariableTags():24;vtable=128;member=26",
+                      "ICXP_POUHeadDoc2.GetVariableTag(nIndex:3,enUsage:29,bTag:26):3;vtable=132;member=27",
+                      "ICXP_POUHeadDoc2.FindTextInField(bReplace:3,enSearchField:29,bstrTxtIn:8,bMatchCase:3,bMatchExact:3,bIncludeBool:3):3;vtable=136;member=28",
+                      "ICXP_POUHeadDoc2.MaxNumberVarExceeded(lNumber:3,enUsage:29,pbstrErrorMessage:26):3;vtable=140;member=29",
+                      "ICXP_POUHeadDoc2.GetVarParamString(bstrName:8,pbstrParams:26):3;vtable=144;member=30",
+                      "ICXP_POUHeadDoc2.AddVarParamString(bstrParam:8):24;vtable=148;member=31",
+                      "ICXP_POUHeadDoc2.ShowEditDlg(bstrName:8,nType:3):24;vtable=152;member=32",
+                      "ICXP_POUHeadDoc2.UpdateView():24;vtable=156;member=33",
+                      "ICXP_POUHeadDoc2.FindNameInExternals(bstrName:8):3;vtable=160;member=34",
+                      "ICXP_POUHeadDoc2.ValidateMemoryAddress(bReadMemory:3,enumDataType:29,lArraySize:3,pbstrAddress:26):3;vtable=164;member=35",
+                      "ICXP_POUHeadDoc2.SelectAllRows():24;vtable=168;member=36",
+                      "ICXP_POUHeadDoc2.GetFindInTxtPositions(nIndex:3,enUsage:29,nPositionDataIndex:3):3;vtable=172;member=37",
+                      "ICXP_POUHeadDoc2.GetFindInTxtCount(nIndex:3,enUsage:29):3;vtable=176;member=38",
+                      "ICXP_POUHeadDoc2.GetDeletedVarCount():3;vtable=180;member=39",
+                      "ICXP_POUHeadDoc2.GetDeletedVar(nListIndex:3,nIndex:26,enUsage:26,pbstrName:26,penumType:26,pnTypeArraySize:26,pbstrAtAddress:26,pbstrInitial:26,pbstrComment:26,pbRetained:26,penTrigger:26,pbstrFBDefinition:26,pnFBDefinitionIndex:26,nMultiple:26,pnStringSize:26):24;vtable=184;member=40",
+                      "ICXP_POUHeadDoc2.ClearDeletedVar():24;vtable=188;member=41",
+                      "ICXP_POUHeadDoc2.GetTypeSize(enType:29,nNumberBits:26,nNumberWords:26):24;vtable=192;member=42",
+                      "ICXP_POUHeadDoc2.GetVariableSize(bstrName:8,nSize:26):3;vtable=196;member=43",
+                      "ICXP_POUHeadDoc2.GetMemoryRanges(bReadMemory:3,enumDataType:29,lArraySize:3):8;vtable=200;member=44",
+                      "ICXP_POUHeadDoc2.SetKeywords(bstrKeywords:8):24;vtable=204;member=45",
+                      "ICXP_POUHeadDoc2.IsKeyword(bstrName:8):3;vtable=208;member=46",
+                      "ICXP_POUHeadDoc2.HighlightVariable(enUsage:29,nIndex:3):24;vtable=212;member=47",
+                      "ICXP_POUHeadDoc2.GetInstanceID():8;vtable=216;member=48",
+                      "ICXP_POUHeadDoc2.SetInstanceID(bstrID:8):24;vtable=220;member=49",
+                      "ICXP_POUHeadDoc2.GetClipboardFormat(wFormat:26):24;vtable=224;member=50",
+                      "ICXP_POUHeadDoc2.IsPredefined(bstrName:8,bstrErrorMsg:26):3;vtable=228;member=51",
+                      "ICXP_POUHeadDoc2.GetID():3;vtable=232;member=52",
+                      "ICXP_POUHeadDoc2.MoveVariable(nIndex:3,enDeleteUsage:29,enumUsage:29,bstrName:8,enumType:29,nTypeArraySize:3,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3,enTrigger:29,bstrFBDefinition:8,nStringSize:3):24;vtable=236;member=53",
+                      "ICXP_POUHeadDoc2.UpdateUndoRedoSort(bNewData:3,enUsage:29):24;vtable=240;member=54",
+                      "ICXP_POUHeadDoc2.UndoRedoSort(bRedo:3,enUsage:29):24;vtable=244;member=55",
+                      "ICXP_POUHeadDoc2.IsFunctionBlock(nIndex:3):3;vtable=248;member=56",
+                      "ICXP_POUHeadDoc2.GetFunctionBlockDefinitionsCount():3;vtable=252;member=57",
+                      "ICXP_POUHeadDoc2.GetFunctionBlockDefinition(nDefinitionIndex:3,pbstrDefinition:26):3;vtable=256;member=58",
+                      "ICXP_POUHeadDoc2.GetItem2(nIndex:3,pbstrName:26,pnUsage:26,penumType:26,pnTypeArraySize:26,pbstrAtAddress:26,pbstrInitial:26,pbstrComment:26,bRetained:26,pbPredefined:26,penTrigger:26,pbstrFBDefinition:26,pnStringSize:26):3;vtable=260;member=59",
+                      "ICXP_POUHeadDoc2.AddItem(enUsage:29,bstrName:8,enumType:29,nTypeArraySize:3,bstrAtAddress:8,bstrInitial:8,pbstrComment:8,bRetained:3,bPredefined:3,enTrigger:29,bstrFBDefinition:8,nStringSize:3):24;vtable=264;member=60",
+                      "ICXP_POUHeadDoc2.LoadVersion1Externals():24;vtable=268;member=61",
+                      "ICXP_POUHeadDoc2.SetTypeManager(pTypeManager:13):24;vtable=272;member=62",
+                      "ICXP_POUHeadDoc2.GetDefinedFBCount():3;vtable=276;member=63",
+                      "ICXP_POUHeadDoc2.GetDefinedFBName(nIndex:3,bstrName:26,bstrDefinitionName:26):3;vtable=280;member=64",
+                      "ICXP_POUHeadDoc2.IsValidFunctionBlockDefinition(bstrDefinitionName:8):3;vtable=284;member=65",
+                      "ICXP_POUHeadDoc2.AddVariable2(enumUsage:29,bstrName:8,enumType:29,nTypeArraySize:3,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3,bPredefined:3,enTrigger:29,bstrFBDefinition:8,nStringSize:3):24;vtable=288;member=66",
+                      "ICXP_POUHeadDoc2.ReplaceVariable2(enumUsage:29,nIndex:3,bstrName:8,enumType:29,nArrayTypeSize:3,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3,enTrigger:29,bstrFBDefinition:8,nStringSize:3):24;vtable=292;member=67",
+                      "ICXP_POUHeadDoc2.GetVariable2(enumUsage:29,nIndex:3,pbstrName:26,penumType:26,pnTypeArraySize:26,pbstrAtAddress:26,pbstrInitial:26,pbstrComment:26,pbRetained:26,pbPredefined:26,penTrigger:26,pbstrFBDefinition:26,pnStringSize:26):3;vtable=296;member=68",
+                      "ICXP_POUHeadDoc2.InsertVariable2(enumUsage:29,nIndex:3,bstrName:8,enumType:29,nArrayTypeSize:3,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3,bPredefined:3,enTrigger:29,bstrFBDefinition:8,nStringSize:3):24;vtable=300;member=69",
+                      "ICXP_POUHeadDoc2.ValidateName(bstrName:8,bExists:26,bstrError:26):3;vtable=304;member=70",
+                      "ICXP_POUHeadDoc2.ValidateType(bstrName:8,enumType:29,bST:3,enumUsage:29,nTypeArraySize:22,bstrAtAddress:8,bstrInitial:8,bstrFunctionBlock:8,bRetained:3,nStringSize:3,bstrError:26):3;vtable=308;member=71",
+                      "ICXP_POUHeadDoc2.ValidateArray(nTypeArraySize:3,enUsage:29,enumType:29,bstrError:26):3;vtable=312;member=72",
+                      "ICXP_POUHeadDoc2.ValidateATAddress(bstrAtAddress:26,enUsage:29,enumType:29,nTypeArraySize:3,bstrError:26):3;vtable=316;member=73",
+                      "ICXP_POUHeadDoc2.ValidateRetained(bRetained:3,enumUsage:29,bstrError:26):3;vtable=320;member=74",
+                      "ICXP_POUHeadDoc2.ValidateInitialValue(bstrInitial:8,enType:29,bstrError:26):3;vtable=324;member=75",
+                      "ICXP_POUHeadDoc2.ValidateInitialSyntax(bstrInitial:26,enType:29,bstrNonDecimalNumber:26,nBase:26,bNonDecimal:26,bstrError:26):3;vtable=328;member=76",
+                      "ICXP_POUHeadDoc2.ValidateNonDecimalInitialValue(bstrNumber:8,enType:29,nBase:22,bstrErrorMsg:26):3;vtable=332;member=77",
+                      "ICXP_POUHeadDoc2.ValidateTrigger(enTrigger:29,enUsage:29,enType:29,bstrErrorMsg:26):3;vtable=336;member=78",
+                      "ICXP_POUHeadDoc2.ValidateNameNotADuplicate(bstrName:8,bstrErrorMsg:26):3;vtable=340;member=79",
+                      "ICXP_POUHeadDoc2.SetDefinitionName(bstrName:8):24;vtable=344;member=80",
+                      "ICXP_POUHeadDoc2.GetDefinitionName():8;vtable=348;member=81",
+                      "ICXP_POUHeadDoc2.ReplaceDefinitionName(bstrNewName:8,bstrOldName:8):24;vtable=352;member=82",
+                      "ICXP_POUHeadDoc2.IsVariableReferenced(bstrName:8):3;vtable=356;member=83",
+                      "ICXP_POUHeadDoc2.GetOptionAutoControlIME(bAutoControlIME:26):24;vtable=360;member=84",
+                      "ICXP_POUHeadDoc2.SetOptionAutoControlIME(bAutoControlIME:3):24;vtable=364;member=85",
+                      "ICXP_POUHeadDoc2.CheckValidAsAddress(bstrName:8,bAutoControlIME:26):24;vtable=368;member=86",
+                      "ICXP_POUHeadDoc2.IsUsedTypeStringOrVerInOut():3;vtable=372;member=87",
+                      "ICXP_POUHeadDoc2.SetFBOnLineEditMode(bOnlineEditing:3):24;vtable=376;member=88",
+                      "ICXP_POUHeadDoc2.IsFBOnlineEditing():3;vtable=380;member=89",
+                      "ICXP_POUHeadDoc2.CanAddVariableForOnlineEdit(enumUsage:29,bstrName:8,enumType:29,nTypeArraySize:3,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3,bPredefined:3,enTrigger:29,bstrFBDefinition:8,nStringSize:3):3;vtable=384;member=90",
+                      "ICXP_POUHeadDoc2.GetUsedBOOLAndWORDSize(bBase:29,nBOOLSize:26,nWORDSize:26):24;vtable=388;member=91",
+                      "ICXP_POUHeadDoc2.MaxNumVarExceededForChangeUsage(lNumber:3,enUsage:29,enOrgUsage:29,pbstrErrorMessage:26):3;vtable=392;member=92",
+                      "ICXP_POUHeadDoc2.MakeVarDiffText(enumUsage:29,nIndex:3,pDiffVariableText:26):24;vtable=396;member=93",
+                      "ICXP_POUHeadDoc2.CursorChange(bstrVarName:8,bReportCross:3):24;vtable=400;member=94",
+                      "ICXP_POUHeadDoc2.GetStructureDefinitionsCount():3;vtable=404;member=95",
+                      "ICXP_POUHeadDoc2.GetStructureDefinition(nDefinitionIndex:3,pbstrDefinition:26):3;vtable=408;member=96",
+                      "ICXP_POUHeadDoc2.GetTypeSupplier():13;vtable=412;member=97",
+                      "ICXP_POUHeadDoc2.ValidateMemoryAddress2(bReadMemory:3,enumDataType:29,bstrArrayDimensions:8,pbstrAddress:26):3;vtable=416;member=98",
+                      "ICXP_POUHeadDoc2.GetDeletedVar2(nListIndex:3,nIndex:26,enUsage:26,pbstrName:26,penumType:26,pbstrArrayDimensions:26,pbstrAtAddress:26,pbstrInitial:26,pbstrComment:26,pbRetained:26,penTrigger:26,pbstrFBDefinition:26,pnFBDefinitionIndex:26,nMultiple:26,pnStringSize:26):24;vtable=420;member=99",
+                      "ICXP_POUHeadDoc2.GetMemoryRanges2(bReadMemory:3,enumDataType:29,bstrArrayDimensions:8):8;vtable=424;member=100",
+                      "ICXP_POUHeadDoc2.MoveVariable2(nIndex:3,enDeleteUsage:29,enumUsage:29,bstrName:8,enumType:29,bstrArrayDimensions:8,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3,enTrigger:29,bstrFBDefinition:8,nStringSize:3):24;vtable=428;member=101",
+                      "ICXP_POUHeadDoc2.GetItem3(nIndex:3,pbstrName:26,pnUsage:26,penumType:26,pbstrArrayDimensions:26,pbstrAtAddress:26,pbstrInitial:26,pbstrComment:26,bRetained:26,pbPredefined:26,penTrigger:26,pbstrFBDefinition:26,pnStringSize:26):3;vtable=432;member=102",
+                      "ICXP_POUHeadDoc2.AddItem2(enUsage:29,bstrName:8,enumType:29,bstrArrayDimensions:8,bstrAtAddress:8,bstrInitial:8,pbstrComment:8,bRetained:3,bPredefined:3,enTrigger:29,bstrFBDefinition:8,nStringSize:3):24;vtable=436;member=103",
+                      "ICXP_POUHeadDoc2.AddVariable3(enumUsage:29,bstrName:8,enumType:29,bstrArrayDimensions:8,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3,bPredefined:3,enTrigger:29,bstrFBDefinition:8,nStringSize:3):24;vtable=440;member=104",
+                      "ICXP_POUHeadDoc2.ReplaceVariable3(enumUsage:29,nIndex:3,bstrName:8,enumType:29,bstrArrayDimensions:8,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3,enTrigger:29,bstrFBDefinition:8,nStringSize:3):24;vtable=444;member=105",
+                      "ICXP_POUHeadDoc2.GetVariable3(enumUsage:29,nIndex:3,pbstrName:26,penumType:26,pbstrArrayDimensions:26,pbstrAtAddress:26,pbstrInitial:26,pbstrComment:26,pbRetained:26,pbPredefined:26,penTrigger:26,pbstrFBDefinition:26,pnStringSize:26):3;vtable=448;member=106",
+                      "ICXP_POUHeadDoc2.InsertVariable3(enumUsage:29,nIndex:3,bstrName:8,enumType:29,bstrArrayDimensions:8,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3,bPredefined:3,enTrigger:29,bstrFBDefinition:8,nStringSize:3):24;vtable=452;member=107",
+                      "ICXP_POUHeadDoc2.ValidateType2(bstrName:8,enumType:29,bST:3,enumUsage:29,bstrArrayDimensions:8,bstrAtAddress:8,bstrInitial:8,bstrFunctionBlock:8,bRetained:3,nStringSize:3,bstrError:26):3;vtable=456;member=108",
+                      "ICXP_POUHeadDoc2.ValidateArray2(bstrArrayDimensions:8,enUsage:29,enumType:29,bstrError:26):3;vtable=460;member=109",
+                      "ICXP_POUHeadDoc2.ValidateATAddress2(bstrAtAddress:26,enUsage:29,enumType:29,bstrArrayDimensions:8,bstrError:26):3;vtable=464;member=110",
+                      "ICXP_POUHeadDoc2.CanAddVariableForOnlineEdit2(enumUsage:29,bstrName:8,enumType:29,bstrArrayDimensions:8,bstrAtAddress:8,bstrInitial:8,bstrComment:8,bRetained:3,bPredefined:3,enTrigger:29,bstrFBDefinition:8,nStringSize:3):3;vtable=468;member=111",
+                      "ICXP_POUHeadDoc2.GetStructureMemorySize():3;vtable=472;member=112",
+                      "ICXP_POUHeadDoc2.GetStructureMemberOffset(bstrName:8,pnOffset:26,pbIsBool:26):3;vtable=476;member=113",
+                      "ICXP_POUHeadDoc2.GetOperandInfo(bstrPath:8,penumUsage:26,penumType:26,pbstrFBDefinition:26):3;vtable=480;member=114",
+                      "ICXP_POUHeadDoc2.IsValidStructureDefinition(bstrDefinitionName:8):3;vtable=484;member=115",
+                      "ICXP_POUHeadDoc2.UpdateStructureDefinition(bstrDefinitionName:8):24;vtable=488;member=116",
+                      "ICXP_POUHeadDoc2.IsIncludeStructureDefinition(bstrDefinitionName:8):3;vtable=492;member=117",
+                      "ICXP_POUHeadDoc2.GetStructureMemberNum(pnMemberNum:26):24;vtable=496;member=118",
+                      "ICXP_POUHeadDoc2.GetStructureMemberInfo(Index:3,MemberName:26,pbstrType:26,pnTypeArraySize:26,pbstrFBDefinition:26,pbstrComment:26):24;vtable=500;member=119"
+                  ],
+    "enums":  [
+                  {
+                      "Name":  "PH_CHANGE",
+                      "Members":  [
+                                      {
+                                          "Name":  "PH_VAR_ADD",
+                                          "Value":  0
+                                      },
+                                      {
+                                          "Name":  "PH_VAR_DELETE",
+                                          "Value":  1
+                                      },
+                                      {
+                                          "Name":  "PH_VAR_MODIFY",
+                                          "Value":  2
+                                      },
+                                      {
+                                          "Name":  "PH_VAR_DATATYPE",
+                                          "Value":  3
+                                      },
+                                      {
+                                          "Name":  "PH_CHANGE_END",
+                                          "Value":  4
+                                      }
+                                  ]
+                  },
+                  {
+                      "Name":  "PH_USAGE_VAR",
+                      "Members":  [
+                                      {
+                                          "Name":  "PH_INTERNAL",
+                                          "Value":  0
+                                      },
+                                      {
+                                          "Name":  "PH_INPUT",
+                                          "Value":  1
+                                      },
+                                      {
+                                          "Name":  "PH_OUTPUT",
+                                          "Value":  2
+                                      },
+                                      {
+                                          "Name":  "PH_INPUT_OUTPUT",
+                                          "Value":  3
+                                      },
+                                      {
+                                          "Name":  "PH_EXTERNAL",
+                                          "Value":  4
+                                      },
+                                      {
+                                          "Name":  "PH_STRUCTURE_MEMBERS",
+                                          "Value":  5
+                                      },
+                                      {
+                                          "Name":  "PH_USAGE_END",
+                                          "Value":  6
+                                      }
+                                  ]
+                  },
+                  {
+                      "Name":  "PH_SORT_FIELD",
+                      "Members":  [
+                                      {
+                                          "Name":  "PH_SORT_NAME",
+                                          "Value":  0
+                                      },
+                                      {
+                                          "Name":  "PH_SORT_TYPE",
+                                          "Value":  1
+                                      },
+                                      {
+                                          "Name":  "PH_SORT_ATADDRESS",
+                                          "Value":  2
+                                      },
+                                      {
+                                          "Name":  "PH_SORT_INIT",
+                                          "Value":  3
+                                      },
+                                      {
+                                          "Name":  "PH_SORT_RETAINED",
+                                          "Value":  4
+                                      },
+                                      {
+                                          "Name":  "PH_SORT_COMMENT",
+                                          "Value":  5
+                                      },
+                                      {
+                                          "Name":  "PH_SORT_FIELD_END",
+                                          "Value":  6
+                                      }
+                                  ]
+                  },
+                  {
+                      "Name":  "PH_SORT_DIRECTION",
+                      "Members":  [
+                                      {
+                                          "Name":  "PH_NO_SORT",
+                                          "Value":  0
+                                      },
+                                      {
+                                          "Name":  "PH_SORT_UP",
+                                          "Value":  1
+                                      },
+                                      {
+                                          "Name":  "PH_SORT_DOWN",
+                                          "Value":  2
+                                      },
+                                      {
+                                          "Name":  "PH_SORT_END",
+                                          "Value":  3
+                                      }
+                                  ]
+                  },
+                  {
+                      "Name":  "PH_TYPE",
+                      "Members":  [
+                                      {
+                                          "Name":  "PH_BOOL",
+                                          "Value":  0
+                                      },
+                                      {
+                                          "Name":  "PH_INT",
+                                          "Value":  1
+                                      },
+                                      {
+                                          "Name":  "PH_UINT",
+                                          "Value":  2
+                                      },
+                                      {
+                                          "Name":  "PH_DINT",
+                                          "Value":  3
+                                      },
+                                      {
+                                          "Name":  "PH_UDINT",
+                                          "Value":  4
+                                      },
+                                      {
+                                          "Name":  "PH_LINT",
+                                          "Value":  5
+                                      },
+                                      {
+                                          "Name":  "PH_ULINT",
+                                          "Value":  6
+                                      },
+                                      {
+                                          "Name":  "PH_WORD",
+                                          "Value":  7
+                                      },
+                                      {
+                                          "Name":  "PH_DWORD",
+                                          "Value":  8
+                                      },
+                                      {
+                                          "Name":  "PH_LWORD",
+                                          "Value":  9
+                                      },
+                                      {
+                                          "Name":  "PH_REAL",
+                                          "Value":  10
+                                      },
+                                      {
+                                          "Name":  "PH_LREAL",
+                                          "Value":  11
+                                      },
+                                      {
+                                          "Name":  "PH_COUNTER",
+                                          "Value":  12
+                                      },
+                                      {
+                                          "Name":  "PH_TIMER",
+                                          "Value":  13
+                                      },
+                                      {
+                                          "Name":  "PH_FUNCTION_BLOCK",
+                                          "Value":  14
+                                      },
+                                      {
+                                          "Name":  "PH_STRING",
+                                          "Value":  15
+                                      },
+                                      {
+                                          "Name":  "PH_STRUCTURE",
+                                          "Value":  16
+                                      },
+                                      {
+                                          "Name":  "PH_TYPE_END",
+                                          "Value":  17
+                                      }
+                                  ]
+                  },
+                  {
+                      "Name":  "PH_BASE",
+                      "Members":  [
+                                      {
+                                          "Name":  "PH_BR0",
+                                          "Value":  0
+                                      },
+                                      {
+                                          "Name":  "PH_BR1",
+                                          "Value":  1
+                                      },
+                                      {
+                                          "Name":  "PH_BR2",
+                                          "Value":  2
+                                      },
+                                      {
+                                          "Name":  "PH_BR3",
+                                          "Value":  3
+                                      },
+                                      {
+                                          "Name":  "PH_BR4",
+                                          "Value":  4
+                                      },
+                                      {
+                                          "Name":  "PH_BASE_END",
+                                          "Value":  5
+                                      }
+                                  ]
+                  },
+                  {
+                      "Name":  "PH_SEARCH_FIELD",
+                      "Members":  [
+                                      {
+                                          "Name":  "PH_SEARCH_NAME",
+                                          "Value":  0
+                                      },
+                                      {
+                                          "Name":  "PH_SEARCH_COMMENT",
+                                          "Value":  1
+                                      },
+                                      {
+                                          "Name":  "PH_SEARCH_ALL",
+                                          "Value":  2
+                                      },
+                                      {
+                                          "Name":  "PH_SEARCH_ADDRESS",
+                                          "Value":  3
+                                      }
+                                  ]
+                  },
+                  {
+                      "Name":  "PH_TRIGGER",
+                      "Members":  [
+                                      {
+                                          "Name":  "PH_NONE",
+                                          "Value":  0
+                                      },
+                                      {
+                                          "Name":  "PH_RISING",
+                                          "Value":  1
+                                      },
+                                      {
+                                          "Name":  "PH_FALLING",
+                                          "Value":  2
+                                      },
+                                      {
+                                          "Name":  "PH_END",
+                                          "Value":  3
+                                      }
+                                  ]
+                  }
+              ]
+}

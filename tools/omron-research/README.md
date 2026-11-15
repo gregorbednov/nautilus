@@ -6,6 +6,14 @@ a PLC. Keep original projects unchanged; use the generated copies for experiment
 
 ## Portable evidence audit
 
+`Read-CJ1TypeLibrary.ps1 -Binary PATH -ExpectedSHA256 HASH -Output NEW.json`
+reads embedded type-library enums and function signatures with system
+LoadTypeLibEx(REGKIND_NONE). It creates no vendor COM object and does not register
+the library. Use x86 Windows PowerShell for native x86 vtable offsets. Saved
+PHeadDoc/KBaseComp metadata and the reader snapshot under cxp/testdata corroborate
+PH_TYPE and nDATA_TYPE as separate enum domains; actual CX-P Ghidra exports link
+PH_TYPE to the source row. Existing output is never overwritten.
+
 `oracle` reconstructs the saved source cases, validates artifact hashes and
 compiler transcripts, and checks exact binary differences using repository
 fixtures only. See [its usage and evidence limits](oracle/README.md).

@@ -158,6 +158,43 @@ FBCALL operand must not be assumed to be the saved InstanceNum.
 
 ## Inspector and next qualification
 
+### Confirmed declaration types
+
+PHeadDoc.dll SHA256463eb4402bb6fa00453a5d7a745d77ced6be454d77aa2a683eb67de7e38ba71c
+contains the source declaration enum PH_TYPE. An x86 LoadTypeLibEx(REGKIND_NONE)
+read identifies BOOL0, INT1, UINT2, DINT3, UDINT4, LINT5, ULINT6, WORD7, DWORD8,
+LWORD9, REAL10, LREAL11, COUNTER12, TIMER13, FUNCTION_BLOCK14, STRING15 and
+STRUCTURE16;17 is the sentinel. No vendor COM object is created or registered.
+The separate KBaseComp type library confirms native nDATA_TYPE bitmasks: BOOL1,
+INT2, UINT4, WORD8, TIMER65536. Ordinal source codes cannot be passed directly
+to native instruction methods. Naming all17 source types does not enable their
+native lowering.
+
+Actual Ghidra analysis of pinned CX-P.exe e91f15b8613e56c8f326bc83ce07f5a24b177f5f70a4a445e4eadfa34b0a9eb4
+links the enum to file data:124895a0 invokes ICXP_POUHeadDoc2::GetItem3 through
+vtable offset0x1b0 (432 in the x86 type library), carrying penumType into the row
+constructor1248a3b0. The constructor stores it at record+0x10. Row writer1248a560
+emits that field as the third column after usage and name; parser1248ab80 reads
+the same slot. Thus original PV/PN code1 means INT; IN/OUT code0 means BOOL and
+TIMER_1/2 code13 means TIMER. Usage3/4 is swapped by the CXP boundary; current
+call planning rejects both, and this enum evidence does not enable INOUT.
+
+`cxp.FBTypeName` identifies known codes while retaining the original numeric
+value. `fbcode.ScalarTransferForPin` now derives supported scalar transfer types
+from that identity, ignoring cached display names, and checks exact bindings.
+All176 native scalar observations exercise the bridge. The full27-container
+source-pin comparison now has no manual type map; FBICALL and invocation-option
+selection are still explicit test controls. Complete graph compilation, project
+type/range checks and allocation remain open.
+
+Metadata/reader snapshots and three raw Ghidra exports are preserved under
+cxp/testdata/phead-typelib.json, kbase-typelib.json, typelib-reader.ps1 and
+pou-*-ghidra.json.gz. Tests pin hashes, engine/source provenance, enum names and
+GetItem3's slot. Numeric type names appear in inspect-fb-call; the report's
+declarationTypesIdentified flag describes identity only. compiled and full
+typeCodesQualified remain false. GUI inspection was unavailable because the
+node helper failed before initialization; none of this proof relies on GUI.
+
 ### Source call planning
 
 `cxp.Document.PlanFBCall` and `naut omron inspect-fb-call -program PATH -rung
@@ -177,11 +214,11 @@ Local-over-global source bindings supply #100, #100,4.14 and W1.01; LD ON resolv
 to W1.00. Saved source identifiers supply instance0 and definition TaskID1024.
 No signedness or native nDATA_TYPE conversion is inferred from PouVarList.
 
-A fixture-specific transport test feeds the plan into the previously qualified
-scalar/frame primitives. With explicit transport controls for the observed
-type0/type1 cases and an explicit FBICALL recipe, all27 containers, including
-the LD before the call, match both saved N1 fixtures. This is a controlled bridge
-test, not a production declaration-type mapping or complete source compiler.
+A source-plan test feeds the plan into the previously qualified scalar/frame
+primitives. Its initial explicit transport controls for type0/type1 have now
+been replaced by the confirmed PH_TYPE bridge above. With an explicit FBICALL
+recipe, all27 containers, including the LD before the call, match both saved N1
+fixtures. This remains a controlled bridge test, not a complete source compiler.
 The CLI reports compiled=false and typeCodesQualified=false. Corrupt geometry,
 stale versions, count mismatches, aliases and unsupported metadata have negative
 tests; cell ordering and source edits have separate regression tests.

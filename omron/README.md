@@ -11,6 +11,10 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   by row to declaration order, resolves source symbols and correlates the saved
   global instance/definition/version. Numeric declaration types remain raw;
   this is source planning, not graph compilation or memory allocation.
+  PH_TYPE identities are now confirmed from PHeadDoc metadata and the actual
+  CX-P serialization chain: BOOL0, INT1, UINT2, WORD7, TIMER13. Known codes have
+  a display name; unknown codes remain raw. Identifying a type does not qualify
+  all its operations or complete project-level typing.
 * `il`: independent lexical instruction model: source spelling, mnemonic,
   leading `@`/`%`, decimal function label and opaque operands (including quoted
   text). `inspect` exposes parsed instructions and source-located syntax errors;
@@ -60,12 +64,14 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   BLINK instances match complete runtime buffers. See [FB evidence and limits](../docs/design/omron-fb-format.md).
 * `internal/fbcode`: qualified invocation postamble operations and a frame
   assembler for already encoded/allocated transfer instructions. It matches all
-  26 containers of the saved BLINK call, but does not lower CXP operands or graph
-  pins and is not enabled by the source compiler.
+  26 containers of the saved BLINK call and is not enabled by the source compiler.
   Scalar BOOL/WORD/UINT/INT input/output transfers can now be generated from
   typed source operands, verified against176 new native observations. The full
-  call test uses generated transfers; FBICALL selection and port order remain
-  explicit, with no CXP graph/type/allocation integration yet.
+  call test uses generated transfers. Source planning now supplies port order.
+  `ScalarTransferForPin` now derives BOOL/INT/UINT/WORD from source declarations
+  and checks scalar binding metadata. The27-container LD+BLINK test no longer
+  supplies a manual transport-type map. FBICALL construction and caller-state
+  choice remain explicit controls; the full source compiler is still unchanged.
 
 **There is no full-project CJ1 executable compiler or deploy command yet.** Import
 bundles are source/research artifacts, not runnable Nautilus projects. The full

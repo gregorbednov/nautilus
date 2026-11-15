@@ -1,0 +1,1473 @@
+﻿{
+    "schemaVersion":  1,
+    "method":  "oleaut32-LoadTypeLibEx-REGKIND_NONE",
+    "sourceSHA256":  "8ab6abdd01a4928a3ec0a5f7d235e1b2a658a47a17e8407fe53ba538554b261f",
+    "sourceName":  "KBaseComp.dll",
+    "pointerBytes":  4,
+    "vendorObjectCreated":  false,
+    "typeNames":  [
+                      "CXP_Variable2:TKIND_COCLASS",
+                      "ICXP_Variable2:TKIND_DISPATCH",
+                      "nDATA_TYPE:TKIND_ENUM",
+                      "CXP_VariableCollection2:TKIND_COCLASS",
+                      "ICXP_VariableCollection2:TKIND_DISPATCH",
+                      "CXP_InstanceObject2:TKIND_COCLASS",
+                      "ICXP_InstanceObject2:TKIND_DISPATCH",
+                      "_ICXP_KBasePLCEvents2:TKIND_DISPATCH",
+                      "CXP_KBaseComp2:TKIND_COCLASS",
+                      "ICXP_KBaseComp2:TKIND_DISPATCH",
+                      "PLC_INSTRUCTIONS:TKIND_ENUM",
+                      "ePROG_TYPE:TKIND_ENUM",
+                      "eVALID_INST:TKIND_ENUM"
+                  ],
+    "functions":  [
+                      "ICXP_Variable2.QueryInterface(riid:26,ppvObj:26):24;vtable=0;member=1610612736",
+                      "ICXP_Variable2.AddRef():19;vtable=4;member=1610612737",
+                      "ICXP_Variable2.Release():19;vtable=8;member=1610612738",
+                      "ICXP_Variable2.GetTypeInfoCount(pctinfo:26):24;vtable=12;member=1610678272",
+                      "ICXP_Variable2.GetTypeInfo(itinfo:23,lcid:19,pptinfo:26):24;vtable=16;member=1610678273",
+                      "ICXP_Variable2.GetIDsOfNames(riid:26,rgszNames:26,cNames:23,lcid:19,rgdispid:26):24;vtable=20;member=1610678274",
+                      "ICXP_Variable2.Invoke(dispidMember:3,riid:26,lcid:19,wFlags:18,pdispparams:26,pvarResult:26,pexcepinfo:26,puArgErr:26):24;vtable=24;member=1610678275",
+                      "ICXP_Variable2.Address():8;vtable=28;member=1",
+                      "ICXP_Variable2.Address(?:8):24;vtable=32;member=1",
+                      "ICXP_Variable2.Type():29;vtable=36;member=2",
+                      "ICXP_Variable2.Type(?:29):24;vtable=40;member=2",
+                      "ICXP_Variable2.Found():3;vtable=44;member=3",
+                      "ICXP_Variable2.Found(?:3):24;vtable=48;member=3",
+                      "ICXP_Variable2.DataSize():3;vtable=52;member=4",
+                      "ICXP_Variable2.DataSize(?:3):24;vtable=56;member=4",
+                      "ICXP_Variable2.StructSize():3;vtable=60;member=5",
+                      "ICXP_Variable2.StructSize(?:3):24;vtable=64;member=5",
+                      "ICXP_Variable2.StructArraySize():3;vtable=68;member=6",
+                      "ICXP_Variable2.StructArraySize(?:3):24;vtable=72;member=6",
+                      "ICXP_VariableCollection2.QueryInterface(riid:26,ppvObj:26):24;vtable=0;member=1610612736",
+                      "ICXP_VariableCollection2.AddRef():19;vtable=4;member=1610612737",
+                      "ICXP_VariableCollection2.Release():19;vtable=8;member=1610612738",
+                      "ICXP_VariableCollection2.GetTypeInfoCount(pctinfo:26):24;vtable=12;member=1610678272",
+                      "ICXP_VariableCollection2.GetTypeInfo(itinfo:23,lcid:19,pptinfo:26):24;vtable=16;member=1610678273",
+                      "ICXP_VariableCollection2.GetIDsOfNames(riid:26,rgszNames:26,cNames:23,lcid:19,rgdispid:26):24;vtable=20;member=1610678274",
+                      "ICXP_VariableCollection2.Invoke(dispidMember:3,riid:26,lcid:19,wFlags:18,pdispparams:26,pvarResult:26,pexcepinfo:26,puArgErr:26):24;vtable=24;member=1610678275",
+                      "ICXP_VariableCollection2.Item(lIndex:3):26;vtable=28;member=0",
+                      "ICXP_VariableCollection2.Add(pVariable:26):24;vtable=32;member=1",
+                      "ICXP_VariableCollection2.Count():3;vtable=36;member=2",
+                      "ICXP_VariableCollection2.Remove(lIndex:3):24;vtable=40;member=3",
+                      "ICXP_VariableCollection2.RemoveAll():24;vtable=44;member=4",
+                      "ICXP_VariableCollection2._NewEnum():13;vtable=48;member=-4",
+                      "ICXP_InstanceObject2.QueryInterface(riid:26,ppvObj:26):24;vtable=0;member=1610612736",
+                      "ICXP_InstanceObject2.AddRef():19;vtable=4;member=1610612737",
+                      "ICXP_InstanceObject2.Release():19;vtable=8;member=1610612738",
+                      "ICXP_InstanceObject2.GetTypeInfoCount(pctinfo:26):24;vtable=12;member=1610678272",
+                      "ICXP_InstanceObject2.GetTypeInfo(itinfo:23,lcid:19,pptinfo:26):24;vtable=16;member=1610678273",
+                      "ICXP_InstanceObject2.GetIDsOfNames(riid:26,rgszNames:26,cNames:23,lcid:19,rgdispid:26):24;vtable=20;member=1610678274",
+                      "ICXP_InstanceObject2.Invoke(dispidMember:3,riid:26,lcid:19,wFlags:18,pdispparams:26,pvarResult:26,pexcepinfo:26,puArgErr:26):24;vtable=24;member=1610678275",
+                      "ICXP_InstanceObject2.BodyNumber():8;vtable=28;member=1",
+                      "ICXP_InstanceObject2.BodyNumber(?:8):24;vtable=32;member=1",
+                      "ICXP_InstanceObject2.InstanceNumber():8;vtable=36;member=2",
+                      "ICXP_InstanceObject2.InstanceNumber(?:8):24;vtable=40;member=2",
+                      "ICXP_InstanceObject2.InputVariables():26;vtable=44;member=3",
+                      "ICXP_InstanceObject2.InputVariables(?:26):24;vtable=48;member=3",
+                      "ICXP_InstanceObject2.OutputVariables():26;vtable=52;member=4",
+                      "ICXP_InstanceObject2.OutputVariables(?:26):24;vtable=56;member=4",
+                      "ICXP_InstanceObject2.InputOutputVariables():26;vtable=60;member=5",
+                      "ICXP_InstanceObject2.InputOutputVariables(?:26):24;vtable=64;member=5",
+                      "ICXP_KBaseComp2.QueryInterface(riid:26,ppvObj:26):24;vtable=0;member=1610612736",
+                      "ICXP_KBaseComp2.AddRef():19;vtable=4;member=1610612737",
+                      "ICXP_KBaseComp2.Release():19;vtable=8;member=1610612738",
+                      "ICXP_KBaseComp2.GetTypeInfoCount(pctinfo:26):24;vtable=12;member=1610678272",
+                      "ICXP_KBaseComp2.GetTypeInfo(itinfo:23,lcid:19,pptinfo:26):24;vtable=16;member=1610678273",
+                      "ICXP_KBaseComp2.GetIDsOfNames(riid:26,rgszNames:26,cNames:23,lcid:19,rgdispid:26):24;vtable=20;member=1610678274",
+                      "ICXP_KBaseComp2.Invoke(dispidMember:3,riid:26,lcid:19,wFlags:18,pdispparams:26,pvarResult:26,pexcepinfo:26,puArgErr:26):24;vtable=24;member=1610678275",
+                      "ICXP_KBaseComp2.Initialise(bstrPLC:8,bstrCPU:8):3;vtable=28;member=1",
+                      "ICXP_KBaseComp2.GetInstructionName(nType:22):8;vtable=32;member=2",
+                      "ICXP_KBaseComp2.GetIECInstructionList():8;vtable=36;member=3",
+                      "ICXP_KBaseComp2.GetNearestLadderInstruction(bFunctionBlock:3,bstrName:8,pbstrInstructionName:26):24;vtable=40;member=4",
+                      "ICXP_KBaseComp2.GetInstructionInfo(bFunctionBlock:3,pbstrName:26,plOperands:26,plInputs:26,pbLD:26,pbAND:26,pbOR:26,pbRung:26,pbRight:26):3;vtable=44;member=5",
+                      "ICXP_KBaseComp2.GetEquivalentSLForContact(pbstrName:26,bNegated:3,bstrAttributes:8,bLD:3,bAND:3,bOR:3,bRung:3,bRight:3,bOut:3,plStack:26):3;vtable=48;member=6",
+                      "ICXP_KBaseComp2.GetEquivalentSLForCoil(pbstrName:26,bNegated:3,bstrAttributes:8,bLD:3,bAND:3,bOR:3,bRung:3,bRight:3,bOut:3,plStack:26):3;vtable=52;member=7",
+                      "ICXP_KBaseComp2.GetEquivalentSLForInstruction(bFunctionBlock:3,pbstrName:26,bstrAttributes:8,bLD:3,bAND:3,bOR:3,bRung:3,bRight:3,bOut:3,plStack:26):3;vtable=56;member=8",
+                      "ICXP_KBaseComp2.GetNumberOfTRbits():3;vtable=60;member=9",
+                      "ICXP_KBaseComp2.GetStackSize():3;vtable=64;member=10",
+                      "ICXP_KBaseComp2.GetExternalSymbols(pbstrDataString:26):3;vtable=68;member=11",
+                      "ICXP_KBaseComp2.GetMnemonic(enumInstruction:29,bstrParam:8,pbstrWarnings:26,pbstrErrors:26):8;vtable=72;member=12",
+                      "ICXP_KBaseComp2.Dummy(enumDataType:29,enumNDataType:29):24;vtable=76;member=13",
+                      "ICXP_KBaseComp2.ShowFindInstructionDlg(enumProgType:29,pbOK:26,pbstrInstructionName:26):24;vtable=80;member=14",
+                      "ICXP_KBaseComp2.GetInstructionOperandInfo(enumProgType:29,bstrInstruction:8,lOperand:3,bstrOperandInput:8,pbstrDescription:26,pbstrMemoryRange:26,pbstrErrorStatus:26):24;vtable=84;member=15",
+                      "ICXP_KBaseComp2.ValidateInstructionOperandType(bstrInstructionName:8,bstrOperandType:8,lOperandNumber:3,lArraySize:3,lArrayIndex:3,lStructureSize:3,pbValidOnPLC:26):3;vtable=88;member=16",
+                      "ICXP_KBaseComp2.ValidateInstructionOperand(bstrInstructionName:8,bstrOperand:8,lOperandNumber:3,pbWriteError:26):3;vtable=92;member=17",
+                      "ICXP_KBaseComp2.IsInstructionOperandWrittenTo(bstrInstructionName:8,lOperandNumber:3):3;vtable=96;member=18",
+                      "ICXP_KBaseComp2.GetInstructionDescription(bstrName:8):8;vtable=100;member=19",
+                      "ICXP_KBaseComp2.GetDefaultDataType(bstrInstructionName:8,lOperandNumber:3):8;vtable=104;member=20",
+                      "ICXP_KBaseComp2.ValidateInstruction(bstrInstructionName:8,pbstrValidPrefix:26):29;vtable=108;member=21",
+                      "ICXP_KBaseComp2.GetMemoryRange(bRead:3,enumDataType:29,lArraySize:3):8;vtable=112;member=22",
+                      "ICXP_KBaseComp2.Validate_AT_MemoryAddress(bRead:3,enumDataType:29,lArraySize:3,pbstrAddress:26):3;vtable=116;member=23",
+                      "ICXP_KBaseComp2.GetCommentInstructionName(pbstrCommentName:26):24;vtable=120;member=24",
+                      "ICXP_KBaseComp2.ShowInstructionHelp(bstrInstructionName:8):24;vtable=124;member=25",
+                      "ICXP_KBaseComp2.CreateFBInvocationCode(pIInstanceObject:13,enumContext:29):8;vtable=128;member=26",
+                      "ICXP_KBaseComp2.SetTimerCounterModeBinary(bBinary:3):24;vtable=132;member=27",
+                      "ICXP_KBaseComp2.GetNumberOfOperands(bstrMnemonic:8):3;vtable=136;member=28",
+                      "ICXP_KBaseComp2.ValidateInstructionOperands(bstrMnemonic:8,bstrOperands:8,bstrErrMsg:26,bstrWrnMsg:26):24;vtable=140;member=29",
+                      "ICXP_KBaseComp2.SetStringVarInOutAddresses(bstrVarInOutAddresses:8):24;vtable=144;member=30"
+                  ],
+    "enums":  [
+                  {
+                      "Name":  "nDATA_TYPE",
+                      "Members":  [
+                                      {
+                                          "Name":  "nDT_BOOL",
+                                          "Value":  1
+                                      },
+                                      {
+                                          "Name":  "nDT_INT",
+                                          "Value":  2
+                                      },
+                                      {
+                                          "Name":  "nDT_UINT",
+                                          "Value":  4
+                                      },
+                                      {
+                                          "Name":  "nDT_WORD",
+                                          "Value":  8
+                                      },
+                                      {
+                                          "Name":  "nDT_DINT",
+                                          "Value":  16
+                                      },
+                                      {
+                                          "Name":  "nDT_UDINT",
+                                          "Value":  32
+                                      },
+                                      {
+                                          "Name":  "nDT_DWORD",
+                                          "Value":  64
+                                      },
+                                      {
+                                          "Name":  "nDT_LINT",
+                                          "Value":  128
+                                      },
+                                      {
+                                          "Name":  "nDT_ULINT",
+                                          "Value":  256
+                                      },
+                                      {
+                                          "Name":  "nDT_LWORD",
+                                          "Value":  512
+                                      },
+                                      {
+                                          "Name":  "nDT_REAL",
+                                          "Value":  1024
+                                      },
+                                      {
+                                          "Name":  "nDT_LREAL",
+                                          "Value":  2048
+                                      },
+                                      {
+                                          "Name":  "nDT_STRING",
+                                          "Value":  4096
+                                      },
+                                      {
+                                          "Name":  "nDT_NUMBER",
+                                          "Value":  8192
+                                      },
+                                      {
+                                          "Name":  "nDT_SAME",
+                                          "Value":  16384
+                                      },
+                                      {
+                                          "Name":  "nDT_BIGGER",
+                                          "Value":  32768
+                                      },
+                                      {
+                                          "Name":  "nDT_TIMER",
+                                          "Value":  65536
+                                      },
+                                      {
+                                          "Name":  "nDT_COUNTER",
+                                          "Value":  131072
+                                      },
+                                      {
+                                          "Name":  "nDT_CORRECT",
+                                          "Value":  262144
+                                      },
+                                      {
+                                          "Name":  "nDT_ARRAY",
+                                          "Value":  524288
+                                      },
+                                      {
+                                          "Name":  "nDT_EN",
+                                          "Value":  1048576
+                                      },
+                                      {
+                                          "Name":  "nDT_ENO",
+                                          "Value":  2097152
+                                      },
+                                      {
+                                          "Name":  "nDT_ARRAY_LEN",
+                                          "Value":  4194304
+                                      },
+                                      {
+                                          "Name":  "nDT_LITERAL",
+                                          "Value":  8388608
+                                      },
+                                      {
+                                          "Name":  "nDT_INDIRECT",
+                                          "Value":  16777216
+                                      },
+                                      {
+                                          "Name":  "nDT_ADDRESS",
+                                          "Value":  33554432
+                                      },
+                                      {
+                                          "Name":  "nDT_STRUCT",
+                                          "Value":  67108864
+                                      },
+                                      {
+                                          "Name":  "nDT_STRUCT_ARRAY",
+                                          "Value":  134217728
+                                      },
+                                      {
+                                          "Name":  "nDT_STRUCTINFO",
+                                          "Value":  268435456
+                                      },
+                                      {
+                                          "Name":  "nDT_STRUCT_MEM_INDIRECT_OFFSET",
+                                          "Value":  536870912
+                                      }
+                                  ]
+                  },
+                  {
+                      "Name":  "PLC_INSTRUCTIONS",
+                      "Members":  [
+                                      {
+                                          "Name":  "PLC_ABS",
+                                          "Value":  0
+                                      },
+                                      {
+                                          "Name":  "PLC_ACOS",
+                                          "Value":  1
+                                      },
+                                      {
+                                          "Name":  "PLC_ADD",
+                                          "Value":  2
+                                      },
+                                      {
+                                          "Name":  "PLC_ALOG",
+                                          "Value":  3
+                                      },
+                                      {
+                                          "Name":  "PLC_AND",
+                                          "Value":  4
+                                      },
+                                      {
+                                          "Name":  "PLC_ASIN",
+                                          "Value":  5
+                                      },
+                                      {
+                                          "Name":  "PLC_ASSIGN",
+                                          "Value":  6
+                                      },
+                                      {
+                                          "Name":  "PLC_ASSIGN_NUM_TO_DINT",
+                                          "Value":  7
+                                      },
+                                      {
+                                          "Name":  "PLC_ASSIGN_NUM_TO_INT",
+                                          "Value":  8
+                                      },
+                                      {
+                                          "Name":  "PLC_ASSIGN_NUM_TO_LINT",
+                                          "Value":  9
+                                      },
+                                      {
+                                          "Name":  "PLC_ASSIGN_TO_DINT",
+                                          "Value":  10
+                                      },
+                                      {
+                                          "Name":  "PLC_ASSIGN_TO_LINT",
+                                          "Value":  11
+                                      },
+                                      {
+                                          "Name":  "PLC_ATAN",
+                                          "Value":  12
+                                      },
+                                      {
+                                          "Name":  "PLC_BOOL_TO_DINT",
+                                          "Value":  13
+                                      },
+                                      {
+                                          "Name":  "PLC_BOOL_TO_DWORD",
+                                          "Value":  14
+                                      },
+                                      {
+                                          "Name":  "PLC_BOOL_TO_INT",
+                                          "Value":  15
+                                      },
+                                      {
+                                          "Name":  "PLC_BOOL_TO_LINT",
+                                          "Value":  16
+                                      },
+                                      {
+                                          "Name":  "PLC_BOOL_TO_LREAL",
+                                          "Value":  17
+                                      },
+                                      {
+                                          "Name":  "PLC_BOOL_TO_LWORD",
+                                          "Value":  18
+                                      },
+                                      {
+                                          "Name":  "PLC_BOOL_TO_REAL",
+                                          "Value":  19
+                                      },
+                                      {
+                                          "Name":  "PLC_BOOL_TO_UDINT",
+                                          "Value":  20
+                                      },
+                                      {
+                                          "Name":  "PLC_BOOL_TO_UINT",
+                                          "Value":  21
+                                      },
+                                      {
+                                          "Name":  "PLC_BOOL_TO_ULINT",
+                                          "Value":  22
+                                      },
+                                      {
+                                          "Name":  "PLC_BOOL_TO_WORD",
+                                          "Value":  23
+                                      },
+                                      {
+                                          "Name":  "PLC_CONCAT",
+                                          "Value":  24
+                                      },
+                                      {
+                                          "Name":  "PLC_CONDITIONAL_JUMP",
+                                          "Value":  25
+                                      },
+                                      {
+                                          "Name":  "PLC_CONDITIONAL_JUMP_END",
+                                          "Value":  26
+                                      },
+                                      {
+                                          "Name":  "PLC_CONDITIONAL_JUMP_NOT",
+                                          "Value":  27
+                                      },
+                                      {
+                                          "Name":  "PLC_CONDITIONAL_JUMP_NOT_END",
+                                          "Value":  28
+                                      },
+                                      {
+                                          "Name":  "PLC_COS",
+                                          "Value":  29
+                                      },
+                                      {
+                                          "Name":  "PLC_DEC",
+                                          "Value":  30
+                                      },
+                                      {
+                                          "Name":  "PLC_DEG",
+                                          "Value":  31
+                                      },
+                                      {
+                                          "Name":  "PLC_DELETE",
+                                          "Value":  32
+                                      },
+                                      {
+                                          "Name":  "PLC_DINT_TO_BCD_DWORD",
+                                          "Value":  33
+                                      },
+                                      {
+                                          "Name":  "PLC_DINT_TO_BCD_WORD",
+                                          "Value":  34
+                                      },
+                                      {
+                                          "Name":  "PLC_DINT_TO_BOOL",
+                                          "Value":  35
+                                      },
+                                      {
+                                          "Name":  "PLC_DINT_TO_DWORD",
+                                          "Value":  36
+                                      },
+                                      {
+                                          "Name":  "PLC_DINT_TO_INT",
+                                          "Value":  37
+                                      },
+                                      {
+                                          "Name":  "PLC_DINT_TO_LINT",
+                                          "Value":  38
+                                      },
+                                      {
+                                          "Name":  "PLC_DINT_TO_LREAL",
+                                          "Value":  39
+                                      },
+                                      {
+                                          "Name":  "PLC_DINT_TO_LWORD",
+                                          "Value":  40
+                                      },
+                                      {
+                                          "Name":  "PLC_DINT_TO_REAL",
+                                          "Value":  41
+                                      },
+                                      {
+                                          "Name":  "PLC_DINT_TO_STRING",
+                                          "Value":  42
+                                      },
+                                      {
+                                          "Name":  "PLC_DINT_TO_UDINT",
+                                          "Value":  43
+                                      },
+                                      {
+                                          "Name":  "PLC_DINT_TO_UINT",
+                                          "Value":  44
+                                      },
+                                      {
+                                          "Name":  "PLC_DINT_TO_ULINT",
+                                          "Value":  45
+                                      },
+                                      {
+                                          "Name":  "PLC_DINT_TO_WORD",
+                                          "Value":  46
+                                      },
+                                      {
+                                          "Name":  "PLC_DIV",
+                                          "Value":  47
+                                      },
+                                      {
+                                          "Name":  "PLC_DSHL",
+                                          "Value":  48
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_BCD_TO_DINT",
+                                          "Value":  49
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_BCD_TO_INT",
+                                          "Value":  50
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_BCD_TO_UDINT",
+                                          "Value":  51
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_BCD_TO_UINT",
+                                          "Value":  52
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_BCD_TO_ULINT",
+                                          "Value":  53
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_TO_BOOL",
+                                          "Value":  54
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_TO_DINT",
+                                          "Value":  55
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_TO_INT",
+                                          "Value":  56
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_TO_LINT",
+                                          "Value":  57
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_TO_LREAL",
+                                          "Value":  58
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_TO_LWORD",
+                                          "Value":  59
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_TO_REAL",
+                                          "Value":  60
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_TO_STRING",
+                                          "Value":  61
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_TO_UDINT",
+                                          "Value":  62
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_TO_UINT",
+                                          "Value":  63
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_TO_ULINT",
+                                          "Value":  64
+                                      },
+                                      {
+                                          "Name":  "PLC_DWORD_TO_WORD",
+                                          "Value":  65
+                                      },
+                                      {
+                                          "Name":  "PLC_ELSE",
+                                          "Value":  66
+                                      },
+                                      {
+                                          "Name":  "PLC_ELSEIF",
+                                          "Value":  67
+                                      },
+                                      {
+                                          "Name":  "PLC_ENDIF",
+                                          "Value":  68
+                                      },
+                                      {
+                                          "Name":  "PLC_EQ",
+                                          "Value":  69
+                                      },
+                                      {
+                                          "Name":  "PLC_EQ1",
+                                          "Value":  70
+                                      },
+                                      {
+                                          "Name":  "PLC_EXP",
+                                          "Value":  71
+                                      },
+                                      {
+                                          "Name":  "PLC_EXPT",
+                                          "Value":  72
+                                      },
+                                      {
+                                          "Name":  "PLC_FIND",
+                                          "Value":  73
+                                      },
+                                      {
+                                          "Name":  "PLC_FORMAT_STRING",
+                                          "Value":  74
+                                      },
+                                      {
+                                          "Name":  "PLC_GE",
+                                          "Value":  75
+                                      },
+                                      {
+                                          "Name":  "PLC_GT",
+                                          "Value":  76
+                                      },
+                                      {
+                                          "Name":  "PLC_IF",
+                                          "Value":  77
+                                      },
+                                      {
+                                          "Name":  "PLC_IF_ELSE",
+                                          "Value":  78
+                                      },
+                                      {
+                                          "Name":  "PLC_IF_ELSEIF",
+                                          "Value":  79
+                                      },
+                                      {
+                                          "Name":  "PLC_INSERT",
+                                          "Value":  80
+                                      },
+                                      {
+                                          "Name":  "PLC_INT_TO_BCD_DWORD",
+                                          "Value":  81
+                                      },
+                                      {
+                                          "Name":  "PLC_INT_TO_BCD_WORD",
+                                          "Value":  82
+                                      },
+                                      {
+                                          "Name":  "PLC_INT_TO_BOOL",
+                                          "Value":  83
+                                      },
+                                      {
+                                          "Name":  "PLC_INT_TO_DINT",
+                                          "Value":  84
+                                      },
+                                      {
+                                          "Name":  "PLC_INT_TO_DWORD",
+                                          "Value":  85
+                                      },
+                                      {
+                                          "Name":  "PLC_INT_TO_LINT",
+                                          "Value":  86
+                                      },
+                                      {
+                                          "Name":  "PLC_INT_TO_LREAL",
+                                          "Value":  87
+                                      },
+                                      {
+                                          "Name":  "PLC_INT_TO_LWORD",
+                                          "Value":  88
+                                      },
+                                      {
+                                          "Name":  "PLC_INT_TO_REAL",
+                                          "Value":  89
+                                      },
+                                      {
+                                          "Name":  "PLC_INT_TO_STRING",
+                                          "Value":  90
+                                      },
+                                      {
+                                          "Name":  "PLC_INT_TO_UDINT",
+                                          "Value":  91
+                                      },
+                                      {
+                                          "Name":  "PLC_INT_TO_UINT",
+                                          "Value":  92
+                                      },
+                                      {
+                                          "Name":  "PLC_INT_TO_ULINT",
+                                          "Value":  93
+                                      },
+                                      {
+                                          "Name":  "PLC_INT_TO_WORD",
+                                          "Value":  94
+                                      },
+                                      {
+                                          "Name":  "PLC_JUMP",
+                                          "Value":  95
+                                      },
+                                      {
+                                          "Name":  "PLC_JUMPEND",
+                                          "Value":  96
+                                      },
+                                      {
+                                          "Name":  "PLC_LE",
+                                          "Value":  97
+                                      },
+                                      {
+                                          "Name":  "PLC_LEFT",
+                                          "Value":  98
+                                      },
+                                      {
+                                          "Name":  "PLC_LEN",
+                                          "Value":  99
+                                      },
+                                      {
+                                          "Name":  "PLC_LIMIT",
+                                          "Value":  100
+                                      },
+                                      {
+                                          "Name":  "PLC_LINT_TO_BOOL",
+                                          "Value":  101
+                                      },
+                                      {
+                                          "Name":  "PLC_LINT_TO_DINT",
+                                          "Value":  102
+                                      },
+                                      {
+                                          "Name":  "PLC_LINT_TO_DWORD",
+                                          "Value":  103
+                                      },
+                                      {
+                                          "Name":  "PLC_LINT_TO_INT",
+                                          "Value":  104
+                                      },
+                                      {
+                                          "Name":  "PLC_LINT_TO_LREAL",
+                                          "Value":  105
+                                      },
+                                      {
+                                          "Name":  "PLC_LINT_TO_LWORD",
+                                          "Value":  106
+                                      },
+                                      {
+                                          "Name":  "PLC_LINT_TO_REAL",
+                                          "Value":  107
+                                      },
+                                      {
+                                          "Name":  "PLC_LINT_TO_STRING",
+                                          "Value":  108
+                                      },
+                                      {
+                                          "Name":  "PLC_LINT_TO_UDINT",
+                                          "Value":  109
+                                      },
+                                      {
+                                          "Name":  "PLC_LINT_TO_UINT",
+                                          "Value":  110
+                                      },
+                                      {
+                                          "Name":  "PLC_LINT_TO_ULINT",
+                                          "Value":  111
+                                      },
+                                      {
+                                          "Name":  "PLC_LINT_TO_WORD",
+                                          "Value":  112
+                                      },
+                                      {
+                                          "Name":  "PLC_LN",
+                                          "Value":  113
+                                      },
+                                      {
+                                          "Name":  "PLC_LOG",
+                                          "Value":  114
+                                      },
+                                      {
+                                          "Name":  "PLC_LOGICAL_AND",
+                                          "Value":  115
+                                      },
+                                      {
+                                          "Name":  "PLC_LOGICAL_NOT",
+                                          "Value":  116
+                                      },
+                                      {
+                                          "Name":  "PLC_LOGICAL_OR",
+                                          "Value":  117
+                                      },
+                                      {
+                                          "Name":  "PLC_LREAL_TO_BOOL",
+                                          "Value":  118
+                                      },
+                                      {
+                                          "Name":  "PLC_LREAL_TO_DINT",
+                                          "Value":  119
+                                      },
+                                      {
+                                          "Name":  "PLC_LREAL_TO_INT",
+                                          "Value":  120
+                                      },
+                                      {
+                                          "Name":  "PLC_LREAL_TO_LINT",
+                                          "Value":  121
+                                      },
+                                      {
+                                          "Name":  "PLC_LREAL_TO_REAL",
+                                          "Value":  122
+                                      },
+                                      {
+                                          "Name":  "PLC_LREAL_TO_UDINT",
+                                          "Value":  123
+                                      },
+                                      {
+                                          "Name":  "PLC_LREAL_TO_UINT",
+                                          "Value":  124
+                                      },
+                                      {
+                                          "Name":  "PLC_LREAL_TO_ULINT",
+                                          "Value":  125
+                                      },
+                                      {
+                                          "Name":  "PLC_LT",
+                                          "Value":  126
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_BCD_TO_UDINT",
+                                          "Value":  127
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_BCD_TO_UINT",
+                                          "Value":  128
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_BCD_TO_ULINT",
+                                          "Value":  129
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_TO_BOOL",
+                                          "Value":  130
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_TO_DINT",
+                                          "Value":  131
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_TO_DWORD",
+                                          "Value":  132
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_TO_INT",
+                                          "Value":  133
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_TO_LINT",
+                                          "Value":  134
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_TO_LREAL",
+                                          "Value":  135
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_TO_REAL",
+                                          "Value":  136
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_TO_STRING",
+                                          "Value":  137
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_TO_UDINT",
+                                          "Value":  138
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_TO_UINT",
+                                          "Value":  139
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_TO_ULINT",
+                                          "Value":  140
+                                      },
+                                      {
+                                          "Name":  "PLC_LWORD_TO_WORD",
+                                          "Value":  141
+                                      },
+                                      {
+                                          "Name":  "PLC_MAX",
+                                          "Value":  142
+                                      },
+                                      {
+                                          "Name":  "PLC_MID",
+                                          "Value":  143
+                                      },
+                                      {
+                                          "Name":  "PLC_MIN",
+                                          "Value":  144
+                                      },
+                                      {
+                                          "Name":  "PLC_MOD",
+                                          "Value":  145
+                                      },
+                                      {
+                                          "Name":  "PLC_MOV",
+                                          "Value":  146
+                                      },
+                                      {
+                                          "Name":  "PLC_MOV1",
+                                          "Value":  147
+                                      },
+                                      {
+                                          "Name":  "PLC_MOVE",
+                                          "Value":  148
+                                      },
+                                      {
+                                          "Name":  "PLC_MUL",
+                                          "Value":  149
+                                      },
+                                      {
+                                          "Name":  "PLC_MUX",
+                                          "Value":  150
+                                      },
+                                      {
+                                          "Name":  "PLC_NE",
+                                          "Value":  151
+                                      },
+                                      {
+                                          "Name":  "PLC_NEG",
+                                          "Value":  152
+                                      },
+                                      {
+                                          "Name":  "PLC_NEG_NUM",
+                                          "Value":  153
+                                      },
+                                      {
+                                          "Name":  "PLC_NOT",
+                                          "Value":  154
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_CMND",
+                                          "Value":  155
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_CNTRX",
+                                          "Value":  156
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_CNTX",
+                                          "Value":  157
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_IORD",
+                                          "Value":  158
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_IOWR",
+                                          "Value":  159
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_PMCR",
+                                          "Value":  160
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_RECV",
+                                          "Value":  161
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_RXD",
+                                          "Value":  162
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_RXD_CPU",
+                                          "Value":  163
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_RXD_SCB",
+                                          "Value":  164
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_RXD_SCU",
+                                          "Value":  165
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_SEND",
+                                          "Value":  166
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_TIMHX",
+                                          "Value":  167
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_TIMUX",
+                                          "Value":  168
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_TIMX",
+                                          "Value":  169
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_TMHHX",
+                                          "Value":  170
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_TMUHX",
+                                          "Value":  171
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_TRSET",
+                                          "Value":  172
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_TTIMX",
+                                          "Value":  173
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_TWRIT_DOLLAR",
+                                          "Value":  174
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_TXD",
+                                          "Value":  175
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_TXD_CPU",
+                                          "Value":  176
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_TXD_SCB",
+                                          "Value":  177
+                                      },
+                                      {
+                                          "Name":  "PLC_OM_TXD_SCU",
+                                          "Value":  178
+                                      },
+                                      {
+                                          "Name":  "PLC_OR",
+                                          "Value":  179
+                                      },
+                                      {
+                                          "Name":  "PLC_RAD",
+                                          "Value":  180
+                                      },
+                                      {
+                                          "Name":  "PLC_REAL_TO_BOOL",
+                                          "Value":  181
+                                      },
+                                      {
+                                          "Name":  "PLC_REAL_TO_DINT",
+                                          "Value":  182
+                                      },
+                                      {
+                                          "Name":  "PLC_REAL_TO_INT",
+                                          "Value":  183
+                                      },
+                                      {
+                                          "Name":  "PLC_REAL_TO_LINT",
+                                          "Value":  184
+                                      },
+                                      {
+                                          "Name":  "PLC_REAL_TO_LREAL",
+                                          "Value":  185
+                                      },
+                                      {
+                                          "Name":  "PLC_REAL_TO_UDINT",
+                                          "Value":  186
+                                      },
+                                      {
+                                          "Name":  "PLC_REAL_TO_UINT",
+                                          "Value":  187
+                                      },
+                                      {
+                                          "Name":  "PLC_REAL_TO_ULINT",
+                                          "Value":  188
+                                      },
+                                      {
+                                          "Name":  "PLC_REPLACE",
+                                          "Value":  189
+                                      },
+                                      {
+                                          "Name":  "PLC_RIGHT",
+                                          "Value":  190
+                                      },
+                                      {
+                                          "Name":  "PLC_ROL",
+                                          "Value":  191
+                                      },
+                                      {
+                                          "Name":  "PLC_ROR",
+                                          "Value":  192
+                                      },
+                                      {
+                                          "Name":  "PLC_SEL",
+                                          "Value":  193
+                                      },
+                                      {
+                                          "Name":  "PLC_SHL",
+                                          "Value":  194
+                                      },
+                                      {
+                                          "Name":  "PLC_SHR",
+                                          "Value":  195
+                                      },
+                                      {
+                                          "Name":  "PLC_SIN",
+                                          "Value":  196
+                                      },
+                                      {
+                                          "Name":  "PLC_SQRT",
+                                          "Value":  197
+                                      },
+                                      {
+                                          "Name":  "PLC_STRING_TO_BCD_DWORD",
+                                          "Value":  198
+                                      },
+                                      {
+                                          "Name":  "PLC_STRING_TO_BCD_LWORD",
+                                          "Value":  199
+                                      },
+                                      {
+                                          "Name":  "PLC_STRING_TO_BCD_WORD",
+                                          "Value":  200
+                                      },
+                                      {
+                                          "Name":  "PLC_STRING_TO_DINT",
+                                          "Value":  201
+                                      },
+                                      {
+                                          "Name":  "PLC_STRING_TO_DWORD",
+                                          "Value":  202
+                                      },
+                                      {
+                                          "Name":  "PLC_STRING_TO_INT",
+                                          "Value":  203
+                                      },
+                                      {
+                                          "Name":  "PLC_STRING_TO_LINT",
+                                          "Value":  204
+                                      },
+                                      {
+                                          "Name":  "PLC_STRING_TO_LREAL",
+                                          "Value":  205
+                                      },
+                                      {
+                                          "Name":  "PLC_STRING_TO_LWORD",
+                                          "Value":  206
+                                      },
+                                      {
+                                          "Name":  "PLC_STRING_TO_REAL",
+                                          "Value":  207
+                                      },
+                                      {
+                                          "Name":  "PLC_STRING_TO_UDINT",
+                                          "Value":  208
+                                      },
+                                      {
+                                          "Name":  "PLC_STRING_TO_UINT",
+                                          "Value":  209
+                                      },
+                                      {
+                                          "Name":  "PLC_STRING_TO_ULINT",
+                                          "Value":  210
+                                      },
+                                      {
+                                          "Name":  "PLC_STRING_TO_WORD",
+                                          "Value":  211
+                                      },
+                                      {
+                                          "Name":  "PLC_SUB",
+                                          "Value":  212
+                                      },
+                                      {
+                                          "Name":  "PLC_TAN",
+                                          "Value":  213
+                                      },
+                                      {
+                                          "Name":  "PLC_TRUNC",
+                                          "Value":  214
+                                      },
+                                      {
+                                          "Name":  "PLC_TRUNC1",
+                                          "Value":  215
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_BCD_DWORD",
+                                          "Value":  216
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_BCD_LWORD",
+                                          "Value":  217
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_BCD_WORD",
+                                          "Value":  218
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_BOOL",
+                                          "Value":  219
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_DINT",
+                                          "Value":  220
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_DWORD",
+                                          "Value":  221
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_INT",
+                                          "Value":  222
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_LINT",
+                                          "Value":  223
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_LREAL",
+                                          "Value":  224
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_LWORD",
+                                          "Value":  225
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_REAL",
+                                          "Value":  226
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_STRING",
+                                          "Value":  227
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_UINT",
+                                          "Value":  228
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_ULINT",
+                                          "Value":  229
+                                      },
+                                      {
+                                          "Name":  "PLC_UDINT_TO_WORD",
+                                          "Value":  230
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_BCD_DWORD",
+                                          "Value":  231
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_BCD_LWORD",
+                                          "Value":  232
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_BCD_WORD",
+                                          "Value":  233
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_BOOL",
+                                          "Value":  234
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_DINT",
+                                          "Value":  235
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_DWORD",
+                                          "Value":  236
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_INT",
+                                          "Value":  237
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_LINT",
+                                          "Value":  238
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_LREAL",
+                                          "Value":  239
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_LWORD",
+                                          "Value":  240
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_REAL",
+                                          "Value":  241
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_STRING",
+                                          "Value":  242
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_UDINT",
+                                          "Value":  243
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_ULINT",
+                                          "Value":  244
+                                      },
+                                      {
+                                          "Name":  "PLC_UINT_TO_WORD",
+                                          "Value":  245
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_BCD_DWORD",
+                                          "Value":  246
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_BCD_LWORD",
+                                          "Value":  247
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_BCD_WORD",
+                                          "Value":  248
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_BOOL",
+                                          "Value":  249
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_DINT",
+                                          "Value":  250
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_DWORD",
+                                          "Value":  251
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_INT",
+                                          "Value":  252
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_LINT",
+                                          "Value":  253
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_LREAL",
+                                          "Value":  254
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_LWORD",
+                                          "Value":  255
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_REAL",
+                                          "Value":  256
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_STRING",
+                                          "Value":  257
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_UDINT",
+                                          "Value":  258
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_UINT",
+                                          "Value":  259
+                                      },
+                                      {
+                                          "Name":  "PLC_ULINT_TO_WORD",
+                                          "Value":  260
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_BCD_TO_DINT",
+                                          "Value":  261
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_BCD_TO_INT",
+                                          "Value":  262
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_BCD_TO_UDINT",
+                                          "Value":  263
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_BCD_TO_UINT",
+                                          "Value":  264
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_BCD_TO_ULINT",
+                                          "Value":  265
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_TO_BOOL",
+                                          "Value":  266
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_TO_DINT",
+                                          "Value":  267
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_TO_DWORD",
+                                          "Value":  268
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_TO_INT",
+                                          "Value":  269
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_TO_LINT",
+                                          "Value":  270
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_TO_LREAL",
+                                          "Value":  271
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_TO_LWORD",
+                                          "Value":  272
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_TO_REAL",
+                                          "Value":  273
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_TO_STRING",
+                                          "Value":  274
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_TO_UDINT",
+                                          "Value":  275
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_TO_UINT",
+                                          "Value":  276
+                                      },
+                                      {
+                                          "Name":  "PLC_WORD_TO_ULINT",
+                                          "Value":  277
+                                      },
+                                      {
+                                          "Name":  "PLC_XOR",
+                                          "Value":  278
+                                      },
+                                      {
+                                          "Name":  "PLC_MAX_INSTRUCTIONS",
+                                          "Value":  279
+                                      }
+                                  ]
+                  },
+                  {
+                      "Name":  "ePROG_TYPE",
+                      "Members":  [
+                                      {
+                                          "Name":  "ePT_Ladder",
+                                          "Value":  1
+                                      },
+                                      {
+                                          "Name":  "ePT_Mnemonic",
+                                          "Value":  2
+                                      },
+                                      {
+                                          "Name":  "ePT_Program",
+                                          "Value":  4
+                                      },
+                                      {
+                                          "Name":  "ePT_ST",
+                                          "Value":  8
+                                      },
+                                      {
+                                          "Name":  "ePT_FB_INST",
+                                          "Value":  16
+                                      },
+                                      {
+                                          "Name":  "ePT_FB_BODY",
+                                          "Value":  32
+                                      },
+                                      {
+                                          "Name":  "ePT_FB_ST",
+                                          "Value":  40
+                                      },
+                                      {
+                                          "Name":  "ePT_FB_LADDER",
+                                          "Value":  33
+                                      },
+                                      {
+                                          "Name":  "ePT_FB_INSTANCE",
+                                          "Value":  64
+                                      },
+                                      {
+                                          "Name":  "ePT_FB_INSTANCE_LADDER",
+                                          "Value":  65
+                                      },
+                                      {
+                                          "Name":  "ePT_FUNCTION",
+                                          "Value":  128
+                                      },
+                                      {
+                                          "Name":  "ePT_SFC",
+                                          "Value":  256
+                                      },
+                                      {
+                                          "Name":  "ePT_FB_SFC",
+                                          "Value":  288
+                                      },
+                                      {
+                                          "Name":  "ePT_PROG_SFC",
+                                          "Value":  260
+                                      },
+                                      {
+                                          "Name":  "ePT_PROG_LADDER",
+                                          "Value":  5
+                                      },
+                                      {
+                                          "Name":  "ePT_PROG_ST",
+                                          "Value":  12
+                                      }
+                                  ]
+                  },
+                  {
+                      "Name":  "eVALID_INST",
+                      "Members":  [
+                                      {
+                                          "Name":  "eOK",
+                                          "Value":  0
+                                      },
+                                      {
+                                          "Name":  "eNOTOK",
+                                          "Value":  1
+                                      },
+                                      {
+                                          "Name":  "eINST_INVALID",
+                                          "Value":  2
+                                      },
+                                      {
+                                          "Name":  "eDIFUP_INVALID",
+                                          "Value":  3
+                                      },
+                                      {
+                                          "Name":  "eDIFDN_INVALID",
+                                          "Value":  4
+                                      },
+                                      {
+                                          "Name":  "eIMMREF_INVALID",
+                                          "Value":  5
+                                      },
+                                      {
+                                          "Name":  "eDIFUPDN_INVALID",
+                                          "Value":  6
+                                      },
+                                      {
+                                          "Name":  "eNOT_ON_CURRENT_PLC",
+                                          "Value":  7
+                                      },
+                                      {
+                                          "Name":  "eNOT_IN_FBBODY",
+                                          "Value":  8
+                                      }
+                                  ]
+                  }
+              ]
+}

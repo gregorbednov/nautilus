@@ -32,15 +32,22 @@ func omronFBCall(args []string) error {
 	if err != nil {
 		return err
 	}
+	identified := true
+	for _, variable := range plan.Variables {
+		identified = identified && variable.TypeName != ""
+	}
+	// Enum identity is now known. Full native typing/operand and graph checks
+	// are still partial, so the existing qualification/compiled flags stay false.
 	report := struct {
-		SchemaVersion      int             `json:"schemaVersion"`
-		Format             string          `json:"format"`
-		SourceSHA256       string          `json:"sourceSHA256"`
-		TypeCodesQualified bool            `json:"typeCodesQualified"`
-		Compiled           bool            `json:"compiled"`
-		HardwareQualified  bool            `json:"hardwareQualified"`
-		Plan               *cxp.FBCallPlan `json:"plan"`
-	}{SchemaVersion: 1, Format: "cxp-fb-call-plan", SourceSHA256: doc.SHA256, Plan: plan}
+		SchemaVersion              int             `json:"schemaVersion"`
+		Format                     string          `json:"format"`
+		SourceSHA256               string          `json:"sourceSHA256"`
+		TypeCodesQualified         bool            `json:"typeCodesQualified"`
+		DeclarationTypesIdentified bool            `json:"declarationTypesIdentified"`
+		Compiled                   bool            `json:"compiled"`
+		HardwareQualified          bool            `json:"hardwareQualified"`
+		Plan                       *cxp.FBCallPlan `json:"plan"`
+	}{SchemaVersion: 1, Format: "cxp-fb-call-plan", SourceSHA256: doc.SHA256, DeclarationTypesIdentified: identified, Plan: plan}
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(report)

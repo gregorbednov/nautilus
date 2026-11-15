@@ -112,7 +112,7 @@ func TestFBCallPlanPreservesUnqualifiedTypeCodes(t *testing.T) {
 	f := fbTestField(t, doc, fbDefinition+".POUHeader.PouVarList")
 	f.Raw = strings.Replace(f.Raw, "1,PV,1,", "1,PV,99,", 1)
 	plan, err := doc.PlanFBCall(fbProgram, fbRung)
-	if err != nil || plan.Inputs[0].Declaration.TypeCode != 99 {
+	if err != nil || plan.Inputs[0].Declaration.TypeCode != 99 || plan.Inputs[0].Declaration.TypeName != "" {
 		t.Fatal("invented type qualification", err)
 	}
 }

@@ -31,33 +31,21 @@ func TestObservedSourcePinOrderRebuildsCapturedCall(t *testing.T) {
 			t.Fatal(err)
 		}
 		var body [][]uint32
-		appendPin := func(pin cxp.FBCallPin, usage fbcode.ParameterUsage) {
-			// Fixture-specific transport controls, NOT a production mapping of
-			// numeric CXP enums. Code1's signedness/type identity remains unknown;
-			// all measured16-bit scalar copies use the same native MOV recipe.
-			var kind fbcode.ScalarType
-			switch pin.Declaration.TypeCode {
-			case 0:
-				kind = fbcode.Bool
-			case 1:
-				kind = fbcode.Word
-			default:
-				t.Fatal("unqualified fixture type")
-			}
-			words, e := fbcode.ScalarTransfer(8, kind, usage, pin.Value.Operand)
+		appendPin := func(pin cxp.FBCallPin) {
+			words, e := fbcode.ScalarTransferForPin(8, pin)
 			if e != nil {
 				t.Fatal(e)
 			}
 			body = append(body, words)
 		}
 		for _, pin := range plan.Inputs {
-			appendPin(pin, fbcode.Input)
+			appendPin(pin)
 		}
 		// The measured FBICALL literal recipe is still an explicit test control;
 		// identifiers now come from the selected source instance/definition.
 		body = append(body, []uint32{0xb2410806, 0x61440000 | uint32(plan.InstanceNumber), 0x65440000 | uint32(plan.TaskID), 0x80000000})
 		for _, pin := range plan.Outputs {
-			appendPin(pin, fbcode.Output)
+			appendPin(pin)
 		}
 		frame, err := fbcode.AssembleInvocation(8, body, false)
 		if err != nil {

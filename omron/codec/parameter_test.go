@@ -1,6 +1,7 @@
 package codec_test
 
 import (
+	"github.com/joyautomation/nautilus/omron/cxp"
 	"reflect"
 	"testing"
 
@@ -19,6 +20,11 @@ func TestScalarTransfersAgainstNativeGeneration(t *testing.T) {
 		words, err := fbcode.ScalarTransfer(8, fbcode.ScalarType(p.Input.Type), fbcode.ParameterUsage(p.Input.Usage), p.Input.Source)
 		if err != nil {
 			t.Fatal(row.ID, err)
+		}
+		pin := cxp.FBCallPin{Declaration: cxp.FBVariable{Name: "P", Usage: p.Input.Usage, TypeCode: map[string]int{"BOOL": 0, "INT": 1, "UINT": 2, "WORD": 7}[p.Input.Type], RemainingColumns: [4]string{"", "0", "0", "0"}}, Value: cxp.FBCallOperand{Source: p.Input.Source, Operand: p.Input.Source}}
+		fromPin, e := fbcode.ScalarTransferForPin(8, pin)
+		if e != nil || !reflect.DeepEqual(fromPin, words) {
+			t.Fatal("PH_TYPE pin lowering differs from native scalar form", row.ID, e)
 		}
 		final, err := fbcode.InvocationPostamble(8, words, false)
 		wantMnemonic := "MOV"

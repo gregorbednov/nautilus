@@ -25,10 +25,9 @@ Failure returns no partial frame; successful output owns its word storage.
 
 Evidence includes54 fresh primitive observations over both models, four actual
 normal-object invocation-generation observations, Ghidra exports under testdata,
-and all nine changes in the old full-project lifecycle trace. With the five
-known initial encoder body controls, frame assembly matches all26 containers
-of the saved BLINK call. That body is still supplied as encoded controls in the
-test, not compiled from CXP. Full source-to-FB generation remains unfinished.
+and all nine changes in the old full-project lifecycle trace. Frame assembly
+matches all26 containers of the saved BLINK call. Full source-to-FB generation
+remains unfinished; the current source-plan bridge is described below.
 
 The next stage adds `ScalarTransfer`: BOOL and WORD/UINT/INT, explicit input or
 output, scalar count1 only. A new176-row native capsule calls the actual
@@ -42,13 +41,22 @@ The Go operation returns the initial typed instruction for `AssembleInvocation`.
 It shares the public codec's16-bit literal/direct-word rules. Qualified areas
 are CIO/W/H/D for words and explicit CIO/W/H bits for BOOL; arrays, INOUT,
 implicit ports, BOOL constants, private addresses and wider types fail closed.
-The captured full call test now generates its four transfers from typed source
-operands; the FBICALL and port ordering remain explicit controls. CXP graph
-resolution, declaration-type mapping and allocation are still not implemented.
+This low-level operation receives typed source operands; source declarations
+are connected through `ScalarTransferForPin` below. Allocation and general
+graph compilation remain unimplemented.
 
 The next source-plan bridge test reads `cxp.PlanFBCall` and verifies the complete
 27-container LD+call against both captures. Port selection/order, bindings and
-identifiers now come from CXP; the fixture's transport-type mapping and FBICALL
-recipe remain explicit test controls. No production source compiler is enabled.
+identifiers now come from CXP. The FBICALL recipe and invocation option remain
+explicit test controls. No production source compiler is enabled.
+
+PH_TYPE identity is now confirmed through PHeadDoc's x86 type library and the
+actual CX-P GetItem3/constructor/row-writer chain. `ScalarTransferForPin` maps
+BOOL0, INT1, UINT2 and WORD7 into the measured transfer forms. It validates
+scalar metadata and exact symbol identity/address/type; it ignores cached
+TypeName. All176 native transfer observations also exercise this pin bridge.
+The complete-call comparison no longer has a test-only transport-type map;
+FBICALL and invocation-option choice remain explicit controls. Complete project
+typing, assignment-range checks, definition code and allocation remain pending.
 
 See [the complete FB research](../../../docs/design/omron-fb-format.md).

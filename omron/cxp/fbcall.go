@@ -12,11 +12,12 @@ import (
 var ErrFBCall = errors.New("unsupported or malformed CXP FB call")
 
 // FBVariable preserves CXP's declaration codes. TypeCode is NOT the native
-// nDATA_TYPE bitmask and is deliberately not converted into a codec type.
+// nDATA_TYPE bitmask. TypeName identifies PH_TYPE, not native-code support.
 type FBVariable struct {
 	Name     string `json:"name"`
 	Usage    int    `json:"usageCode"`
 	TypeCode int    `json:"typeCode"`
+	TypeName string `json:"typeName,omitempty"`
 	// Columns3..6 are retained without assigning unverified field semantics.
 	RemainingColumns [4]string `json:"remainingColumns"`
 	Comment          string    `json:"comment"`
@@ -109,7 +110,7 @@ func fbVariables(header Field, path string) ([]FBVariable, string, error) {
 			return nil, "", fbError(path, line, "invalid or ambiguous declaration")
 		}
 		seen[key] = true
-		result = append(result, FBVariable{columns[1], usage, typeCode, [4]string{columns[3], columns[4], columns[5], columns[6]}, strings.TrimSuffix(columns[7], ";"), line})
+		result = append(result, FBVariable{Name: columns[1], Usage: usage, TypeCode: typeCode, TypeName: FBTypeName(typeCode), RemainingColumns: [4]string{columns[3], columns[4], columns[5], columns[6]}, Comment: strings.TrimSuffix(columns[7], ";"), Line: line})
 	}
 	if len(result) != n {
 		return nil, "", fbError(path, count.Line, "declaration count mismatch")
