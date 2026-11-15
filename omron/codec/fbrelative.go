@@ -24,6 +24,87 @@ type FBRelativeInstruction struct {
 	Operands    []FBRelativeOperand `json:"operands"`
 }
 
+// EncodeFBRelativeInstruction emits only the short forms accepted by
+// DecodeFBRelativeBody. Offsets must already be allocated and fit signed12.
+// Span fields are inspection metadata and do not participate in encoding.
+// Extended displacements, other banks/forms and instance allocation are absent.
+func EncodeFBRelativeInstruction(profile Profile, instruction FBRelativeInstruction) ([]uint32, error) {
+	if err := profile.validate(); err != nil {
+		return nil, err
+	}
+	fail := func() ([]uint32, error) {
+		return nil, fmt.Errorf("%w: unqualified relative %s operands", ErrFBRelativeBody, instruction.Mnemonic)
+	}
+	for _, operand := range instruction.Operands {
+		if operand.Offset < -2048 || operand.Offset > 2047 {
+			return fail()
+		}
+	}
+	if instruction.Mnemonic == "TIMH" {
+		if profile.TimerCounterMode != TimerModeBCD || (instruction.Function != "" && instruction.Function != "015") || len(instruction.Operands) != 2 {
+			return fail()
+		}
+		timer, preset := instruction.Operands[0], instruction.Operands[1]
+		if timer.BaseRegister != 0 || timer.Unit != "timer" || preset.BaseRegister != 3 || preset.Unit != "word" {
+			return fail()
+		}
+		return []uint32{0xbb4000c1, 0x513c0000 | uint32(timer.Offset)&0xfff, 0x653c3000 | uint32(preset.Offset)&0xfff}, nil
+	}
+	if instruction.Function != "" || len(instruction.Operands) != 1 {
+		return fail()
+	}
+	operand := instruction.Operands[0]
+	if instruction.Mnemonic == "LD" && operand.BaseRegister == 0 && operand.Unit == "timer" {
+		return []uint32{0xe21f0000 | uint32(operand.Offset)&0xfff}, nil
+	}
+	if operand.BaseRegister != 3 || operand.Unit != "bit" {
+		return fail()
+	}
+	var opcode uint32
+	switch instruction.Mnemonic {
+	case "LD":
+		opcode = 0xe21f3000
+	case "LDNOT":
+		opcode = 0xe23f3000
+	case "AND":
+		opcode = 0xe25f3000
+	case "ANDNOT":
+		opcode = 0xe27f3000
+	case "OUT":
+		opcode = 0xfa1f3000
+	case "SET":
+		opcode = 0xf05f3000
+	case "RSET":
+		opcode = 0xf07f3000
+	default:
+		return fail()
+	}
+	return []uint32{opcode | uint32(operand.Offset)&0xfff}, nil
+}
+
+// EncodeFBRelativeBody assembles preallocated typed relative instructions. It
+// does not infer bindings or include FBBN/FBBRET, task records or an N1 image.
+func EncodeFBRelativeBody(profile Profile, instructions []FBRelativeInstruction) ([]uint32, error) {
+	if err := profile.validate(); err != nil {
+		return nil, err
+	}
+	if len(instructions) == 0 || len(instructions) > 65536 {
+		return nil, fmt.Errorf("%w: invalid instruction count", ErrFBRelativeBody)
+	}
+	var result []uint32
+	for i, instruction := range instructions {
+		words, err := EncodeFBRelativeInstruction(profile, instruction)
+		if err != nil {
+			return nil, fmt.Errorf("instruction %d: %w", i, err)
+		}
+		if len(result) > 65536-len(words) {
+			return nil, fmt.Errorf("%w: body length limit", ErrFBRelativeBody)
+		}
+		result = append(result, words...)
+	}
+	return result, nil
+}
+
 // DecodeFBRelativeBody reads the observed BLINK instruction forms, excluding
 // FBBN/FBBRET wrappers. It accepts BR3 bit logic, LD of BR0 timer completion and
 // BCD TIMH with a BR0 timer/BR3 word preset. Other forms fail atomically.

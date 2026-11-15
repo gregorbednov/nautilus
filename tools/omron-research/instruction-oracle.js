@@ -35,9 +35,23 @@ setImmediate(()=>{
   const operandPreamble=native(0x1749ea,'void',['pointer','pointer','pointer','pointer','int','int','uint32','int','pointer','int','int']);
   const getBase=native(0x1ce6a1,'int',['pointer','int','pointer','pointer']);
   const getBaseAddress=native(0x1d0137,'int',['pointer','int','pointer','pointer']);
-  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1','fb-body-operands-v1'].includes(request.probe))throw new Error('unsupported probe');
+  const setUseFB=native(0x1cf742,'void',['pointer','int']);
+  const getUseFB=native(0x1cf79a,'int',['pointer']);
+  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1','fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1'].includes(request.probe))throw new Error('unsupported probe');
   const programType=request.programType===undefined?0:request.programType;
-  if(programType!==(request.probe==='fb-body-operands-v1'?32:0))throw new Error('invalid program type/probe combination');
+  if(programType!==(['fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1'].includes(request.probe)?32:0))throw new Error('invalid program type/probe combination');
+  const compileContext=['fb-body-context-v1','fb-instruction-compile-v1'].includes(request.probe);
+  let arrayCtor,arrayDtor,arraySet,compileInstruction,isCompiled;
+  if(request.probe==='fb-instruction-compile-v1'){
+   const mfc=Process.enumerateModules().find(x=>x.name.toLowerCase()==='mfc42.dll');if(!mfc)throw new Error('missing MFC42');
+   const getProc=new NativeFunction(Process.getModuleByName('kernel32.dll').getExportByName('GetProcAddress'),'pointer',['pointer','pointer'],'stdcall');
+   const ctorThunk=library.base.add(0x24e332);
+   if(ctorThunk.readU8()!==0xff || ctorThunk.add(1).readU8()!==0x25 || !ctorThunk.add(2).readPointer().readPointer().equals(getProc(mfc.base,ptr(541))))throw new Error('unreviewed CStringArray constructor import');
+   function ordinal(number,result,args){const address=getProc(mfc.base,ptr(number));if(address.isNull())throw new Error('missing reviewed MFC ordinal');return new NativeFunction(address,result,args,'thiscall');}
+   arrayCtor=ordinal(541,'pointer',['pointer']);arrayDtor=ordinal(801,'void',['pointer']);arraySet=ordinal(5861,'void',['pointer','int','pointer']);
+   compileInstruction=native(0x16b432,'int',['pointer','pointer','int','pointer','pointer','int','int','int','int','int','int']);
+   isCompiled=native(0x16b3e3,'int',['pointer']);
+  }
   function snapshot(instance){
    const count=instance.add(0x34).readU8();if(count>128)throw new Error('control snapshot bound exceeded');
    const buffer=instance.add(0xc).readPointer();if(count && buffer.isNull())throw new Error('missing control buffer');
@@ -66,13 +80,15 @@ setImmediate(()=>{
    for(const cpu of request.profiles){
     const selected=setPLC(kbase,string(cpu.device,profileStrings),string(cpu.cpu,profileStrings));
     if(selected!==1)throw new Error('SetPLC failed for '+cpu.device+' '+cpu.cpu);
+    if(compileContext){setUseFB(kbase,1);if(getUseFB(kbase)!==1)throw new Error('FB mode readback mismatch');}
     if(timerMode==='bcd')setBCD(kbase);
     if(timerMode==='binary')setBinary(kbase);
     const bcd=isBCD(kbase),binary=isBinary(kbase);
     if((bcd!==0 && bcd!==1) || binary!==1-bcd || (timerMode==='bcd' && bcd!==1) || (timerMode==='binary' && binary!==1))throw new Error('timer mode readback mismatch');
     const descriptor=kbase.add(0x2d50).readPointer();
     const profile={device:cpu.device,cpu:cpu.cpu,selector:descriptor.add(0x44).readU32(),familyMaskLow:descriptor.add(0x68).readU32(),familyMaskHigh:descriptor.add(0x6c).readU32(),timerModeBcd:bcd,timerModeBinary:binary};
-    if(request.probe==='fb-body-operands-v1'){
+    if(compileContext)profile.useFunctionBlocks=getUseFB(kbase);
+    if(['fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1'].includes(request.probe)){
      profile.bases=[];
      for(let index=0;index<5;index++){
       const name=string('',profileStrings),size=Memory.alloc(4),address=Memory.alloc(4),secondSize=Memory.alloc(4);
@@ -92,6 +108,19 @@ setImmediate(()=>{
        result.definition=text(definition.add(12).readPointer());
        result.arity=definition.add(0xc0).readU8();
        if(result.arity===test.operands.length){
+        if(request.probe==='fb-instruction-compile-v1'){
+         const array=Memory.alloc(20);retained.push(array);arrayCtor(array);
+         try{
+          for(let i=0;i<test.operands.length;i++){const chars=Memory.allocUtf8String(test.operands[i]);retained.push(chars);arraySet(array,i,chars);}
+          // Same explicit argument values as PLC_Program::GenerateInst.
+          result.compileResult=compileInstruction(instance,array,0,ptr(0),ptr(0),0,0,1,0,1,programType);
+          result.compiledFlag=isCompiled(instance);
+          const state=snapshot(instance);result.words=state.words;result.flags=state.flags;
+          for(let i=0;i<result.arity;i++){const record=instance.add(0x10).readPointer().add(i*0x30);result.operandResults.push(record.readU32());result.normalized.push({value:record.add(4).readU32(),flags:record.add(8).readU32()});}
+          result.accepted=result.compileResult===1 && result.compiledFlag!==0 && result.words.length>0;
+          if(!result.accepted)result.words=[];
+         }finally{arrayDtor(array);}
+        }else{
         for(let index=0;index<test.operands.length;index++){
          const validation=operandEncode(definition,kbase,instance,string(test.operands[index],owned),index,programType);
          result.operandResults.push(validation);
@@ -136,6 +165,7 @@ setImmediate(()=>{
           operandPreamble(instance,kbase,instance.add(0x3c),source,p.usage,1,dataType,0,string('',owned),0,0);
           result.parameter={input:p,dataType,sourceAfter:text(source.readPointer()),instructions:readList(instance,0x3c)};
          }
+        }
         }
        }
       }

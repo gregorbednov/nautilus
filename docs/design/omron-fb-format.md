@@ -158,6 +158,42 @@ FBCALL operand must not be assumed to be the saved InstanceNum.
 
 ## Inspector and next qualification
 
+### Independent short relative encoding
+
+`codec.EncodeFBRelativeInstruction` and `codec.EncodeFBRelativeBody` now emit
+the same short BR0/BR3 forms supported by the bounded decoder. Inputs are typed
+relative instructions with explicit register/displacement/unit operands; source
+span fields do not affect encoding. Offsets must fit -2048..2047, and TIMH
+requires the BCD profile. Unknown forms, roles, banks, function qualifiers and
+extended displacements fail atomically. No CXP variable allocation, wrappers,
+instance records or task/N1 generation is performed.
+
+The native context is now qualified for these forms. SetUseFunctionBlockFlag1
+alone leaves all72 standalone OperandEncode results unchanged (`br-context-*`).
+Calling the real InstructionInst::Compile1216b432, with a normally constructed
+CStringArray and the exact explicit arguments used by PLC_Program::GenerateInst
+121e3bde, accepts the rendered BR operands. The library performs its own operand
+preparation and sets IsCompiled; no compilation flags or normalized records are
+injected on this path. The research harness uses reviewed MFC42 ordinals541/801
+(CStringArray constructor/destructor) and5861(SetAtGrow). It checks the actual
+CX-Pdata constructor import against ordinal541 before invoking the array API.
+Raw Ghidra and the bundled Ghidra ordinal map are archived and hash-pinned.
+
+`codec/testdata/br-compile-*` contains292 native instruction compilations,146
+per CPU, with FB mode and timer mode readbacks. 280 succeed and12 fail. The Go
+encoder exactly matches all218 observations in its short-form scope. The other
+74 cases include rejected syntax/banks and successful native forms deliberately
+outside this scope. In particular, LD4095,BR3 emits a three-word macro, and
+TIMH with extended displacements expands its operands. They must not be masked
+into short offsets. Both saved BLINK bodies reconstruct all19 containers exactly
+from their already allocated typed relative instructions.
+
+These are successful internal instruction compilations, not full-program
+compilations. The missing connection is still source declarations to relative
+storage allocation, followed by definition/instance records and task linking.
+The observed source declaration order alone is insufficient evidence for a
+general allocation policy. Ordinary physical-address encoding remains separate.
+
 ### Independent relative body decoding
 
 `codec.DecodeFBRelativeBody` now decodes the observed BR3 bit forms LD, LDNOT,
@@ -200,9 +236,9 @@ The decoder renders IN as `2,BR3`, ON as `4,BR3`, EN as `,BR3` (zero), and the
 first timer as `,BR0`. Separate native encoding experiments are archived as
 `br-rendered-*` (72 observations) and `br-typed-*` (30 observations). Every case
 is rejected by standalone OperandEncode, including address-prefixed variants.
-Rendered syntax therefore does not establish the full encoder context. No
-relative syntax was enabled in the ordinary physical-address encoder. Next
-inspect the caller's FB mode, variable translation and normal compilation path.
+Those earlier probes omit the preparation performed by the real Compile API,
+which is covered by the short relative encoding stage above. No relative syntax
+was enabled in the ordinary physical-address encoder.
 
 ### Symbolic definition body
 

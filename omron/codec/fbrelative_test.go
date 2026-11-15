@@ -172,5 +172,9 @@ func FuzzFBRelativeBody(f *testing.F) {
 		if offset != len(words) {
 			t.Fatal("incomplete decoded body")
 		}
+		encoded, err := codec.EncodeFBRelativeBody(fbRelativeProfile(), got)
+		if err != nil || !reflect.DeepEqual(encoded, words) {
+			t.Fatal("accepted body cannot be reconstructed", err)
+		}
 	})
 }

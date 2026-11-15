@@ -30,6 +30,9 @@ type inputCase struct {
 	Operands          []string        `json:"operands"`
 }
 type nativeResult struct {
+	CompileResult      *int                 `json:"compileResult"`
+	CompiledFlag       *int                 `json:"compiledFlag"`
+	UseFunctionBlocks  *int                 `json:"useFunctionBlocks"`
 	Decoded            []decodedInstruction `json:"decoded"`
 	SourceSHA256       string               `json:"sourceSHA256"`
 	SourceOffsetWords  int                  `json:"sourceOffsetWords"`
@@ -195,10 +198,10 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 	}
 	const compiler = "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141"
 	programType := 0
-	if probe == "fb-body-operands-v1" || probe == "fb-native-decode-v1" {
+	if probe == "fb-body-operands-v1" || probe == "fb-native-decode-v1" || probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" {
 		programType = 32
 	}
-	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1" && probe != "fb-native-decode-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
+	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1" && probe != "fb-native-decode-v1" && probe != "fb-body-context-v1" && probe != "fb-instruction-compile-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
 		t.Fatal("unsupported oracle provenance")
 	}
 	assets := map[string][]byte{}
@@ -293,7 +296,14 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				t.Fatal("library configuration mismatch")
 			}
 		case "profile":
-			if probe == "fb-body-operands-v1" {
+			if probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" {
+				if row.UseFunctionBlocks == nil || *row.UseFunctionBlocks != 1 {
+					t.Fatal("FB mode readback mismatch")
+				}
+			} else if row.UseFunctionBlocks != nil {
+				t.Fatal("unexpected FB mode readback")
+			}
+			if probe == "fb-body-operands-v1" || probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" {
 				wantBases := []nativeBase{{0, "T3072", 60416, 1024}, {1, "C3072", 64512, 1024}, {2, "DIFF8191", 40959, 0}, {3, "H512", 55808, 896}, {4, "H1408", 56704, 128}}
 				if !reflect.DeepEqual(row.Bases, wantBases) {
 					t.Fatal("base register readback differs", row.Bases)
@@ -323,6 +333,12 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				}
 			}
 		case "case":
+			if probe != "fb-native-decode-v1" && (len(row.Decoded) != 0 || row.SourceSHA256 != "" || row.SourceOffsetWords != 0) {
+				t.Fatal("decode results presented as compile evidence")
+			}
+			if probe != "fb-instruction-compile-v1" && (row.CompileResult != nil || row.CompiledFlag != nil) {
+				t.Fatal("instruction compile presented as encode-only evidence")
+			}
 			if probe != "control-bits-v1" && len(row.ControlStages) != 0 {
 				t.Fatal("unexpected control probe data")
 			}
@@ -364,6 +380,22 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				}
 				if offset != len(want.Code) {
 					t.Fatal("incomplete decoded word coverage")
+				}
+			} else if probe == "fb-instruction-compile-v1" {
+				if row.CompileResult == nil || row.CompiledFlag == nil || row.EncodeResult != nil || row.Initialise != 1 || len(row.OperandResults) != len(want.Operands) {
+					t.Fatal("incomplete instruction compile result")
+				}
+				if row.Accepted {
+					if *row.CompileResult != 1 || *row.CompiledFlag != 1 || len(row.Words) == 0 {
+						t.Fatal("failed native compile admitted")
+					}
+					for _, code := range row.OperandResults {
+						if code != 0 {
+							t.Fatal("compiled invalid operand")
+						}
+					}
+				} else if *row.CompileResult != 0 || *row.CompiledFlag != 0 || len(row.Words) != 0 {
+					t.Fatal("inconsistent rejected compile")
 				}
 			} else if len(row.Decoded) != 0 || row.SourceSHA256 != "" {
 				t.Fatal("unexpected decode results")
