@@ -10,6 +10,47 @@ in the big-endian N1 file; event buffers instead contain x86 little-endian words
 
 ## Prefix records
 
+### Definition section and combined FB fragment
+
+`compiler.CompileCXPFBDefinitionSection(profile, doc, resource, numbers)`
+generates all supported definitions in source order, with the observed count
+and three literal zero words. All50 words match the native definition section
+at330..379 on both CPUs. This header is corroborated by writer121c28ef: full
+image mode writes iStack_a70, then three zero words, before definition records.
+The existing hash-pinned writer export is the static evidence; this stage adds
+no fresh native full-project capture.
+
+`cxp.SourceForFBDefinitions` requires unique case-folded names and unique body
+TaskIDs, and caps the set at1024 definitions. The caller must supply exactly one
+record number per exact definition name, each unique and in0..1023. Record IDs
+are not derived from TaskID or declaration order. Missing/extra bindings, duplicate
+IDs, ambiguous names/body IDs, unsupported source and late errors fail atomically.
+Empty sections must be omitted by a future image linker and are rejected here.
+
+CLI: `compile-fb-definition-section -model MODEL -resource 'Resource[0]'
+-timer-mode bcd -number BLINK=0 FILE`; repeat `-number NAME=N` for each definition.
+`compile-fb-prefix` accepts the same controls and requires explicit
+`-next-enable 0,0,0,0,0,0,0`. It composes definition and instance sections,
+matching instance source references to generated definitions. Both sections must
+be nonempty in this API. All166 words match the complete native FB fragment
+at330..495 in both saved images. Fragment-relative section offsets are0/50;
+record offsets remain relative to their respective sections.
+
+Changing BLINK record number to7 changes only the record's number word, leaving
+FBBN and FBBCALL body IDs unchanged. A two-definition source mutation, with
+record IDs9/2 and body TaskIDs1024/1025, produces96 definition-section words and
+212 fragment words; the second instance calls1025. These are generated-source
+tests backed by existing primitive/writer evidence, not fresh native captures
+of a multiple-definition project. Source order is the explicit deterministic
+assembly policy; broader CX project ordering remains unqualified.
+
+Reports keep linked/storageInitialized/hardwareQualified=false. The prefix
+reports instanceDefinitionReferencesChecked=true for its internal name/path
+bindings only; all callers, task IDs, project-wide resources and FB call versions
+are not checked by this operation. Saved placement and explicit zero next-enable
+state remain required. The fragment has no N1 file header, task directory or
+task code and is not a deployable image or wire payload.
+
 ### Instance section generation with explicit next-enable state
 
 `compiler.CompileCXPFBInstanceSection(profile, doc, resource, [7]uint32{})`

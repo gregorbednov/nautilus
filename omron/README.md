@@ -2,6 +2,15 @@
 
 The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
 
+`naut omron compile-fb-definition-section -model MODEL -resource PATH -timer-mode
+bcd -number BLINK=0 FILE` generates the complete observed definition section,
+matching all50 words on both CPU fixtures. Repeat `-number NAME=N` for every
+definition; record IDs remain explicit and independent of body TaskIDs.
+`compile-fb-prefix` adds the audited instance section with required
+`-next-enable 0,0,0,0,0,0,0`: all166 FB-fragment words match both native images.
+It checks internal instance-to-definition names/paths, not all callers or tasks.
+There is no N1 file header, task directory/code, initial storage or full image.
+
 `naut omron compile-fb-instance-section -model MODEL -resource PATH -timer-mode bcd
 -next-enable 0,0,0,0,0,0,0 FILE` generates the observed full instance section;
 all116 words match both saved native fixtures. The seven header fields are

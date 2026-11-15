@@ -37,6 +37,12 @@ const omronUsage = `naut omron — independent CJ1 source tools, rung compilatio
   naut omron compile-fb-definition -model MODEL -definition PATH -number N -timer-mode bcd FILE
       Generate one definition record, including entry/return and its N1 record header.
       Numbering is explicit; instances, sections, task linking and full N1 remain absent.
+  naut omron compile-fb-definition-section -model MODEL -resource PATH -number NAME=N -timer-mode bcd FILE
+      Generate all definition records and their count/reserved section header.
+      Repeat -number for every definition; record IDs are independent of body TaskIDs.
+  naut omron compile-fb-prefix -model MODEL -resource PATH -number NAME=N -timer-mode bcd -next-enable 0,0,0,0,0,0,0 FILE
+      Assemble the observed definition and instance sections with relative offsets.
+      No file header, tasks, storage initialization or complete N1 generation.
   naut omron compile-fb-instance -model MODEL -instance PATH -timer-mode bcd FILE
       Generate the observed scalar runtime frame and its instance record header.
       Uses saved placement; no storage initialization, global placement audit or linking.
@@ -115,6 +121,10 @@ func runOmron(args []string) int {
 		err = omronCompileFBDefinitionBody(args[1:])
 	case "compile-fb-definition":
 		err = omronCompileFBDefinitionRecord(args[1:])
+	case "compile-fb-definition-section":
+		err = omronCompileFBDefinitionSection(args[1:])
+	case "compile-fb-prefix":
+		err = omronCompileFBPrefix(args[1:])
 	case "compile-fb-instance":
 		err = omronCompileFBInstance(args[1:])
 	case "compile-fb-instances":

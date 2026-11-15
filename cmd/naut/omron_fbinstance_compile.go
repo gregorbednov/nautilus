@@ -50,16 +50,10 @@ func omronCompileFBInstanceCommand(args []string, all, section bool) error {
 	}
 	var next [7]uint32
 	if section {
-		parts := strings.Split(nextText, ",")
-		if len(parts) != 7 {
-			return errors.New("section requires explicit -next-enable 0,0,0,0,0,0,0")
-		}
-		for i, part := range parts {
-			value, err := strconv.ParseUint(part, 10, 32)
-			if err != nil || strconv.FormatUint(value, 10) != part {
-				return errors.New("next-enable values must be canonical unsigned decimal integers")
-			}
-			next[i] = uint32(value)
+		var err error
+		next, err = parseOmronNextEnable(nextText)
+		if err != nil {
+			return err
 		}
 	}
 	data, err := readOmronFile(flags.Arg(0))
@@ -105,4 +99,20 @@ func omronCompileFBInstanceCommand(args []string, all, section bool) error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(report)
+}
+
+func parseOmronNextEnable(text string) ([7]uint32, error) {
+	var next [7]uint32
+	parts := strings.Split(text, ",")
+	if len(parts) != 7 {
+		return next, errors.New("section requires explicit -next-enable 0,0,0,0,0,0,0")
+	}
+	for i, part := range parts {
+		value, err := strconv.ParseUint(part, 10, 32)
+		if err != nil || strconv.FormatUint(value, 10) != part {
+			return [7]uint32{}, errors.New("next-enable values must be canonical unsigned decimal integers")
+		}
+		next[i] = uint32(value)
+	}
+	return next, nil
 }

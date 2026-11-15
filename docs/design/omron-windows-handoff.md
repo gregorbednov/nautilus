@@ -15,6 +15,25 @@
 
 ## Что уже реализовано
 
+Последний этап: `SourceForFBDefinitions` читает все определения ресурса,
+отклоняет неоднозначные имена/TaskID. `CompileCXPFBDefinitionSection` выдаёт
+count+3zero+записи: все50 слов совпадают с обоими N1 (330..379). Номера записей
+явно передаются map[точное имя]int, уникальны0..1023, не выводятся из TaskID.
+CLI `compile-fb-definition-section -model MODEL -resource 'Resource[0]'
+-timer-mode bcd -number BLINK=0 FILE`, повторять -number для каждого определения.
+`CompileCXPFBPrefix` / CLI `compile-fb-prefix` с теми же флагами и обязательным
+`-next-enable 0,0,0,0,0,0,0` объединяет определения/экземпляры. Все166 слов
+совпадают с обоими N1 (330..495), относительные смещения секций0/50.
+Проверены внутренние ссылки экземпляров по имени/пути, ошибки атомарны.
+Перенумерация BLINK в7 не меняет FBBN/FBBCALL; источник с2 определениями и
+TaskID1024/1025 даёт96 слов секции/212 всего и разные body-вызовы экземпляров.
+Это изменённые Go-source тесты, не новые native full-project captures.
+Пустые секции здесь отклоняются; их должен опускать будущий linker.
+Основание заголовка — уже hash-pinned writer121c28ef, full-image branch.
+N1 header/tasks, начальные значения, авторазмещение и hardware остаются открытыми.
+instanceDefinitionReferencesChecked относится лишь к связи экземпляров с
+определениями, не ко всем вызовам/версиям/задачам. linked=false сохранён.
+
 Последний этап: `CompileCXPFBInstanceSection` / CLI
 `compile-fb-instance-section -model MODEL -resource 'Resource[0]' -timer-mode bcd
 -next-enable 0,0,0,0,0,0,0 FILE` генерирует всю секцию экземпляров. Все116 слов
