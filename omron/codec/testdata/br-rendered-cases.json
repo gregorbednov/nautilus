@@ -1,0 +1,261 @@
+[
+  {
+    "id": "br-0",
+    "mnemonic": "LD",
+    "operands": [
+      ",BR3"
+    ]
+  },
+  {
+    "id": "br-1",
+    "mnemonic": "LD",
+    "operands": [
+      "0,BR3"
+    ]
+  },
+  {
+    "id": "br-2",
+    "mnemonic": "LD",
+    "operands": [
+      "1,BR3"
+    ]
+  },
+  {
+    "id": "br-3",
+    "mnemonic": "LD",
+    "operands": [
+      "2,BR3"
+    ]
+  },
+  {
+    "id": "br-4",
+    "mnemonic": "LD",
+    "operands": [
+      "15,BR3"
+    ]
+  },
+  {
+    "id": "br-5",
+    "mnemonic": "LD",
+    "operands": [
+      "16,BR3"
+    ]
+  },
+  {
+    "id": "br-6",
+    "mnemonic": "LD",
+    "operands": [
+      "255,BR3"
+    ]
+  },
+  {
+    "id": "br-7",
+    "mnemonic": "LD",
+    "operands": [
+      "4095,BR3"
+    ]
+  },
+  {
+    "id": "br-8",
+    "mnemonic": "LD",
+    "operands": [
+      "4096,BR3"
+    ]
+  },
+  {
+    "id": "br-9",
+    "mnemonic": "LD",
+    "operands": [
+      "65535,BR3"
+    ]
+  },
+  {
+    "id": "br-10",
+    "mnemonic": "LD",
+    "operands": [
+      "65536,BR3"
+    ]
+  },
+  {
+    "id": "br-11",
+    "mnemonic": "LD",
+    "operands": [
+      "-1,BR3"
+    ]
+  },
+  {
+    "id": "br-12",
+    "mnemonic": "LD",
+    "operands": [
+      "1,BR0"
+    ]
+  },
+  {
+    "id": "br-13",
+    "mnemonic": "LD",
+    "operands": [
+      "1,BR1"
+    ]
+  },
+  {
+    "id": "br-14",
+    "mnemonic": "LD",
+    "operands": [
+      "1,BR2"
+    ]
+  },
+  {
+    "id": "br-15",
+    "mnemonic": "LD",
+    "operands": [
+      "1,BR4"
+    ]
+  },
+  {
+    "id": "br-16",
+    "mnemonic": "LD",
+    "operands": [
+      "1,BR5"
+    ]
+  },
+  {
+    "id": "br-17",
+    "mnemonic": "LD",
+    "operands": [
+      "1,BR6"
+    ]
+  },
+  {
+    "id": "br-18",
+    "mnemonic": "LD",
+    "operands": [
+      "1,BR7"
+    ]
+  },
+  {
+    "id": "br-19",
+    "mnemonic": "LD",
+    "operands": [
+      "1,BR8"
+    ]
+  },
+  {
+    "id": "br-20",
+    "mnemonic": "LD",
+    "operands": [
+      "1,br3"
+    ]
+  },
+  {
+    "id": "br-21",
+    "mnemonic": "LD",
+    "operands": [
+      "#10,BR3"
+    ]
+  },
+  {
+    "id": "br-22",
+    "mnemonic": "LD",
+    "operands": [
+      "&10,BR3"
+    ]
+  },
+  {
+    "id": "br-23",
+    "mnemonic": "LDNOT",
+    "operands": [
+      "2,BR3"
+    ]
+  },
+  {
+    "id": "br-24",
+    "mnemonic": "AND",
+    "operands": [
+      "2,BR3"
+    ]
+  },
+  {
+    "id": "br-25",
+    "mnemonic": "ANDNOT",
+    "operands": [
+      "2,BR3"
+    ]
+  },
+  {
+    "id": "br-26",
+    "mnemonic": "OUT",
+    "operands": [
+      "2,BR3"
+    ]
+  },
+  {
+    "id": "br-27",
+    "mnemonic": "SET",
+    "operands": [
+      "2,BR3"
+    ]
+  },
+  {
+    "id": "br-28",
+    "mnemonic": "RSET",
+    "operands": [
+      "2,BR3"
+    ]
+  },
+  {
+    "id": "br-29",
+    "mnemonic": "TIMH(015)",
+    "operands": [
+      ",BR0",
+      "1,BR3"
+    ]
+  },
+  {
+    "id": "br-30",
+    "mnemonic": "TIMH(015)",
+    "operands": [
+      "0,BR0",
+      "1,BR3"
+    ]
+  },
+  {
+    "id": "br-31",
+    "mnemonic": "TIMH(015)",
+    "operands": [
+      "1,BR0",
+      "2,BR3"
+    ]
+  },
+  {
+    "id": "br-32",
+    "mnemonic": "TIMH(015)",
+    "operands": [
+      "4095,BR0",
+      "4095,BR3"
+    ]
+  },
+  {
+    "id": "br-33",
+    "mnemonic": "TIMH(015)",
+    "operands": [
+      "4096,BR0",
+      "4096,BR3"
+    ]
+  },
+  {
+    "id": "br-34",
+    "mnemonic": "TIMH(015)",
+    "operands": [
+      "65535,BR0",
+      "65535,BR3"
+    ]
+  },
+  {
+    "id": "br-35",
+    "mnemonic": "TIMH(015)",
+    "operands": [
+      "65536,BR0",
+      "65536,BR3"
+    ]
+  }
+]

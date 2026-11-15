@@ -158,6 +158,52 @@ FBCALL operand must not be assumed to be the saved InstanceNum.
 
 ## Inspector and next qualification
 
+### Independent relative body decoding
+
+`codec.DecodeFBRelativeBody` now decodes the observed BR3 bit forms LD, LDNOT,
+AND, ANDNOT, OUT, SET, RSET; LD of BR0 timer completion; and BCD TIMH(015)
+with a BR0 timer and BR3 word preset. It consumes the body between FBBN/FBBRET,
+returns typed register/displacement/unit references and word spans, and fails
+atomically on unknown forms. It neither emits code nor allocates an instance.
+Other banks, bit opcodes, timer modes and instruction forms remain unqualified.
+
+The independent inspector exposes this with:
+
+```sh
+naut omron inspect-image -decode-fb-bodies -model 'CJ1H-H CPU65' \
+  -timer-mode bcd omron/um/testdata/cj1h-baseline.n1
+```
+
+This includes the FB record inventory and `relativeBodies`. Word spans inside
+each body are relative to its first instruction; `prefixOffsetWords` locates
+that instruction in the N1 prefix (359 for BLINK). The original19 words decode
+to the same15 instructions previously lowered from source. Connecting source
+variables to these displacements remains an allocation problem.
+
+The new native probe constructs PLC_Program normally, uses SetProgramType32,
+calls Decompile(kbase,int-array,count), walks the normal AddToProgram list and
+calls InstructionInst::GetText. GetBinaryText instead returns hex code and is
+not a source decompiler. No compiled flags or internal decoded buffers are
+injected. Runtime class size752 and list offset0x210 are corroborated by the
+archived genuine Ghidra exports `codec/testdata/ghidra-*-0[1-4].json.gz`;
+compressed/decoded hashes and function coverage are pinned in tests.
+
+`codec/testdata/fb-decode-*` contains12 native observations: the actual23-word
+BLINK definition and five explicitly declared low12-bit mutations, each decoded
+on both CPUs. The original source hash/word offset and all changed indices are
+verified against N1. Each decoded span must cover exactly the supplied words.
+Native decoding confirms offsets15,16,2047,-2048,-1 and the original0..4.
+Thus the observed displacement is a signed12-bit quantity. The mutated cases
+are decoder evidence, not successful new compilations or executable projects.
+
+The decoder renders IN as `2,BR3`, ON as `4,BR3`, EN as `,BR3` (zero), and the
+first timer as `,BR0`. Separate native encoding experiments are archived as
+`br-rendered-*` (72 observations) and `br-typed-*` (30 observations). Every case
+is rejected by standalone OperandEncode, including address-prefixed variants.
+Rendered syntax therefore does not establish the full encoder context. No
+relative syntax was enabled in the ordinary physical-address encoder. Next
+inspect the caller's FB mode, variable translation and normal compilation path.
+
 ### Symbolic definition body
 
 `cxp.Document.SourceForFBDefinition` and `naut omron inspect-fb-definition

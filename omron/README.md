@@ -62,6 +62,10 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   `inspect-image -function-blocks` now inventories the observed N1 definition
   and instance records, including opaque code and retained headers. Both saved
   BLINK instances match complete runtime buffers. See [FB evidence and limits](../docs/design/omron-fb-format.md).
+  `inspect-image -decode-fb-bodies -model MODEL -timer-mode bcd` also decodes
+  the observed relative BLINK body forms independently, including signed12-bit
+  BR0/BR3 displacements and instruction spans. This is a bounded decoder;
+  relative encoding, allocation and definition compilation remain pending.
 * `internal/fbcode`: qualified invocation postamble operations and a frame
   assembler for already encoded/allocated transfer instructions. It matches all
   26 containers of the saved BLINK call and supports the restricted standalone

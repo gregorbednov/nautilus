@@ -1,0 +1,110 @@
+[
+  {
+    "id": "br2-0",
+    "operands": [
+      "H0.02,BR3"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "br2-1",
+    "operands": [
+      "H512.02,BR3"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "br2-2",
+    "operands": [
+      "0.02,BR3"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "br2-3",
+    "operands": [
+      "W0.02,BR3"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "br2-4",
+    "operands": [
+      "H1.00,BR3"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "br2-5",
+    "operands": [
+      "H0.00,BR3"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "br2-6",
+    "operands": [
+      "T0,BR0"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "br2-7",
+    "operands": [
+      "T1,BR0"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "br2-8",
+    "operands": [
+      "T3072,BR0"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "br2-9",
+    "operands": [
+      "0,BR0"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "br2-10",
+    "operands": [
+      "H0,BR3"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "br2-11",
+    "operands": [
+      "1,H0.02,BR3"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "br2-12",
+    "operands": [
+      "T0,BR0",
+      "H1,BR3"
+    ],
+    "mnemonic": "TIMH(015)"
+  },
+  {
+    "id": "br2-13",
+    "operands": [
+      "0,BR0",
+      "H1,BR3"
+    ],
+    "mnemonic": "TIMH(015)"
+  },
+  {
+    "id": "br2-14",
+    "operands": [
+      "T1,BR0",
+      "H2,BR3"
+    ],
+    "mnemonic": "TIMH(015)"
+  }
+]
