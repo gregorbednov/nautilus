@@ -34,6 +34,9 @@ const omronUsage = `naut omron — independent CJ1 source tools, rung compilatio
   naut omron compile-fb-definition-body -model MODEL -definition PATH -timer-mode bcd FILE
       Allocate an offline scalar relative frame and compile observed series networks.
       Unlinked body: no instance placement, initialization, wrappers or full image.
+  naut omron compile-fb-definition -model MODEL -definition PATH -number N -timer-mode bcd FILE
+      Generate one definition record, including entry/return and its N1 record header.
+      Numbering is explicit; instances, sections, task linking and full N1 remain absent.
   naut omron compile-fb-call-body -model MODEL -program PATH -rung PATH FILE
       Compile only the observed single-call scalar rung, with source maps.
       Unlinked body: no FB definition/instance generation or complete image.
@@ -101,6 +104,8 @@ func runOmron(args []string) int {
 		err = omronFBDefinition(args[1:])
 	case "compile-fb-definition-body":
 		err = omronCompileFBDefinitionBody(args[1:])
+	case "compile-fb-definition":
+		err = omronCompileFBDefinitionRecord(args[1:])
 	case "compile-fb-call-body":
 		err = omronCompileFBCallBody(args[1:])
 	case "compile-program-body":

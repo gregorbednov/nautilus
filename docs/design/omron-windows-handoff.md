@@ -15,6 +15,23 @@
 
 ## Что уже реализовано
 
+Новейший этап: `compiler.CompileCXPFBDefinition` / CLI `compile-fb-definition
+-model MODEL -definition PATH -number 0 -timer-mode bcd FILE` генерируют из CXP
+полную отдельную запись определения BLINK:23 слова кода с FBBN/FBBRET и23 слова
+заголовка. Все46 слов совпадают с обоими N1. Номер записи явно задаёт вызывающая
+сторона; TaskID исходника — отдельный номер FBBN. Не выводить один из другого.
+15 исходных диапазонов +2 служебных охватывают23 слова кода. Счётчики портов
+включают EN/ENO. Команда body по-прежнему выдаёт19 слов.
+Новые эталоны codec/testdata/definition-wrapper-* (38 компиляций,14 успехов),
+definition-properties-* (16 normal program setter/readback controls), сырая
+Ghidra ghidra-definition-properties-09.json.gz. FBBN baredecimal0..2047, '&'
+неприемлемо; номер записи0..1023; порты1..65 включая EN/ENO; ASCII-имя1..64.
+Нативные setters допускают отрицательные счётчики и65-байтные имена; Go их
+отклоняет, чтобы избежать некорректных значений и усечения. Заголовок flags0,
+прочие варианты не генерируются. Writer layout проверен старым hash-pinned
+fb-writer Ghidra. Далее — секция определений, ресурсы/инициализация экземпляров,
+связывание задач. Полный N1 и аппаратная проверка ещё отсутствуют.
+
 Самый новый этап: `compiler.PlanOfflineFBAllocation` и
 `CompileCXPFBDefinitionBody` размещают офлайн-скаляры и генерируют19 слов тела
 BLINK прямо из CXP на обеих моделях. CLI `compile-fb-definition-body -model MODEL

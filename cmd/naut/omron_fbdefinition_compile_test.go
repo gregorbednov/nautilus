@@ -35,3 +35,35 @@ func TestOmronCompileFBDefinitionBodyCLI(t *testing.T) {
 		}
 	}
 }
+
+func TestOmronCompileFBDefinitionRecordCLI(t *testing.T) {
+	const definition = "Resource[0].FunctionBlocks.FunctionBlockWrapper[0].FunctionBlock"
+	for _, spec := range []struct{ file, model string }{{"cj1m.cxp", codec.CJ1MCPU21}, {"cj1h.cxp", codec.CJ1HCPU65}} {
+		file := "../../omron/cxp/testdata/" + spec.file
+		data, err := captureOmronBodyCommand(t, omronCompileFBDefinitionRecord, []string{"-model", spec.model, "-definition", definition, "-number", "0", "-timer-mode", "bcd", file})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var report struct {
+			Format                                                                string
+			DefinitionRecordGenerated, Linked, InstancesPlaced, HardwareQualified bool
+			Result                                                                compiler.FBDefinition
+		}
+		if err := json.Unmarshal(data, &report); err != nil {
+			t.Fatal(err)
+		}
+		if report.Format != "cj1-fb-definition-record-containers" || !report.DefinitionRecordGenerated || report.Linked || report.InstancesPlaced || report.HardwareQualified || len(report.Result.RecordWords) != 46 || len(report.Result.Body.Words) != 23 || len(report.Result.Body.Generated) != 2 || report.Result.InputsIncludingEN != 4 || report.Result.OutputsIncludingENO != 2 {
+			t.Fatal("incorrect definition record report", string(data))
+		}
+		for _, number := range []string{"-1", "1024", "bad"} {
+			data, err := captureOmronBodyCommand(t, omronCompileFBDefinitionRecord, []string{"-model", spec.model, "-definition", definition, "-number", number, "-timer-mode", "bcd", file})
+			if err == nil || len(data) != 0 {
+				t.Fatal("invalid numbering emitted a record")
+			}
+		}
+		data, err = captureOmronBodyCommand(t, omronCompileFBDefinitionRecord, []string{"-model", spec.model, "-definition", definition, "-timer-mode", "bcd", file})
+		if err == nil || len(data) != 0 {
+			t.Fatal("missing explicit definition number accepted")
+		}
+	}
+}

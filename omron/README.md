@@ -71,7 +71,10 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   a bounded offline scalar allocator now connects it to CXP definition source.
   `compile-fb-definition-body` produces all19 body words and15 source spans
   from both original projects, with exact N1 agreement and40 native allocation
-  cases. Instance placement/initialization, wrappers and image linking remain pending.
+  cases. `compile-fb-definition -number N` also generates the entry/return and
+  record header: all46 words match each native BLINK definition record.
+  Number assignment is explicit. Instance placement/initialization, section
+  headers and image linking remain pending.
 * `internal/fbcode`: qualified invocation postamble operations and a frame
   assembler for already encoded/allocated transfer instructions. It matches all
   26 containers of the saved BLINK call and supports the restricted standalone

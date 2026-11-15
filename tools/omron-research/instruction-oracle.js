@@ -37,12 +37,13 @@ setImmediate(()=>{
   const getBaseAddress=native(0x1d0137,'int',['pointer','int','pointer','pointer']);
   const setUseFB=native(0x1cf742,'void',['pointer','int']);
   const getUseFB=native(0x1cf79a,'int',['pointer']);
-  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1','fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1'].includes(request.probe))throw new Error('unsupported probe');
+  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1','fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1'].includes(request.probe))throw new Error('unsupported probe');
   const programType=request.programType===undefined?0:request.programType;
-  if(programType!==(['fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1'].includes(request.probe)?32:0))throw new Error('invalid program type/probe combination');
-  const compileContext=['fb-body-context-v1','fb-instruction-compile-v1'].includes(request.probe);
+  if(programType!==(['fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1'].includes(request.probe)?32:0))throw new Error('invalid program type/probe combination');
+  const compileContext=['fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1'].includes(request.probe);
+  const useCompile=['fb-instruction-compile-v1','fb-definition-properties-v1'].includes(request.probe);
   let arrayCtor,arrayDtor,arraySet,compileInstruction,isCompiled;
-  if(request.probe==='fb-instruction-compile-v1'){
+  if(useCompile){
    const mfc=Process.enumerateModules().find(x=>x.name.toLowerCase()==='mfc42.dll');if(!mfc)throw new Error('missing MFC42');
    const getProc=new NativeFunction(Process.getModuleByName('kernel32.dll').getExportByName('GetProcAddress'),'pointer',['pointer','pointer'],'stdcall');
    const ctorThunk=library.base.add(0x24e332);
@@ -88,7 +89,7 @@ setImmediate(()=>{
     const descriptor=kbase.add(0x2d50).readPointer();
     const profile={device:cpu.device,cpu:cpu.cpu,selector:descriptor.add(0x44).readU32(),familyMaskLow:descriptor.add(0x68).readU32(),familyMaskHigh:descriptor.add(0x6c).readU32(),timerModeBcd:bcd,timerModeBinary:binary};
     if(compileContext)profile.useFunctionBlocks=getUseFB(kbase);
-    if(['fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1'].includes(request.probe)){
+    if(['fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1'].includes(request.probe)){
      profile.bases=[];
      for(let index=0;index<5;index++){
       const name=string('',profileStrings),size=Memory.alloc(4),address=Memory.alloc(4),secondSize=Memory.alloc(4);
@@ -102,13 +103,27 @@ setImmediate(()=>{
      const owned=[];
      const result={id:test.id,device:cpu.device,cpu:cpu.cpu,mnemonic:test.mnemonic,operands:test.operands,initialiseResult:null,operandResults:[],normalized:[],encodeResult:null,words:[],accepted:false};
      try{
+      if(request.probe==='fb-definition-properties-v1'){
+       const p=test.definitionProperties;if(!p || !Number.isInteger(p.number) || !Number.isInteger(p.inputCount) || !Number.isInteger(p.outputCount))throw new Error('invalid definition properties');
+       const size=library.base.add(0x2726bc).readU32();if(size!==752)throw new Error('unreviewed program size');
+       const program=Memory.alloc(size);retained.push(program);
+       native(0x1d5677,'pointer',['pointer'])(program);
+       try{
+        native(0x1d6216,'void',['pointer','int'])(program,32);
+        native(0x12e60,'void',['pointer','int'])(program,p.number);
+        native(0x12d80,'void',['pointer','pointer'])(program,string(p.name,owned));
+        const inputs=native(0x21b323,'int',['pointer','int'])(program,p.inputCount),outputs=native(0x21b34b,'int',['pointer','int'])(program,p.outputCount);
+        const name=string('',owned);native(0x12da0,'void',['pointer','pointer'])(program,name);
+        result.properties={number:native(0x12e80,'int',['pointer'])(program),name:text(name.readPointer()),inputsResult:inputs,outputsResult:outputs,inputCount:program.add(0xec).readS32(),outputCount:program.add(0xf0).readS32(),flags:program.add(0x200).readU32()};
+       }finally{native(0x1d5c77,'void',['pointer'])(program);}
+      }
       result.initialiseResult=initialise(instance,kbase,string(test.mnemonic,owned),0);
       const definition=instance.add(0x2c).readPointer();
       if(result.initialiseResult===1 && !definition.isNull()){
        result.definition=text(definition.add(12).readPointer());
        result.arity=definition.add(0xc0).readU8();
        if(result.arity===test.operands.length){
-        if(request.probe==='fb-instruction-compile-v1'){
+        if(useCompile){
          const array=Memory.alloc(20);retained.push(array);arrayCtor(array);
          try{
           for(let i=0;i<test.operands.length;i++){const chars=Memory.allocUtf8String(test.operands[i]);retained.push(chars);arraySet(array,i,chars);}

@@ -19,56 +19,74 @@ import (
 )
 
 type inputCase struct {
-	Code              []uint32        `json:"code,omitempty"`
-	SourceSHA256      string          `json:"sourceSHA256,omitempty"`
-	SourceOffsetWords int             `json:"sourceOffsetWords,omitempty"`
-	Mutation          *decodeMutation `json:"mutation,omitempty"`
-	Parameter         *parameterInput `json:"parameter,omitempty"`
-	InvocationOption  *bool           `json:"invocationOption,omitempty"`
-	ID                string          `json:"id"`
-	Mnemonic          string          `json:"mnemonic"`
-	Operands          []string        `json:"operands"`
+	DefinitionProperties *definitionPropertiesInput `json:"definitionProperties,omitempty"`
+	Code                 []uint32                   `json:"code,omitempty"`
+	SourceSHA256         string                     `json:"sourceSHA256,omitempty"`
+	SourceOffsetWords    int                        `json:"sourceOffsetWords,omitempty"`
+	Mutation             *decodeMutation            `json:"mutation,omitempty"`
+	Parameter            *parameterInput            `json:"parameter,omitempty"`
+	InvocationOption     *bool                      `json:"invocationOption,omitempty"`
+	ID                   string                     `json:"id"`
+	Mnemonic             string                     `json:"mnemonic"`
+	Operands             []string                   `json:"operands"`
 }
 type nativeResult struct {
-	CompileResult      *int                 `json:"compileResult"`
-	CompiledFlag       *int                 `json:"compiledFlag"`
-	UseFunctionBlocks  *int                 `json:"useFunctionBlocks"`
-	Decoded            []decodedInstruction `json:"decoded"`
-	SourceSHA256       string               `json:"sourceSHA256"`
-	SourceOffsetWords  int                  `json:"sourceOffsetWords"`
-	ObjectSize         int                  `json:"objectSize"`
-	Bases              []nativeBase         `json:"bases"`
-	Parameter          *parameterResult     `json:"parameter"`
-	Invocation         *invocationResult    `json:"invocation"`
-	Probe              string               `json:"probe"`
-	FlagsBeforeControl uint32               `json:"flagsBeforeControl"`
-	ControlStages      []controlStage       `json:"controlStages"`
-	Schema             int                  `json:"schemaVersion"`
-	Kind               string               `json:"kind"`
-	Sequence           int                  `json:"sequence"`
-	ID                 string               `json:"id"`
-	Device             string               `json:"device"`
-	CPU                string               `json:"cpu"`
-	Mnemonic           string               `json:"mnemonic"`
-	Operands           []string             `json:"operands"`
-	Accepted           bool                 `json:"accepted"`
-	Initialise         int                  `json:"initialiseResult"`
-	OperandResults     []uint32             `json:"operandResults"`
-	EncodeResult       *int                 `json:"encodeResult"`
-	Words              []uint32             `json:"words"`
-	Selector           uint32               `json:"selector"`
-	Low                uint32               `json:"familyMaskLow"`
-	High               uint32               `json:"familyMaskHigh"`
-	Compiler           string               `json:"compilerSHA256"`
-	Request            string               `json:"requestSHA256"`
-	Architecture       string               `json:"architecture"`
-	ProgramType        *int                 `json:"programType"`
-	UnitVersion        *string              `json:"unitVersion"`
-	TimerMode          string               `json:"timerCounterMode"`
-	FullProgram        *bool                `json:"fullProgramCompiled"`
-	CaseCount          int                  `json:"caseCount"`
-	ModeBCD            *int                 `json:"timerModeBcd"`
-	ModeBinary         *int                 `json:"timerModeBinary"`
+	Properties         *definitionPropertiesResult `json:"properties"`
+	CompileResult      *int                        `json:"compileResult"`
+	CompiledFlag       *int                        `json:"compiledFlag"`
+	UseFunctionBlocks  *int                        `json:"useFunctionBlocks"`
+	Decoded            []decodedInstruction        `json:"decoded"`
+	SourceSHA256       string                      `json:"sourceSHA256"`
+	SourceOffsetWords  int                         `json:"sourceOffsetWords"`
+	ObjectSize         int                         `json:"objectSize"`
+	Bases              []nativeBase                `json:"bases"`
+	Parameter          *parameterResult            `json:"parameter"`
+	Invocation         *invocationResult           `json:"invocation"`
+	Probe              string                      `json:"probe"`
+	FlagsBeforeControl uint32                      `json:"flagsBeforeControl"`
+	ControlStages      []controlStage              `json:"controlStages"`
+	Schema             int                         `json:"schemaVersion"`
+	Kind               string                      `json:"kind"`
+	Sequence           int                         `json:"sequence"`
+	ID                 string                      `json:"id"`
+	Device             string                      `json:"device"`
+	CPU                string                      `json:"cpu"`
+	Mnemonic           string                      `json:"mnemonic"`
+	Operands           []string                    `json:"operands"`
+	Accepted           bool                        `json:"accepted"`
+	Initialise         int                         `json:"initialiseResult"`
+	OperandResults     []uint32                    `json:"operandResults"`
+	EncodeResult       *int                        `json:"encodeResult"`
+	Words              []uint32                    `json:"words"`
+	Selector           uint32                      `json:"selector"`
+	Low                uint32                      `json:"familyMaskLow"`
+	High               uint32                      `json:"familyMaskHigh"`
+	Compiler           string                      `json:"compilerSHA256"`
+	Request            string                      `json:"requestSHA256"`
+	Architecture       string                      `json:"architecture"`
+	ProgramType        *int                        `json:"programType"`
+	UnitVersion        *string                     `json:"unitVersion"`
+	TimerMode          string                      `json:"timerCounterMode"`
+	FullProgram        *bool                       `json:"fullProgramCompiled"`
+	CaseCount          int                         `json:"caseCount"`
+	ModeBCD            *int                        `json:"timerModeBcd"`
+	ModeBinary         *int                        `json:"timerModeBinary"`
+}
+
+type definitionPropertiesInput struct {
+	Number      int    `json:"number"`
+	Name        string `json:"name"`
+	InputCount  int    `json:"inputCount"`
+	OutputCount int    `json:"outputCount"`
+}
+type definitionPropertiesResult struct {
+	Number        int    `json:"number"`
+	Name          string `json:"name"`
+	InputsResult  int    `json:"inputsResult"`
+	OutputsResult int    `json:"outputsResult"`
+	InputCount    int    `json:"inputCount"`
+	OutputCount   int    `json:"outputCount"`
+	Flags         uint32 `json:"flags"`
 }
 
 type decodeMutation struct {
@@ -198,10 +216,10 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 	}
 	const compiler = "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141"
 	programType := 0
-	if probe == "fb-body-operands-v1" || probe == "fb-native-decode-v1" || probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" {
+	if probe == "fb-body-operands-v1" || probe == "fb-native-decode-v1" || probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" || probe == "fb-definition-properties-v1" {
 		programType = 32
 	}
-	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1" && probe != "fb-native-decode-v1" && probe != "fb-body-context-v1" && probe != "fb-instruction-compile-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
+	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1" && probe != "fb-native-decode-v1" && probe != "fb-body-context-v1" && probe != "fb-instruction-compile-v1" && probe != "fb-definition-properties-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
 		t.Fatal("unsupported oracle provenance")
 	}
 	assets := map[string][]byte{}
@@ -296,14 +314,14 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				t.Fatal("library configuration mismatch")
 			}
 		case "profile":
-			if probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" {
+			if probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" || probe == "fb-definition-properties-v1" {
 				if row.UseFunctionBlocks == nil || *row.UseFunctionBlocks != 1 {
 					t.Fatal("FB mode readback mismatch")
 				}
 			} else if row.UseFunctionBlocks != nil {
 				t.Fatal("unexpected FB mode readback")
 			}
-			if probe == "fb-body-operands-v1" || probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" {
+			if probe == "fb-body-operands-v1" || probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" || probe == "fb-definition-properties-v1" {
 				wantBases := []nativeBase{{0, "T3072", 60416, 1024}, {1, "C3072", 64512, 1024}, {2, "DIFF8191", 40959, 0}, {3, "H512", 55808, 896}, {4, "H1408", 56704, 128}}
 				if !reflect.DeepEqual(row.Bases, wantBases) {
 					t.Fatal("base register readback differs", row.Bases)
@@ -336,7 +354,7 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 			if probe != "fb-native-decode-v1" && (len(row.Decoded) != 0 || row.SourceSHA256 != "" || row.SourceOffsetWords != 0) {
 				t.Fatal("decode results presented as compile evidence")
 			}
-			if probe != "fb-instruction-compile-v1" && (row.CompileResult != nil || row.CompiledFlag != nil) {
+			if probe != "fb-instruction-compile-v1" && probe != "fb-definition-properties-v1" && (row.CompileResult != nil || row.CompiledFlag != nil) {
 				t.Fatal("instruction compile presented as encode-only evidence")
 			}
 			if probe != "control-bits-v1" && len(row.ControlStages) != 0 {
@@ -349,6 +367,26 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				t.Fatal("orphan case")
 			}
 			want := cases[caseIndex]
+			if probe == "fb-definition-properties-v1" {
+				if want.DefinitionProperties == nil || row.Properties == nil {
+					t.Fatal("missing definition properties")
+				}
+				p, r := want.DefinitionProperties, row.Properties
+				if p.Number != r.Number || p.Name != r.Name || r.Flags != 0 {
+					t.Fatal("definition identity/flags mismatch")
+				}
+				for _, pair := range [][3]int{{p.InputCount, r.InputsResult, r.InputCount}, {p.OutputCount, r.OutputsResult, r.OutputCount}} {
+					if pair[0] < 66 {
+						if pair[1] != 1 || pair[2] != pair[0] {
+							t.Fatal("accepted count readback differs")
+						}
+					} else if pair[1] != 0 || pair[2] != 0 {
+						t.Fatal("rejected count changed default")
+					}
+				}
+			} else if want.DefinitionProperties != nil || row.Properties != nil {
+				t.Fatal("unexpected definition properties")
+			}
 			if probe == "parameter-transfer-v1" {
 				if want.Parameter == nil || row.Parameter == nil || !reflect.DeepEqual(row.Parameter.Input, *want.Parameter) {
 					t.Fatal("parameter input correlation mismatch")
@@ -381,7 +419,7 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				if offset != len(want.Code) {
 					t.Fatal("incomplete decoded word coverage")
 				}
-			} else if probe == "fb-instruction-compile-v1" {
+			} else if probe == "fb-instruction-compile-v1" || probe == "fb-definition-properties-v1" {
 				if row.CompileResult == nil || row.CompiledFlag == nil || row.EncodeResult != nil || row.Initialise != 1 || len(row.OperandResults) != len(want.Operands) {
 					t.Fatal("incomplete instruction compile result")
 				}

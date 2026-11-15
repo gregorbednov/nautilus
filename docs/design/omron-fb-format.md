@@ -159,6 +159,52 @@ FBCALL operand must not be assumed to be the saved InstanceNum.
 
 ## Inspector and next qualification
 
+### Standalone definition record generation
+
+`compiler.CompileCXPFBDefinition` and `naut omron compile-fb-definition` now
+generate one definition record from source, including its entry/return code:
+
+```sh
+naut omron compile-fb-definition -model 'CJ1H-H CPU65' \
+  -definition 'Resource[0].FunctionBlocks.FunctionBlockWrapper[0].FunctionBlock' \
+  -number 0 -timer-mode bcd omron/cxp/testdata/cj1h.cxp
+```
+
+The result contains23 code containers and the complete46-word definition record.
+Every word of that record matches both original N1 captures, including all23
+header words. The generator derives name, relative frame, instructions, body
+number and scalar port counts from CXP. The caller explicitly supplies the
+definition number; the project-wide identifier allocator is still absent.
+Number and source TaskID/body number remain distinct fields. Fifteen source
+spans move past the two-word entry; two generated spans cover entry/return.
+Body spans are relative to code, not the23-word record header.
+
+Fresh `codec/testdata/definition-wrapper-*` evidence covers38 normal native
+instruction compilations:14 successful FBBN/FBBRET cases and24 rejected controls.
+FBBN uses a bare canonical decimal number0..2047; `&` syntax is rejected. The
+entry is b0400809,65440000|number; return is bb800805,80000000. Public ordinary
+instruction compilation still rejects internal FB primitives.
+
+`definition-properties-*` contains16 further native controls using normally
+constructed PLC_Program objects and real setters/getters. ProgramType32 yields
+record flags0. SetFBNum writes+e4; the writer masks its low10 bits. Inputs and
+outputs occupy+ec/+f0 and the setters reject66 but accept65. They also accept
+negative counts; those malformed values are deliberately rejected by Go. The
+writer packs counts as inputs<<8|outputs. Source counts include implicit EN/ENO.
+The normal name setter retains65 bytes, while the writer copies at most64;
+Go rejects long/non-ASCII names and numbers outside0..1023 to avoid silent
+truncation/aliasing. Flags, alternate name encodings and other header variants
+are not generated. Genuine property functions are hash-pinned as
+ghidra-definition-properties-09.json.gz; the existing fb-writer Ghidra export
+corroborates padding, byte order, reserved fields and total record length.
+
+Changed-name/body-number/definition-number and port-boundary tests exercise
+source-dependent output. These are component tests, not new full-project CX
+captures or hardware runs. The output is an unlinked standalone record:
+definition section headers, instance placement/initialization, task linking
+and the full N1 image remain pending. The body-only command retains its19-word
+output and does not acquire wrappers implicitly.
+
 ### Source-driven offline scalar definition body
 
 `compiler.PlanOfflineFBAllocation` now assigns the bounded scalar relative frame.
@@ -177,7 +223,8 @@ between FBBN/FBBRET. The generator reads declarations and graphical cells, not
 the saved N1. Swapping PV/PN declarations changes their timer operand words;
 adding13 private BOOLs crosses a packing boundary and moves both word presets.
 `relativeFrameAllocated` is true; instancesPlaced/linked/hardwareQualified stay
-false. FBBN/FBBRET, instance initialization, absolute placement, task records
+false. This body-only API omits FBBN/FBBRET; the separate record generator above
+now supplies them. Instance initialization, absolute placement, task records
 and the complete image are still absent.
 
 Qualified rules: implicit EN/ENO occupy BR3 bits0/1. BOOLs are assigned by usage
