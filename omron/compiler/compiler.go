@@ -1,6 +1,7 @@
 // Package compiler validates selected native mnemonic rungs and emits their
-// instruction containers. It does not allocate symbols/FBs or assemble tasks,
-// complete project images or PLC transfer payloads.
+// instruction containers, including a bounded offline scalar FB definition
+// body with relative allocation. It does not place FB instances or assemble
+// tasks, complete project images or PLC transfer payloads.
 package compiler
 
 import (

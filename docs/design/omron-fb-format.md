@@ -3,8 +3,9 @@
 Research date: 2026-11-15. Observed binaries are pinned CX-Programmer 9.6.1.1
 and CX-Pdata.dll SHA-256
 `a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141`.
-This describes saved BLINK captures and a read-only inspector, not an FB compiler
-or hardware qualification. All offsets below are zero-based 32-bit word offsets
+This describes saved BLINK captures, bounded inspection and standalone FB body
+compilation, not a complete executable project or hardware qualification.
+All offsets below are zero-based 32-bit word offsets
 in the big-endian N1 file; event buffers instead contain x86 little-endian words.
 
 ## Prefix records
@@ -158,6 +159,56 @@ FBCALL operand must not be assumed to be the saved InstanceNum.
 
 ## Inspector and next qualification
 
+### Source-driven offline scalar definition body
+
+`compiler.PlanOfflineFBAllocation` now assigns the bounded scalar relative frame.
+`compiler.CompileCXPFBDefinitionBody` combines it with the strict graphical source
+reader and relative codec. CLI:
+
+```sh
+naut omron compile-fb-definition-body -model 'CJ1H-H CPU65' \
+  -definition 'Resource[0].FunctionBlocks.FunctionBlockWrapper[0].FunctionBlock' \
+  -timer-mode bcd omron/cxp/testdata/cj1h.cxp
+```
+
+The command returns the frame table, memory footprint and19 machine containers
+with15 source spans. Both original projects match the complete native body
+between FBBN/FBBRET. The generator reads declarations and graphical cells, not
+the saved N1. Swapping PV/PN declarations changes their timer operand words;
+adding13 private BOOLs crosses a packing boundary and moves both word presets.
+`relativeFrameAllocated` is true; instancesPlaced/linked/hardwareQualified stay
+false. FBBN/FBBRET, instance initialization, absolute placement, task records
+and the complete image are still absent.
+
+Qualified rules: implicit EN/ENO occupy BR3 bits0/1. BOOLs are assigned by usage
+input, output, internal, preserving declaration order within each usage. The
+BOOL region rounds up to16-bit words; INT/UINT/WORD follow it in the same usage
+order. Internal TIMERs use consecutive BR0 slots in declaration order. The raw
+GetMemorySize result counts logical bits (BLINK: BR0=32, BR3=37); packed frame
+sizes are two timer words and three data words. This does not establish CPU
+instance capacity. Direct AT bindings, retained data, arrays, INOUT/external
+variables, other types and online reserves are rejected. The CXP definition
+reader now explicitly requires the observed five zero online reserve pairs.
+
+The new native oracle uses a real `Omron.CXP.POUHeadDoc.Doc2` object with normal
+AddVariable/GetAddressOffset/GetMemorySize/GetUsedBOOLAndWORDSize calls. PHeadDoc
+requests online BOOL/OTHER reservation sizes from its owner through events10/11
+on IIDd9e8bf87-d3ce-4964-aa4a-71aeb47a2d18. A document without an event sink can
+return unreliable WORD offsets. The qualified offline owner supplies zero
+reservations and explicitly disables online editing; it does not patch object
+memory. Do not use the early unsinked smoke runs as allocation evidence.
+
+`compiler/testdata/allocation-*` archives40 independent native documents: the
+original declarations, their reversal/rename, mixed scalar usages/types and
+BOOL counts around14/16/32-bit boundaries. Every binding, logical bit size and
+packed BOOL/OTHER word size matches Go. This header allocation API is not CPU
+specific; complete code comparison separately covers both qualified CPU models.
+The capsule checks request hashes, actual loaded module hash, event settings,
+method RVAs, lifecycle and input/result correlation. PHeadDoc SHA is
+463eb4402bb6fa00453a5d7a745d77ced6be454d77aa2a683eb67de7e38ba71c.
+Genuine Ghidra output is hash-pinned as ghidra-phead-allocation-08.json.gz:
+COM RVAs6ac0/73e0/eb60 correspond to the three queried allocation methods.
+
 ### Independent short relative encoding
 
 `codec.EncodeFBRelativeInstruction` and `codec.EncodeFBRelativeBody` now emit
@@ -189,10 +240,10 @@ into short offsets. Both saved BLINK bodies reconstruct all19 containers exactly
 from their already allocated typed relative instructions.
 
 These are successful internal instruction compilations, not full-program
-compilations. The missing connection is still source declarations to relative
-storage allocation, followed by definition/instance records and task linking.
-The observed source declaration order alone is insufficient evidence for a
-general allocation policy. Ordinary physical-address encoding remains separate.
+compilations. The source-driven stage above supplies the qualified offline
+scalar frame. Definition/instance records and task linking remain pending;
+other types and placement policies are still unqualified. Ordinary
+physical-address encoding remains separate.
 
 ### Independent relative body decoding
 
@@ -214,7 +265,8 @@ This includes the FB record inventory and `relativeBodies`. Word spans inside
 each body are relative to its first instruction; `prefixOffsetWords` locates
 that instruction in the N1 prefix (359 for BLINK). The original19 words decode
 to the same15 instructions previously lowered from source. Connecting source
-variables to these displacements remains an allocation problem.
+variables to these displacements is now covered by the bounded offline source
+stage above; other allocation contexts remain unqualified.
 
 The new native probe constructs PLC_Program normally, uses SetProgramType32,
 calls Decompile(kbase,int-array,count), walks the normal AddToProgram list and

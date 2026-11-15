@@ -115,6 +115,21 @@ func (doc *Document) sourceForFBDefinition(path string) (*FBDefinitionSource, er
 			return nil, err
 		}
 	}
+	reserve, err := sourceField(block.Fields, "OnlineReserveMemory", "object", path)
+	if err != nil {
+		return nil, err
+	}
+	if len(reserve.Fields) != 6 {
+		return nil, definitionError(path, reserve.Line, "unsupported online reserve layout")
+	}
+	if err := sourceValue(reserve.Fields, "NumRegisters", "5", path); err != nil {
+		return nil, err
+	}
+	for base := 0; base < 5; base++ {
+		if err := sourceValue(reserve.Fields, fmt.Sprintf("BR[%d]", base), `"0,0"`, path); err != nil {
+			return nil, err
+		}
+	}
 	name, err := sourceField(block.Fields, "Name", "scalar", path)
 	if err != nil {
 		return nil, err

@@ -68,7 +68,10 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   short typed BR0/BR3 encoding is also available through
   `codec.EncodeFBRelativeInstruction/Body`, matching218 native compilations.
   It reconstructs the19-word saved bodies with already allocated references;
-  allocation and source definition compilation remain pending.
+  a bounded offline scalar allocator now connects it to CXP definition source.
+  `compile-fb-definition-body` produces all19 body words and15 source spans
+  from both original projects, with exact N1 agreement and40 native allocation
+  cases. Instance placement/initialization, wrappers and image linking remain pending.
 * `internal/fbcode`: qualified invocation postamble operations and a frame
   assembler for already encoded/allocated transfer instructions. It matches all
   26 containers of the saved BLINK call and supports the restricted standalone

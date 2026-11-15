@@ -15,6 +15,24 @@
 
 ## Что уже реализовано
 
+Самый новый этап: `compiler.PlanOfflineFBAllocation` и
+`CompileCXPFBDefinitionBody` размещают офлайн-скаляры и генерируют19 слов тела
+BLINK прямо из CXP на обеих моделях. CLI `compile-fb-definition-body -model MODEL
+-definition PATH -timer-mode bcd FILE`. Таблица размещения и15 исходных диапазонов
+в отчёте. EN/ENO bits0/1; BOOL по usage input/output/internal; INT/UINT/WORD после
+округлённой BOOL-области; внутренние TIMER по BR0. Только нулевые онлайн-резервы,
+без AT/retained/arrays/INOUT/прочих типов. Экземпляры/инициализация/обёртки/задачи
+и N1 ещё не собираются. Полный19-словный результат совпал с обоими N1; перестановка
+PV/PN и переход BOOL через границу слова меняют ожидаемые операнды.
+Эталоны `omron/compiler/testdata/allocation-*`:40 настоящих COM-документов
+PHeadDoc, все смещения/размеры совпадают с Go. Важно: нужен штатный event sink
+для GetOnlineBOOLMemorySize/GetOnlineOTHERMemorySize с нулевыми ответами офлайн.
+Без подписчика WORD-смещения ненадёжны. Ранние allocation-smoke-01/02 без sink
+не считать доказательствами. Окончательный локальный run allocation-library-06;
+проверены hash загруженного PHeadDoc и COM RVAs6ac0/73e0/eb60. Инструмент:
+Invoke-CJ1AllocationOracle.ps1. Далее — обёртка определения, ресурсы/инициализация
+экземпляров и связывание задач; дополнительные полные CX-проекты ещё нужны.
+
 Последний этап: `codec.EncodeFBRelativeInstruction/Body` независимо собирают
 короткие типизированные BR0/BR3-формы тела FB, смещения -2048..2047, TIMH в BCD.
 Корпус `br-compile-*`:292 штатных InstructionInst::Compile (280 успешных,
