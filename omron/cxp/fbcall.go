@@ -44,6 +44,7 @@ type FBCallPin struct {
 type FBCallPlan struct {
 	Program        string        `json:"program"`
 	Rung           string        `json:"rung"`
+	CallLine       int           `json:"callLine"`
 	Instance       string        `json:"instance"`
 	InstanceNumber int           `json:"instanceNumber"`
 	Definition     string        `json:"definition"`
@@ -182,6 +183,7 @@ func (doc *Document) planFBCall(program, rungPath string) (*FBCallPlan, error) {
 	var inputs, outputs []pinCell
 	var enable Field
 	var enableSource, instanceName string
+	callLine := 0
 	wires := 0
 	for _, cell := range rung.Graphic {
 		if cell.Kind != "scalar" || seenCells[cell.Name] {
@@ -214,6 +216,7 @@ func (doc *Document) planFBCall(program, rungPath string) (*FBCallPlan, error) {
 				return nil, fbError(rungPath, cell.Line, "unsupported call")
 			}
 			instanceName = c[6]
+			callLine = cell.Line
 		case "FB_INPUT", "FB_OUTPUT":
 			row, e := fbNumber(c[1], 4)
 			if e != nil || row < 2 || c[2] != "8" {
@@ -345,7 +348,7 @@ func (doc *Document) planFBCall(program, rungPath string) (*FBCallPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	plan := &FBCallPlan{Program: program, Rung: rungPath, Instance: instanceName, InstanceNumber: instanceNumber, Definition: instanceSymbol.AuxType, Version: version.Text()}
+	plan := &FBCallPlan{Program: program, Rung: rungPath, CallLine: callLine, Instance: instanceName, InstanceNumber: instanceNumber, Definition: instanceSymbol.AuxType, Version: version.Text()}
 	for _, wrapper := range wrappers {
 		block, e := sourceField(wrapper.Fields, "FunctionBlock", "object", program)
 		if e != nil {

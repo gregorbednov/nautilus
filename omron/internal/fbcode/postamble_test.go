@@ -39,6 +39,11 @@ func TestInvocationPostambleBoundsAndOwnership(t *testing.T) {
 
 func TestInvocationAssemblyRejectsUnqualifiedBodies(t *testing.T) {
 	call := []uint32{0xb2410806, 0x61440000, 0x65440400, 0x80000000}
+	for _, invalid := range [][]uint32{{0xb2410806, 0x61440800, 0x65440400, 0x80000000}, {0xb2410806, 0x61440000, 0x65440800, 0x80000000}} {
+		if words, err := fbcode.AssembleInvocation(8, [][]uint32{invalid}, false); err == nil || words != nil {
+			t.Fatal("out-of-range call bypassed identifier validation")
+		}
+	}
 	for _, body := range [][][]uint32{nil, {nil}, {call, call}, {{0xb2410806, 0x61440000, 0x65440400}}, {{0xb2410806, 0x61400000, 0x65440400, 0x80000000}}, {{0xb000080e}, call}, {{0xb2410140}, call}, make([][]uint32, 129)} {
 		if words, err := fbcode.AssembleInvocation(8, body, false); err == nil || words != nil {
 			t.Fatal("unqualified invocation body produced code")

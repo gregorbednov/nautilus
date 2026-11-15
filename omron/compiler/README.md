@@ -161,6 +161,30 @@ The scoped Omron CLI tests pass. The broader Windows CLI suite still hits
 previously recorded executable-name/path-separator failures and a stdout-capture
 timeout outside the Omron tests; it is not a passing whole-application check.
 
+`CompileCXPFBCallBody` / `naut omron compile-fb-call-body` now lower the observed
+seven-cell single-call scalar rung separately from the textual APIs. The
+definition/instance identifiers, PH_TYPE declarations, pin order and bindings
+come from CXP; no native code is copied from an N1 template. The actual stock
+CX-P caller selects invocation optionfalse, corroborated in Ghidra. FBICALL
+uses decimal identifiers0..2047, verified against122 fresh observations.
+
+```sh
+naut omron compile-fb-call-body -model 'CJ1M CPU21' \
+  -program 'Resource[0].Programs.Program[0]' \
+  -rung 'Resource[0].Programs.Program[0].Sections.Sec[0].ProgramData.R[4]' \
+  omron/cxp/testdata/cj1m.cxp
+```
+
+The27 emitted containers match the complete LD+call range in both saved N1s.
+Six source spans and three generated spans cover every word exactly once;
+three symbol uses retain declaration/use provenance. Failure emits no body.
+This command produces an UNLINKED fragment: it does not generate the referenced
+BLINK definition, initialized instances, native task or full N1. Only one LD
+enable, three scalar inputs and one scalar output in the measured geometry are
+supported. INOUT, arrays, other graphs and full assignment/range checking remain
+unqualified. Textual APIs and whole-program compilation still reject graphics;
+they do not silently concatenate this fragment into an incomplete executable.
+
 This emits a selected instruction body only. Nautilus LD graph lowering,
 general symbol/type allocation, full palette, graphical FB lowering, task wrappers,
 native image generation and deployment remain unfinished. It cannot compile

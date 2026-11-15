@@ -32,7 +32,8 @@ func InvocationHeader(selector uint32, instructions int) ([]uint32, error) {
 // AssembleInvocation surrounds already encoded/allocated body instructions with
 // the qualified skeleton. It supports one FBICALL and measured transfer forms.
 // It does NOT encode private operands, allocate ports or lower CXP/LD graphs.
-// No source compiler calls this operation until those stages are qualified.
+// The standalone source-call compiler supplies those stages for its restricted
+// layout; this primitive does not qualify general graphical FB compilation.
 func AssembleInvocation(selector uint32, body [][]uint32, option bool) ([]uint32, error) {
 	pre, post, err := InvocationSkeleton(selector, option)
 	if err != nil {
@@ -53,7 +54,7 @@ func AssembleInvocation(selector uint32, body [][]uint32, option bool) ([]uint32
 				return nil, ErrPostamble
 			}
 		case 0xb2410806:
-			if len(words) != 4 || words[1]&0xffff0000 != 0x61440000 || words[2]&0xffff0000 != 0x65440000 || words[3] != 0x80000000 {
+			if len(words) != 4 || words[1]&0xffff0000 != 0x61440000 || words[2]&0xffff0000 != 0x65440000 || words[3] != 0x80000000 || words[1]&0xffff > maxCallIdentifier || words[2]&0xffff > maxCallIdentifier {
 				return nil, ErrPostamble
 			}
 			callCount++

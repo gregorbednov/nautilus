@@ -158,6 +158,40 @@ FBCALL operand must not be assumed to be the saved InstanceNum.
 
 ## Inspector and next qualification
 
+### Standalone source call compilation
+
+`compiler.CompileCXPFBCallBody` and `naut omron compile-fb-call-body` now generate
+the observed seven-cell scalar call rung from CXP, including its LD enable.
+The source plan supplies typed pins, bindings and identifiers; the generator
+supplies native transfers, FBICALL and the qualified invocation envelope. Both
+original projects produce all27 containers matching task0 indices25..51.
+Every word has either a source span (six instructions/macros) or a generated
+span (header/prologue/epilogue), and three symbol uses retain their provenance.
+
+Fresh FBICALL evidence contains122 observations:98 canonical successful decimal
+identifier combinations,16 canonical rejected bounds and eight noncanonical
+syntax controls. Both identifier domains are0..2047;2048 is rejected on either
+operand. This does not establish PLC resource capacity or prove the referenced
+records were generated. Internal '#' syntax is distinct: #0400 encodes decimal400,
+so `fbcode.InstanceCall` accepts integer IDs and emits only the '&' form.
+The immutable capsule is codec/testdata/fbicall-*; exploratory runs with malformed
+one-operand input were not used as qualification evidence.
+
+Actual CX-P.exe code supplies the option without a heuristic: function12713de0
+sets EBX to zero at12713e07, then pushes EBX at12713e40 as the last boolean
+argument of GenerateInvocationCode. Call12713e4c reaches import thunk1285adf6,
+which jumps through IAT12b227f4 to the named CX-Pdata export. The genuine Ghidra
+caller export is hash-pinned as internal/fbcode/testdata/source-invocation-ghidra.json.gz.
+Earlier native probes of both boolean values and the complete saved call
+corroborate the false path. The broader meaning/preconditions of true in other
+contexts remain unqualified.
+
+The new command emits an UNLINKED body fragment. Definition/instance records,
+allocation, timers inside BLINK, other graph layouts, whole-project type checks,
+tasks and full N1 generation remain pending. Existing full-program and textual
+APIs still reject graphics. This is source compilation of one call network,
+not compilation of the complete FB or either complete supplied project.
+
 ### Confirmed declaration types
 
 PHeadDoc.dll SHA256463eb4402bb6fa00453a5d7a745d77ced6be454d77aa2a683eb67de7e38ba71c

@@ -82,6 +82,14 @@ The output preserves input cases, exact injected script/template/worker,
 event stream, stderr and provenance hashes. The portable capsule used by Go
 tests is under `omron/codec/testdata` and needs no vendor software to verify.
 
+The `fbicall-*` capsule has122 rows over both models: a decimal identifier
+matrix, negative/overflow cases and syntax controls. Both operands reject2048;
+the internal Go encoder qualifies0..2047 only, without asserting PLC capacity.
+`#0400` is decimal400 in this internal instruction, so it must not be passed
+through the public hexadecimal literal grammar. The source caller's false
+GenerateInvocationCode argument is separately corroborated in actual CX-P
+Ghidra output, not inferred from EncodeFunction success.
+
 Each case's `operands` must be a JSON array, including `[]` for zero operands.
 Null, missing and scalar operand collections are rejected before output creation
 or worker launch. A PowerShell conditional producing no pipeline values can

@@ -48,7 +48,7 @@ graph compilation remain unimplemented.
 The next source-plan bridge test reads `cxp.PlanFBCall` and verifies the complete
 27-container LD+call against both captures. Port selection/order, bindings and
 identifiers now come from CXP. The FBICALL recipe and invocation option remain
-explicit test controls. No production source compiler is enabled.
+explicit test controls at that stage.
 
 PH_TYPE identity is now confirmed through PHeadDoc's x86 type library and the
 actual CX-P GetItem3/constructor/row-writer chain. `ScalarTransferForPin` maps
@@ -58,5 +58,20 @@ TypeName. All176 native transfer observations also exercise this pin bridge.
 The complete-call comparison no longer has a test-only transport-type map;
 FBICALL and invocation-option choice remain explicit controls. Complete project
 typing, assignment-range checks, definition code and allocation remain pending.
+
+The next stage adds `InstanceCall`: canonical decimal identifiers0..2047 for
+both operands, not arbitrary16-bit values. A122-row capsule covers the matrix,
+negative values,2048 and oversized inputs. '#' is deliberately outside this API
+because native internal identifiers parse #0400 as decimal400. The frame
+assembler also rejects out-of-range FBICALL operands supplied as raw controls.
+
+The stock CX-P caller12713de0 zeros EBX at12713e07 and pushes it at12713e40 for
+GenerateInvocationCode via1285adf6. This qualifies false for the observed source
+call path, without defining every possible context of the DLL's true option.
+`compiler.CompileCXPFBCallBody` now consumes the source plan through these
+primitives, emitting an unlinked LD+call fragment. The full27-container capture
+comparison no longer supplies FBICALL words or chooses a boolean in its compiler
+test. General graph compilation, definition/instance generation and complete
+project typing remain open. Static caller proof is hash-pinned under testdata.
 
 See [the complete FB research](../../../docs/design/omron-fb-format.md).

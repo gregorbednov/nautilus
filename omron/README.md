@@ -64,14 +64,19 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   BLINK instances match complete runtime buffers. See [FB evidence and limits](../docs/design/omron-fb-format.md).
 * `internal/fbcode`: qualified invocation postamble operations and a frame
   assembler for already encoded/allocated transfer instructions. It matches all
-  26 containers of the saved BLINK call and is not enabled by the source compiler.
+  26 containers of the saved BLINK call and supports the restricted standalone
+  call-body compiler.
   Scalar BOOL/WORD/UINT/INT input/output transfers can now be generated from
   typed source operands, verified against176 new native observations. The full
   call test uses generated transfers. Source planning now supplies port order.
   `ScalarTransferForPin` now derives BOOL/INT/UINT/WORD from source declarations
   and checks scalar binding metadata. The27-container LD+BLINK test no longer
   supplies a manual transport-type map. FBICALL construction and caller-state
-  choice remain explicit controls; the full source compiler is still unchanged.
+  choice were initially explicit controls. InstanceCall is now qualified by122
+  new observations, and the stock caller's false option is confirmed in Ghidra.
+  `compile-fb-call-body` independently emits all27 containers of the original
+  LD+BLINK rung, with source/generated spans. It does not generate the referenced
+  FB definition or instance records; full-program graph compilation stays closed.
 
 **There is no full-project CJ1 executable compiler or deploy command yet.** Import
 bundles are source/research artifacts, not runnable Nautilus projects. The full

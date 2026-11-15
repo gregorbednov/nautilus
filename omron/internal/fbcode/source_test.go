@@ -41,9 +41,11 @@ func TestObservedSourcePinOrderRebuildsCapturedCall(t *testing.T) {
 		for _, pin := range plan.Inputs {
 			appendPin(pin)
 		}
-		// The measured FBICALL literal recipe is still an explicit test control;
-		// identifiers now come from the selected source instance/definition.
-		body = append(body, []uint32{0xb2410806, 0x61440000 | uint32(plan.InstanceNumber), 0x65440000 | uint32(plan.TaskID), 0x80000000})
+		call, err := fbcode.InstanceCall(8, plan.InstanceNumber, plan.TaskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body = append(body, call)
 		for _, pin := range plan.Outputs {
 			appendPin(pin)
 		}

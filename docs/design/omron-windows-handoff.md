@@ -106,6 +106,21 @@ compiled/typeCodesQualified остаются false до полной прове�
 GUI сейчас недоступен: node_repl сообщил failed to write kernel assets.
 computer-use SKILL.md/документы прочитаны; Windows UI Automation не обходить.
 
+Теперь FBICALL квалифицирован отдельным122-row корпусом codec/testdata/fbicall-*:
+оба ID0..2047, не65535. Только каноническая decimal '&' форма; #0400 внутри
+кодируется как decimal400. InstanceCall ограничивает ID и не считает их ёмкостью
+контроллера; AssembleInvocation проверяет и raw-операнды FBICALL.
+Найден настоящий caller в CX-P.exe:12713de0 ->1285adf6 ->IAT12b227f4 ->DLL export.
+EBX=0 на12713e07, PUSH EBX на12713e40, CALL на12713e4c: false безусловно в этом
+пути. Сохранён source-invocation-ghidra.json.gz; шире true всё ещё не квалифицирован.
+CompileCXPFBCallBody / CLI compile-fb-call-body теперь генерируют27 слов LD+BLINK
+из исходного проекта:6 source span,3 generated span,3 bindings, full image=false.
+Это несвязанный фрагмент; определения/экземпляры FB не генерируются. Основной
+компилятор всей программы по-прежнему отклоняет графику. Следующее: тело BLINK,
+его относительные операнды, инициализация экземпляров/размещение, затем задачи/N1.
+Стенд fbicall-library-01 был ошибочным: PowerShell '@('&'+i,'&'+d)' склеил строку.
+Не использовать его. Итоговый fbicall-library-final имеет2 операнда и61 случай/CPU.
+
 Таймеры требуют явного BCD/binary. Прямые DM-биты в обычной битовой логике CJ1
 запрещены по руководству, даже если низкоуровневый стенд возвращает код.
 **Компилятора полного проекта, полной палитры LD и развёртывания ещё нет.**

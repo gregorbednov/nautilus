@@ -28,6 +28,9 @@ const omronUsage = `naut omron — independent CJ1 source tools, rung compilatio
   naut omron inspect-fb-call -program PATH -rung PATH [-encoding ...] FILE
       Inspect the observed single-call scalar layout, declarations and bindings.
       Retain numeric type codes; does not compile the graph or allocate memory.
+  naut omron compile-fb-call-body -model MODEL -program PATH -rung PATH FILE
+      Compile only the observed single-call scalar rung, with source maps.
+      Unlinked body: no FB definition/instance generation or complete image.
   naut omron unpack [-encoding ...] FILE
       Write the exact uncompressed CXT bytes to stdout.
   naut omron import [-encoding ...] -o NEW-DIRECTORY FILE
@@ -86,6 +89,8 @@ func runOmron(args []string) int {
 		err = omronImage(args[1:])
 	case "inspect-fb-call":
 		err = omronFBCall(args[1:])
+	case "compile-fb-call-body":
+		err = omronCompileFBCallBody(args[1:])
 	case "compile-program-body":
 		err = omronCompileProgramBody(args[1:])
 	case "compile-rungs":
