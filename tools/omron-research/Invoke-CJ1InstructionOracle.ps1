@@ -5,11 +5,12 @@ param(
  [Parameter(Mandatory=$true)][string]$Output,
  [switch]$ControlProbe,
  [switch]$InvocationProbe,
+ [switch]$ParameterProbe,
 	[ValidateSet('library-default','bcd','binary')][string]$TimerCounterMode='library-default',
  [string]$Frida=(Join-Path $PSScriptRoot '..\..\..\tools\frida-17.26.3\frida-inject.exe')
 )
 $ErrorActionPreference='Stop'
-if($ControlProbe -and $InvocationProbe){throw 'Select only one research probe'}
+if(([int]$ControlProbe.IsPresent+[int]$InvocationProbe.IsPresent+[int]$ParameterProbe.IsPresent) -gt 1){throw 'Select only one research probe'}
 $binary='C:\Program Files (x86)\OMRON\CX-One\CX-Programmer\CX-Pdata.dll'
 $compilerHash='a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141'
 if((Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant() -ne $compilerHash){throw 'Unreviewed compiler binary'}
@@ -21,6 +22,7 @@ $inputCases=@(Get-Content -LiteralPath $casesPath -Raw | ConvertFrom-Json)
 if($inputCases.Count -eq 0 -or $inputCases.Count -gt 512){throw 'Invalid case count'}
 $ids=@{}
 foreach($case in $inputCases){
+ if($ParameterProbe -and ($case.mnemonic -cne 'FBCALL' -or @($case.operands).Count -ne 1 -or $case.operands[0] -cne '&0' -or $case.parameter.type -cnotin @('BOOL','WORD','UINT','INT') -or $case.parameter.usage -notin @(1,2) -or $case.parameter.source -isnot [string] -or $case.parameter.source -cnotmatch '^(#[0-9A-F]{1,4}|&[0-9]{1,5}|(CIO|W|H|D)?[0-9]{1,5}(\.[0-9]{1,2})?)$')){throw 'Invalid scalar parameter probe case'}
  if($InvocationProbe -and ($case.mnemonic -cne 'FBCALL' -or $case.invocationOption -isnot [bool] -or @($case.operands).Count -ne 1 -or $case.operands[0] -cne '&0')){throw 'Invocation probe requires FBCALL &0 and an explicit boolean invocationOption'}
  if(-not $case.id -or $ids.ContainsKey($case.id) -or $case.mnemonic -notmatch '^[A-Za-z@%][A-Za-z0-9@%()]*$' -or $case.operands -isnot [array] -or @($case.operands).Count -gt 8){throw 'Invalid/duplicate instruction case'}
  $ids[$case.id]=$true
@@ -35,6 +37,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'instruction-worker.ps1') -Desti
 $request=[ordered]@{binary=$binary;compilerSHA256=$compilerHash;requestSHA256=(Get-FileHash -LiteralPath $casesPath -Algorithm SHA256).Hash.ToLowerInvariant();timerCounterMode=$TimerCounterMode;profiles=@(@{device='CJ1M';cpu='CPU21'},@{device='CJ1H-H';cpu='CPU65'});cases=$inputCases}
 if($ControlProbe){$request.probe='control-bits-v1'}
 if($InvocationProbe){$request.probe='invocation-skeleton-v1'}
+if($ParameterProbe){$request.probe='parameter-transfer-v1'}
 $script='const request = '+($request | ConvertTo-Json -Compress -Depth 8)+";`n"+(Get-Content -LiteralPath (Join-Path $destination 'oracle-source.js') -Raw)
 $scriptPath=Join-Path $destination 'oracle.js'
 [IO.File]::WriteAllText($scriptPath,$script,(New-Object Text.UTF8Encoding($false)))
@@ -60,6 +63,7 @@ foreach($name in @('worker.stderr','injector.stderr')){if((Get-Item -LiteralPath
 $provenance=[ordered]@{schemaVersion=1;method='native-library-calls-in-disposable-worker';compilerSHA256=$compilerHash;requestSHA256=$request.requestSHA256;programType=0;unitVersion=$null;timerCounterMode=$TimerCounterMode;fullProgramCompiled=$false;hardwareQualified=$false;files=@(Get-ChildItem -LiteralPath $destination -File | Where-Object Name -in @('cases.json','events.log','oracle.js','oracle-source.js','worker.ps1','worker.stderr','injector.stderr') | ForEach-Object {@{name=$_.Name;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant();bytes=$_.Length}})}
 if($ControlProbe){$provenance.probe='control-bits-v1'}
 if($InvocationProbe){$provenance.probe='invocation-skeleton-v1'}
+if($ParameterProbe){$provenance.probe='parameter-transfer-v1'}
 $provenance | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $destination 'provenance.json') -Encoding utf8
 Write-Output ('RESULT='+$destination)
 Write-Output ('CASES='+(2*$inputCases.Count))

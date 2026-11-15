@@ -86,11 +86,18 @@ probe). For a BCD probe, use `-Cases .\omron\codec\testdata\timer-bcd-cases.json
 with `-TimerCounterMode bcd` and a new output directory. All three mode capsules
 are portable; none changes the Windows installation or a user project.
 
-Two explicit research switches extend the normal path:
+Three explicit research switches extend the normal path:
 
 * `-ControlProbe` tags the capsule `control-bits-v1`, preserving baseline words
   and then calling normal ResetCIIflag / SetCCFlags methods. It records both
   snapshots separately. These operations do not imply public instruction support.
+* `-ParameterProbe` tags it `parameter-transfer-v1`. Each case is FBCALL &0
+  plus `parameter: {type: "BOOL"|"WORD"|"UINT"|"INT", usage: 1|2, source: "..."}`.
+  It calls actual StringToDataType and AddOperandPreamble on a normal object,
+  with scalar count1, zero dimensions and empty formal metadata. It records the
+  native type, source read-back and normally compiled child list separately from
+  baseline encoding. Inputs are deliberately bounded; this does not invoke
+  full-project checks or establish CXP declaration-type/pin mappings.
 * `-InvocationProbe` tags it `invocation-skeleton-v1` and requires FBCALL &0
   cases with an explicit JSON `invocationOption` boolean. It invokes normal
   GenerateInvocationCode / GenerateEndOfInvocationCode, recording the two owned
@@ -98,7 +105,7 @@ Two explicit research switches extend the normal path:
   native compilation are used; no compiled flags or code words are injected.
 
 The switches are mutually exclusive. Fixture verification checks probe tags in
-the manifest, literal request and begin event, and correlates the boolean option.
+the manifest, literal request and begin event, and correlates probe inputs.
 Encode-only loading refuses tagged probes. Existing encode-only behavior is
 unchanged. See [the FB investigation](../../docs/design/omron-fb-format.md).
 

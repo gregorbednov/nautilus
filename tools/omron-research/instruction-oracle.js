@@ -31,7 +31,9 @@ setImmediate(()=>{
   const setCC=native(0x175e61,'void',['pointer']);
   const generateInvocation=native(0x171499,'int',['pointer','pointer','pointer','int']);
   const finishInvocation=native(0x17166f,'int',['pointer','pointer']);
-  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1'].includes(request.probe))throw new Error('unsupported probe');
+  const stringToType=native(0x175f7c,'uint32',['pointer'],'mscdecl');
+  const operandPreamble=native(0x1749ea,'void',['pointer','pointer','pointer','pointer','int','int','uint32','int','pointer','int','int']);
+  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1'].includes(request.probe))throw new Error('unsupported probe');
   function snapshot(instance){
    const count=instance.add(0x34).readU8();if(count>128)throw new Error('control snapshot bound exceeded');
    const buffer=instance.add(0xc).readPointer();if(count && buffer.isNull())throw new Error('missing control buffer');
@@ -40,6 +42,17 @@ setImmediate(()=>{
   }
   const retained=[];
   function string(value,owned){const object=Memory.alloc(4);const chars=Memory.allocUtf8String(value);retained.push(object,chars);stringCtor(object,chars);owned.push(object);return object;}
+  function readList(instance,offset){
+   const list=instance.add(offset),expected=list.add(12).readU32();if(expected>128)throw new Error('invocation list bound exceeded');
+   let node=list.add(4).readPointer();const seen=new Set(),instructions=[];
+   while(!node.isNull()){
+    if(instructions.length>=expected || seen.has(node.toString()))throw new Error('invalid invocation list');seen.add(node.toString());
+    const child=node.add(8).readPointer();
+    instructions.push(Object.assign({mnemonic:text(child.add(0x38).readPointer())},snapshot(child)));
+    node=node.readPointer();
+   }
+   if(instructions.length!==expected)throw new Error('invocation list count mismatch');return instructions;
+  }
   emit('begin',{compilerSHA256:request.compilerSHA256,requestSHA256:request.requestSHA256,fridaVersion:Frida.version,architecture:Process.arch,programType:0,unitVersion:null,timerCounterMode:timerMode,fullProgramCompiled:false,probe:request.probe});
   initLanguage();
   const kbase=Memory.alloc(0x4000);retained.push(kbase);kbaseCtor(kbase);
@@ -96,20 +109,19 @@ setImmediate(()=>{
           // buffers are injected into the object to bypass native compilation.
           const generated=generateInvocation(instance,kbase,instance.add(0x58),test.invocationOption?1:0);
           const before=snapshot(instance);
-          function readList(offset){
-           const list=instance.add(offset),expected=list.add(12).readU32();if(expected>128)throw new Error('invocation list bound exceeded');
-           let node=list.add(4).readPointer();const seen=new Set(),instructions=[];
-           while(!node.isNull()){
-            if(instructions.length>=expected || seen.has(node.toString()))throw new Error('invalid invocation list');seen.add(node.toString());
-            const child=node.add(8).readPointer();
-            instructions.push(Object.assign({mnemonic:text(child.add(0x38).readPointer())},snapshot(child)));
-            node=node.readPointer();
-           }
-           if(instructions.length!==expected)throw new Error('invocation list count mismatch');return instructions;
-          }
-          const preamble=readList(0x3c),epilogue=readList(0x58);
+          const preamble=readList(instance,0x3c),epilogue=readList(instance,0x58);
           const finished=finishInvocation(instance,kbase);
           result.invocation={option:test.invocationOption,generateResult:generated,finishResult:finished,before,after:snapshot(instance),preamble,epilogue};
+         }
+         if(result.accepted && request.probe==='parameter-transfer-v1'){
+          const p=test.parameter;
+          if(test.mnemonic!=='FBCALL' || test.operands.length!==1 || test.operands[0]!=='&0' || !p || !['BOOL','WORD','UINT','INT'].includes(p.type) || ![1,2].includes(p.usage) || typeof p.source!=='string' || !/^(#[0-9A-F]{1,4}|&[0-9]{1,5}|(CIO|W|H|D)?[0-9]{1,5}(\.[0-9]{1,2})?)$/.test(p.source))throw new Error('invalid parameter probe case');
+          const dataType=stringToType(string(p.type,owned));if(dataType===0)throw new Error('unrecognized parameter type');
+          const source=string(p.source,owned);
+          // Scalar count1; unused array/structure dimensions0 and empty formal
+          // metadata. The normal method constructs/compiles all child objects.
+          operandPreamble(instance,kbase,instance.add(0x3c),source,p.usage,1,dataType,0,string('',owned),0,0);
+          result.parameter={input:p,dataType,sourceAfter:text(source.readPointer()),instructions:readList(instance,0x3c)};
          }
         }
        }

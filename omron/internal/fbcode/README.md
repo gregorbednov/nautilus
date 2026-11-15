@@ -30,4 +30,20 @@ known initial encoder body controls, frame assembly matches all26 containers
 of the saved BLINK call. That body is still supplied as encoded controls in the
 test, not compiled from CXP. Full source-to-FB generation remains unfinished.
 
+The next stage adds `ScalarTransfer`: BOOL and WORD/UINT/INT, explicit input or
+output, scalar count1 only. A new176-row native capsule calls the actual
+AddOperandPreamble121749ea on normally constructed objects. StringToDataType
+returns1/2/4/8 for BOOL/INT/UINT/WORD; these are not PouVarList numeric codes.
+WORD transfers use MOV with IR63 push/pop, BOOL uses BMOV with IR62 push/pop.
+The generated child is typed (native flag40000000), explaining b241 rather than
+the ordinary MOV b240 opcode before invocation postamble processing.
+
+The Go operation returns the initial typed instruction for `AssembleInvocation`.
+It shares the public codec's16-bit literal/direct-word rules. Qualified areas
+are CIO/W/H/D for words and explicit CIO/W/H bits for BOOL; arrays, INOUT,
+implicit ports, BOOL constants, private addresses and wider types fail closed.
+The captured full call test now generates its four transfers from typed source
+operands; the FBICALL and port ordering remain explicit controls. CXP graph
+resolution, declaration-type mapping and allocation are still not implemented.
+
 See [the complete FB research](../../../docs/design/omron-fb-format.md).

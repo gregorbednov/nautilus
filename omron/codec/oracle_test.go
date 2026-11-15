@@ -19,12 +19,14 @@ import (
 )
 
 type inputCase struct {
-	InvocationOption *bool    `json:"invocationOption,omitempty"`
-	ID               string   `json:"id"`
-	Mnemonic         string   `json:"mnemonic"`
-	Operands         []string `json:"operands"`
+	Parameter        *parameterInput `json:"parameter,omitempty"`
+	InvocationOption *bool           `json:"invocationOption,omitempty"`
+	ID               string          `json:"id"`
+	Mnemonic         string          `json:"mnemonic"`
+	Operands         []string        `json:"operands"`
 }
 type nativeResult struct {
+	Parameter          *parameterResult  `json:"parameter"`
 	Invocation         *invocationResult `json:"invocation"`
 	Probe              string            `json:"probe"`
 	FlagsBeforeControl uint32            `json:"flagsBeforeControl"`
@@ -55,6 +57,19 @@ type nativeResult struct {
 	CaseCount          int               `json:"caseCount"`
 	ModeBCD            *int              `json:"timerModeBcd"`
 	ModeBinary         *int              `json:"timerModeBinary"`
+}
+
+type parameterInput struct {
+	Type   string `json:"type"`
+	Usage  int    `json:"usage"`
+	Source string `json:"source"`
+}
+
+type parameterResult struct {
+	Input        parameterInput          `json:"input"`
+	DataType     uint32                  `json:"dataType"`
+	SourceAfter  string                  `json:"sourceAfter"`
+	Instructions []invocationInstruction `json:"instructions"`
 }
 
 type controlStage struct {
@@ -150,7 +165,7 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 		t.Fatal(err)
 	}
 	const compiler = "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141"
-	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != 0 || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
+	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != 0 || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
 		t.Fatal("unsupported oracle provenance")
 	}
 	assets := map[string][]byte{}
@@ -257,13 +272,23 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				}
 			}
 		case "case":
-			if probe == "" && (len(row.ControlStages) != 0 || row.Invocation != nil) {
+			if probe != "control-bits-v1" && len(row.ControlStages) != 0 {
+				t.Fatal("unexpected control probe data")
+			}
+			if probe == "" && (len(row.ControlStages) != 0 || row.Invocation != nil || row.Parameter != nil) {
 				t.Fatal("control probe presented as encode-only evidence")
 			}
 			if profileIndex < 0 || caseIndex >= len(cases) {
 				t.Fatal("orphan case")
 			}
 			want := cases[caseIndex]
+			if probe == "parameter-transfer-v1" {
+				if want.Parameter == nil || row.Parameter == nil || !reflect.DeepEqual(row.Parameter.Input, *want.Parameter) {
+					t.Fatal("parameter input correlation mismatch")
+				}
+			} else if row.Parameter != nil || want.Parameter != nil {
+				t.Fatal("unexpected parameter probe data")
+			}
 			if probe == "invocation-skeleton-v1" {
 				if want.InvocationOption == nil || row.Invocation == nil || row.Invocation.Option != *want.InvocationOption {
 					t.Fatal("invocation option correlation mismatch")

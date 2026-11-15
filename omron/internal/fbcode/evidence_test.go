@@ -16,6 +16,8 @@ func TestInvocationStaticEvidence(t *testing.T) {
 	}{
 		{"postamble-caller-ghidra.json", "a0444eeb24cacdf4699298d093c6329b2bc81122397a4351b59b7d81f02ed27a", []string{"121dd444", "1217170b", "1216f826"}},
 		{"control-primitives-ghidra.json", "aa07db7103205fa7421acb537ccf1cff96cc2e59713b3eaf93e92e78f0f2f981", []string{"12175eb3", "12175e8a", "12175e61", "12171499", "1217166f"}},
+		{"scalar-transfer-ghidra.json", "dfbc7f04c6174f512c92f83b45573f8a5474e7e00acb19422a747ac480300fdf", []string{"12175d65", "121749ea", "12173d43", "12176744", "1216b1be"}},
+		{"scalar-types-ghidra.json", "46e4a7f08230cf40107144b5c3768d6b5197641e0cb74d640f5f574b17b018a8", []string{"12175f7c", "1217185d"}},
 	} {
 		data, err := os.ReadFile("testdata/" + spec.file)
 		if err != nil {

@@ -58,6 +58,10 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   assembler for already encoded/allocated transfer instructions. It matches all
   26 containers of the saved BLINK call, but does not lower CXP operands or graph
   pins and is not enabled by the source compiler.
+  Scalar BOOL/WORD/UINT/INT input/output transfers can now be generated from
+  typed source operands, verified against176 new native observations. The full
+  call test uses generated transfers; FBICALL selection and port order remain
+  explicit, with no CXP graph/type/allocation integration yet.
 
 **There is no full-project CJ1 executable compiler or deploy command yet.** Import
 bundles are source/research artifacts, not runnable Nautilus projects. The full

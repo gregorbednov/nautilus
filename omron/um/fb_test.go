@@ -166,14 +166,27 @@ func TestSavedPOUBasesMatchNativeInstances(t *testing.T) {
 }
 
 func TestInvocationFrameMatchesCapturedCall(t *testing.T) {
-	// Body inputs are known initial encoder controls, not yet generated from
-	// CXP ports. This qualifies frame assembly, not private-operand lowering.
-	body := [][]uint32{
-		{0xb2410140, 0x61400100, 0x5517f009},
-		{0xb2410140, 0x61400100, 0x5517f009},
-		{0xb2410147, 0x620c004e, 0x5717e009},
-		{0xb2410806, 0x61440000, 0x65440400, 0x80000000},
-		{0xb2410147, 0x6317e001, 0x560de011},
+	// Transfers now come from typed source operands. Their selection/order and
+	// the FBICALL are still explicit controls, not derived from CXP graph pins.
+	var body [][]uint32
+	for _, spec := range []struct {
+		typeName fbcode.ScalarType
+		usage    fbcode.ParameterUsage
+		source   string
+	}{
+		{fbcode.Word, fbcode.Input, "#0100"},
+		{fbcode.Word, fbcode.Input, "#0100"},
+		{fbcode.Bool, fbcode.Input, "4.14"},
+		{fbcode.Bool, fbcode.Output, "W1.01"},
+	} {
+		if spec.usage == fbcode.Output {
+			body = append(body, []uint32{0xb2410806, 0x61440000, 0x65440400, 0x80000000})
+		}
+		words, err := fbcode.ScalarTransfer(8, spec.typeName, spec.usage, spec.source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body = append(body, words)
 	}
 	frame, err := fbcode.AssembleInvocation(8, body, false)
 	if err != nil {

@@ -158,6 +158,42 @@ FBCALL operand must not be assumed to be the saved InstanceNum.
 
 ## Inspector and next qualification
 
+### Scalar parameter generation
+
+AddOperandPreamble121749ea is now independently measured through the research
+`parameter-transfer-v1` probe:176 rows (88 per CPU) invoke the real method with
+scalar count1, usage1/2, normally constructed parent/list objects and no forged
+code buffers or compiled flags. The scope is BOOL plus WORD/UINT/INT; other
+parameters use zero dimensions and empty formal metadata. No full project is
+compiled. The probe retains the original FBCALL EncodeFunction result separately
+from the generated child list, including type conversion and source read-back.
+
+StringToDataType12175f7c returns BOOL1, INT2, UINT4, WORD8. This does not establish
+mapping from CXP PouVarList numeric enums. Usage1 pushes the input; usage2 pops
+the output. Word transfers use MOV and IR63, BOOL transfers BMOV and IR62:
+
+| Typed transfer | Initial containers before invocation postamble |
+| --- | --- |
+| WORD input #0100 | b2410140,61400100,5517f009 |
+| WORD output D101 | b2410140,6117f001,54010065 |
+| BOOL input4.14 | b2410147,620c004e,5717e009 |
+| BOOL output W1.01 | b2410147,6317e001,560de011 |
+
+Actual generated children carry native flag40000000 and final opcode927f0140/47.
+The typed flag explains why ordinary MOV's b240 is not the right initial
+instruction here. `fbcode.ScalarTransfer` generates initial typed controls;
+the existing invocation operation supplies the final transformation. Word
+operands share public codec validation. Only CIO/W/H/D words and explicit
+CIO/W/H BOOL bits are enabled; INOUT, arrays, BOOL constants, private addresses,
+implicit ports and other types are rejected.
+
+The26-container BLINK comparison now generates all four scalar transfers from
+typed source operands. Selection/order and FBICALL instance0/body1024 are still
+explicit test controls. CXP pin resolution, numeric declaration-type mapping,
+allocation and wider caller-state qualification remain open. The source compiler
+still rejects graphical FBs. Fresh raw artifacts are codec/testdata/parameter-*;
+the Ghidra transfer/type exports are hash-pinned in internal/fbcode/testdata.
+
 `N1Image.FunctionBlocks()` and
 `naut omron inspect-image -function-blocks FILE.n1` expose the bounded layout.
 Unknown prefix variants, counts, lengths, wrappers and ambiguous numbering fail
