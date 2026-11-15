@@ -17,15 +17,17 @@ type FBCallLink struct {
 }
 
 // ResourceBody is the observed FB prefix + task block fragment. Offsets are
-// relative to this fragment; it has no global N1 header or task configuration.
+// relative to this fragment. TaskConfiguration is a separate header table;
+// Words do not include it or the rest of the global N1 header.
 type ResourceBody struct {
-	FBPrefix                 *FBPrefix    `json:"fbPrefix"`
-	TaskBlock                *TaskBlock   `json:"taskBlock"`
-	DefinitionOffsetWords    int          `json:"definitionOffsetWords"`
-	InstanceOffsetWords      int          `json:"instanceOffsetWords"`
-	TaskDirectoryOffsetWords int          `json:"taskDirectoryOffsetWords"`
-	Calls                    []FBCallLink `json:"calls"`
-	Words                    []uint32     `json:"words"`
+	FBPrefix                 *FBPrefix          `json:"fbPrefix"`
+	TaskBlock                *TaskBlock         `json:"taskBlock"`
+	TaskConfiguration        *TaskConfiguration `json:"taskConfiguration"`
+	DefinitionOffsetWords    int                `json:"definitionOffsetWords"`
+	InstanceOffsetWords      int                `json:"instanceOffsetWords"`
+	TaskDirectoryOffsetWords int                `json:"taskDirectoryOffsetWords"`
+	Calls                    []FBCallLink       `json:"calls"`
+	Words                    []uint32           `json:"words"`
 }
 
 func CompileCXPResourceBody(profile codec.Profile, doc *cxp.Document, resource string, numbers map[string]int, nextEnable [7]uint32) (*ResourceBody, error) {
@@ -40,8 +42,10 @@ func CompileCXPResourceBody(profile codec.Profile, doc *cxp.Document, resource s
 	definitions := map[string]*FBDefinition{}
 	instances := map[string]*FBInstance{}
 	taskIDs := map[int]bool{}
+	var taskSources []*cxp.TaskSource
 	for _, task := range tasks.Tasks {
 		taskIDs[task.Source.Number] = true
+		taskSources = append(taskSources, task.Source)
 	}
 	for _, definition := range prefix.Definitions.Definitions {
 		if taskIDs[definition.BodyNumber] {
@@ -53,6 +57,7 @@ func CompileCXPResourceBody(profile codec.Profile, doc *cxp.Document, resource s
 		instances[instance.Source.Name] = instance
 	}
 	result := &ResourceBody{FBPrefix: prefix, TaskBlock: tasks, InstanceOffsetWords: prefix.InstanceOffsetWords, TaskDirectoryOffsetWords: len(prefix.Words), Calls: []FBCallLink{}}
+	result.TaskConfiguration = makeTaskConfiguration(resource, taskSources)
 	for _, task := range tasks.Tasks {
 		source, err := doc.SourceForProgram(task.Source.Path)
 		if err != nil {

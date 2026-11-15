@@ -15,12 +15,13 @@ param(
  [switch]$FBInstanceCompileProbe,
  [switch]$FBSectionProbe,
  [switch]$TaskPropertiesProbe,
+ [switch]$TaskConfigurationProbe,
 	[ValidateSet('library-default','bcd','binary')][string]$TimerCounterMode='library-default',
  [string]$Frida=(Join-Path $PSScriptRoot '..\..\..\tools\frida-17.26.3\frida-inject.exe')
 )
 $ErrorActionPreference='Stop'
 if(($DecodeProbe -or $InstanceDecodeProbe) -and $TimerCounterMode -ne 'bcd'){throw 'Decode probe requires an explicit BCD profile'}
-if(([int]$ControlProbe.IsPresent+[int]$InvocationProbe.IsPresent+[int]$ParameterProbe.IsPresent+[int]$FBBodyProbe.IsPresent+[int]$DecodeProbe.IsPresent+[int]$FBContextProbe.IsPresent+[int]$FBCompileProbe.IsPresent+[int]$FBDefinitionProbe.IsPresent+[int]$InstanceDecodeProbe.IsPresent+[int]$FBInstanceCompileProbe.IsPresent+[int]$FBSectionProbe.IsPresent+[int]$TaskPropertiesProbe.IsPresent) -gt 1){throw 'Select only one research probe'}
+if(([int]$ControlProbe.IsPresent+[int]$InvocationProbe.IsPresent+[int]$ParameterProbe.IsPresent+[int]$FBBodyProbe.IsPresent+[int]$DecodeProbe.IsPresent+[int]$FBContextProbe.IsPresent+[int]$FBCompileProbe.IsPresent+[int]$FBDefinitionProbe.IsPresent+[int]$InstanceDecodeProbe.IsPresent+[int]$FBInstanceCompileProbe.IsPresent+[int]$FBSectionProbe.IsPresent+[int]$TaskPropertiesProbe.IsPresent+[int]$TaskConfigurationProbe.IsPresent) -gt 1){throw 'Select only one research probe'}
 $binary='C:\Program Files (x86)\OMRON\CX-One\CX-Programmer\CX-Pdata.dll'
 $compilerHash='a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141'
 if((Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant() -ne $compilerHash){throw 'Unreviewed compiler binary'}
@@ -32,6 +33,7 @@ $inputCases=@(Get-Content -LiteralPath $casesPath -Raw | ConvertFrom-Json)
 if($inputCases.Count -eq 0 -or $inputCases.Count -gt 512){throw 'Invalid case count'}
 $ids=@{}
 foreach($case in $inputCases){
+ if($TaskConfigurationProbe -and ($case.mnemonic -cne 'NOP' -or @($case.operands).Count -ne 0 -or $null -eq $case.taskConfiguration -or $case.taskConfiguration.number -notin @(256,257,287) -or $case.taskConfiguration.startup -notin @(-1,0,1,2) -or $case.taskConfiguration.protection -notin @(0,1))){throw 'Invalid task configuration'}
  if($TaskPropertiesProbe -and ($case.mnemonic -cne 'NOP' -or @($case.operands).Count -ne 0 -or $null -eq $case.taskProperties -or $case.taskProperties.name -cnotmatch '^[A-Za-z0-9_]{0,25}$' -or $case.taskProperties.number -lt -2 -or $case.taskProperties.number -gt 65535 -or $case.taskProperties.protection -notin @(0,1))){throw 'Invalid task properties'}
  if($FBSectionProbe -and ($case.mnemonic -cne 'NOP' -or @($case.operands).Count -ne 0 -or $null -eq $case.nextEnable -or $case.nextEnable.index -lt -1 -or $case.nextEnable.index -gt 7 -or $case.nextEnable.value -lt -2147483648 -or $case.nextEnable.value -gt 2147483647)){throw 'Invalid next-enable probe'}
  if($FBDefinitionProbe -and ($case.mnemonic -cne 'FBBN' -or $case.definitionProperties.name -cnotmatch '^[A-Za-z][A-Za-z0-9_]{0,64}$' -or $case.definitionProperties.number -lt -1 -or $case.definitionProperties.number -gt 1024 -or $case.definitionProperties.inputCount -lt -1 -or $case.definitionProperties.inputCount -gt 66 -or $case.definitionProperties.outputCount -lt -1 -or $case.definitionProperties.outputCount -gt 66)){throw 'Invalid definition properties'}
@@ -64,6 +66,7 @@ if($InstanceDecodeProbe){$request.probe='fb-instance-decode-v1';$request.program
 if($FBInstanceCompileProbe){$request.probe='fb-instance-compile-v1';$request.programType=16}
 if($FBSectionProbe){$request.probe='fb-section-addresses-v1'}
 if($TaskPropertiesProbe){$request.probe='task-properties-v1'}
+if($TaskConfigurationProbe){$request.probe='task-configuration-v1'}
 $script='const request = '+($request | ConvertTo-Json -Compress -Depth 8)+";`n"+(Get-Content -LiteralPath (Join-Path $destination 'oracle-source.js') -Raw)
 $scriptPath=Join-Path $destination 'oracle.js'
 [IO.File]::WriteAllText($scriptPath,$script,(New-Object Text.UTF8Encoding($false)))
@@ -99,6 +102,7 @@ if($InstanceDecodeProbe){$provenance.probe='fb-instance-decode-v1';$provenance.p
 if($FBInstanceCompileProbe){$provenance.probe='fb-instance-compile-v1';$provenance.programType=16}
 if($FBSectionProbe){$provenance.probe='fb-section-addresses-v1'}
 if($TaskPropertiesProbe){$provenance.probe='task-properties-v1'}
+if($TaskConfigurationProbe){$provenance.probe='task-configuration-v1'}
 $provenance | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $destination 'provenance.json') -Encoding utf8
 Write-Output ('RESULT='+$destination)
 Write-Output ('CASES='+(2*$inputCases.Count))

@@ -39,7 +39,7 @@ func TestOmronCompileResourceFragmentsCLI(t *testing.T) {
 		if err := json.Unmarshal(data, &body); err != nil {
 			t.Fatal(err)
 		}
-		if body.Format != "cj1-resource-body-containers" || !body.InternalReferencesChecked || !body.TaskDirectoryGenerated || body.GlobalHeaderGenerated || body.TaskConfigurationGenerated || body.StorageInitialized || body.Linked || body.HardwareQualified || len(body.Result.Words) != 821 || body.Result.TaskDirectoryOffsetWords != 166 || len(body.Result.Calls) != 1 {
+		if body.Format != "cj1-resource-body-containers" || !body.InternalReferencesChecked || !body.TaskDirectoryGenerated || body.GlobalHeaderGenerated || !body.TaskConfigurationGenerated || body.StorageInitialized || body.Linked || body.HardwareQualified || len(body.Result.Words) != 821 || body.Result.TaskDirectoryOffsetWords != 166 || len(body.Result.Calls) != 1 {
 			t.Fatal("invalid resource fragment report", string(data))
 		}
 	}

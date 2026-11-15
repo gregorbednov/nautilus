@@ -12,7 +12,7 @@ type TaskSource struct {
 var taskName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,23}$`)
 
 // SourceForTask reads the observed unprotected task metadata. Only IDs256..287,
-// OpStart1 and ASCII identifier names1..24 bytes are qualified. Other task
+// OpStart0/1 and ASCII identifier names1..24 bytes are qualified. Other task
 // classes and settings need separate configuration/prologue qualification.
 func (doc *Document) SourceForTask(path string) (*TaskSource, error) {
 	if _, err := doc.SourceForProgram(path); err != nil {
@@ -46,8 +46,13 @@ func (doc *Document) SourceForTask(path string) (*TaskSource, error) {
 	if err != nil || number < 256 {
 		return nil, sourceError(path, id.Line, "only task IDs256..287 are qualified")
 	}
-	if err := sourceValue(program.Fields, "OpStart", "1", path); err != nil {
+	start, err := sourceField(program.Fields, "OpStart", "scalar", path)
+	if err != nil {
 		return nil, err
+	}
+	startup, err := fbNumber(start.Value, 1)
+	if err != nil {
+		return nil, sourceError(path, start.Line, "startup must be canonical0 or1")
 	}
 	protection, err := sourceField(program.Fields, "Protection", "object", path)
 	if err != nil {
@@ -59,5 +64,5 @@ func (doc *Document) SourceForTask(path string) (*TaskSource, error) {
 	if err := sourceValue(protection.Fields, "Enabled", "0", path); err != nil {
 		return nil, err
 	}
-	return &TaskSource{Path: path, Name: name.Text(), Number: number, OperationStart: 1}, nil
+	return &TaskSource{Path: path, Name: name.Text(), Number: number, OperationStart: startup}, nil
 }

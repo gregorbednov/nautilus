@@ -2,20 +2,28 @@
 
 The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
 
+`compile-task-configuration -model MODEL -resource PATH -timer-mode bcd FILE`
+generates all288 header task-configuration words, matching both native fixtures.
+Task startup now supports OpStart0/1; protected tasks remain rejected. The
+resource-body command also reports this table separately, without changing its
+post-header words. Global fixed header/options/password handling remain pending.
+
 `compile-task-block` generates the288-word task directory and sorted records;
 all652 words match both native fixtures with their captured source recipes.
 `compile-resource-body -model MODEL -resource PATH -timer-mode bcd -number BLINK=0
 -next-enable 0,0,0,0,0,0,0 FILE` combines this with both FB sections and checks
 FB call links. All818 post-header words match both native images. Unchanged
-original source gives821 words. These fragments have no global N1 header, task
-configuration or initial storage; complete images and hardware remain pending.
+original source gives821 words. These fragments have no global N1 header or
+initial storage; task configuration is returned separately by the resource
+command. Complete images and hardware remain pending.
 
 `naut omron compile-task-record -model MODEL -program PATH -timer-mode bcd FILE`
 generates a standalone task record, including its32-word header and entry/return.
 All188/176 words match both native tasks on both CPU fixtures with the captured
-source recipes. Scope: IDs256..287, OpStart1, unprotected, ASCII identifier names
+source recipes. Scope: IDs256..287, OpStart0/1, unprotected, ASCII identifier names
 of1..24 bytes, qualified mixed body. Original unchanged first program gives191
-record words. Task configuration/directory, global header and full N1 are absent.
+record words. The standalone record excludes task configuration/directory and
+global header; the configuration table is available separately as above.
 
 `compile-program-body -fb-calls -timer-mode bcd -section-markers` now composes
 the observed scalar FB invocation with all textual rungs in one program.

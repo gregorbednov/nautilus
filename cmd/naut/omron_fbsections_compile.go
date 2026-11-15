@@ -102,7 +102,7 @@ func omronCompileFBSections(args []string, prefix, resourceBody bool) error {
 		Linked                              bool   `json:"linked"`
 		HardwareQualified                   bool   `json:"hardwareQualified"`
 		Result                              any    `json:"result"`
-	}{SchemaVersion: 1, Format: format, SourceSHA256: doc.SHA256, Model: *model, TimerCounterMode: *timer, DefinitionNumbersExplicit: true, NextEnableExplicit: prefix, InstanceDefinitionReferencesChecked: prefix, InternalReferencesChecked: resourceBody, TaskDirectoryGenerated: resourceBody, SavedPlacementUsed: prefix, Result: result}
+	}{SchemaVersion: 1, Format: format, SourceSHA256: doc.SHA256, Model: *model, TimerCounterMode: *timer, DefinitionNumbersExplicit: true, NextEnableExplicit: prefix, InstanceDefinitionReferencesChecked: prefix, InternalReferencesChecked: resourceBody, TaskDirectoryGenerated: resourceBody,TaskConfigurationGenerated:resourceBody, SavedPlacementUsed: prefix, Result: result}
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(report)

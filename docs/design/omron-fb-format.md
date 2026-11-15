@@ -10,6 +10,42 @@ in the big-endian N1 file; event buffers instead contain x86 little-endian words
 
 ## Prefix records
 
+### Header task configuration and startup control
+
+The global header is42 fixed words plus288 task-configuration words.
+`compiler.CompileCXPTaskConfiguration` and CLI `compile-task-configuration
+-model MODEL -resource PATH -timer-mode bcd FILE` now generate the latter table
+from task metadata. All288 words match header offsets42..329 in both native
+images. This operation does not compile task bodies. `compile-resource-body`
+also returns the table separately as result.taskConfiguration; its post-header
+Words stay unchanged and it now reports taskConfigurationGenerated=true.
+
+Unused IDs below256 retain number|2000, IDs256..287 number|1000. Present supported
+tasks add8000; OpStart1 adds4000. Thus the two examples produce d100/d101, while
+OpStart0 changes only the selected word to9100/9101. The source front end now
+accepts canonical OpStart0 or1; negative values,2 and noncanonical01 fail.
+Startup changes do not change a task record, body or directory. Protection is
+still rejected in production; cyclic/other active task classes remain closed.
+
+New `task-config-*` preserves48 observations: normal fresh KBase/PLC_Program
+objects for each case, IDs256/257/287, startup -1/0/1/2 and protection0/1 on both
+CPUs. SetStartUpFlag12215fb8 masks bit0; getters, MakeTaskConfigurationTable121cbaed
+and GetTaskConfigurationTable121cbecf verify number|9000|startup*4000|protection*c00.
+The getter returns0 for absent IDs, whereas the full writer supplies nonzero
+class/number defaults to absent header slots. These two behaviors must not be
+confused. Raw `ghidra-header-state-14.json.gz` is hash-pinned with all six functions.
+No fields/code buffers/compiled flags are forged; ordinary NOP results remain
+separate from configuration observations. There is no fresh full-project writer
+capture or hardware qualification.
+
+The same cases read seven default base address/size pairs from the normally
+initialized FB context and call GetStackRegister121ce752: AC0, firstSize64,
+secondSize1536; raw starts b200/b240 and size600. All17 numeric words agree with
+header15..31 on both profiles. This confirms the default memory state, not
+arbitrary source-selected layouts. The remaining fixed header generation,
+global option flags and password conversion are still open; production does
+not copy a captured42/330-word header or claim a complete image.
+
 ### Task directory and complete post-header fragment
 
 `cxp.SourceForTasks` inventories every program, requiring unique TaskIDs and
@@ -48,8 +84,9 @@ definition) and requires `-next-enable 0,0,0,0,0,0,0`. Current resource composit
 requires nonempty FB definition/instance sections and tasks. Counts, IDs and
 state are not allocated automatically; existing restrictions still apply.
 
-The resource report marks internalReferencesChecked/taskDirectoryGenerated=true,
-but globalHeaderGenerated/taskConfigurationGenerated/storageInitialized/linked/
+The resource report marks internalReferencesChecked/taskDirectoryGenerated and
+taskConfigurationGenerated=true (the configuration is returned separately),
+but globalHeaderGenerated/storageInitialized/linked/
 hardwareQualified=false. Reference checking covers this fragment's FB targets,
 not arbitrary CPU semantics, memory collisions with scalar operands, concurrency,
 global settings or hardware execution. Neither output is a complete N1 file or
@@ -59,7 +96,7 @@ PLC payload. The next image-generation gate is the global header/configuration.
 
 `compiler.CompileCXPTaskRecord` and CLI `compile-task-record -model MODEL
 -program PATH -timer-mode bcd FILE` generate one zero-flag task record from CXP.
-`cxp.SourceForTask` requires TaskID256..287, OpStart1, Protection.Enabled0 with no
+`cxp.SourceForTask` requires TaskID256..287, OpStart0/1, Protection.Enabled0 with no
 additional protection fields, and an ASCII identifier name1..24 bytes. Body
 compilation uses the qualified mixed path with section separators, at most one
 scalar FB call and terminal END. Other classes/metadata fail atomically.

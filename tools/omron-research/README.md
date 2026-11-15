@@ -6,6 +6,13 @@ a PLC. Keep original projects unchanged; use the generated copies for experiment
 
 ## Portable evidence audit
 
+`Invoke-CJ1InstructionOracle.ps1 -TaskConfigurationProbe -TimerCounterMode bcd`
+uses NOP cases with `taskConfiguration:{number,startup,protection}`. Each case
+gets fresh normal KBase/PLC_Program objects, startup/protection setters/getters,
+MakeTaskConfigurationTable and its getter. It separately reads default FB bases
+and GetStackRegister state. The48-row `task-config-*` capsule is hash-pinned;
+the absent getter's zero is not the full writer's unused-slot configuration.
+
 `Invoke-CJ1InstructionOracle.ps1 -TaskPropertiesProbe -TimerCounterMode bcd`
 accepts NOP cases with `taskProperties:{number,name,protection}`. It uses a normal
 PLC_Program constructor/type0 and task/name/protection setters and getters, then

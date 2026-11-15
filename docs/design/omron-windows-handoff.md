@@ -15,6 +15,25 @@
 
 ## Что уже реализовано
 
+Последний этап: `CompileCXPTaskConfiguration` / CLI `compile-task-configuration
+-model MODEL -resource PATH -timer-mode bcd FILE` генерирует288-word таблицу
+конфигурации из header[42..329], полное совпадение с обоими N1. Unused slots
+number|2000(<256) или number|1000(>=256); присутствующие задачи +8000,
+OpStart1 +4000. Теперь SourceForTask поддерживает canonicalOpStart0/1,не только1.
+Переключение startup очищает лишь4000 в table word, код/record/directory неизменны.
+ResourceBody.TaskConfiguration выдаётся отдельно от post-headerWords;
+compile-resource-body taskConfigurationGenerated теперьtrue. GlobalHeaderGenerated/
+linked/storageInitialized/hardwareQualifiedfalse сохранены. Protected задачи закрыты.
+Новые task-config-*48normal observations (3IDs x4startup x2protection x2CPU),
+каждыйслучайнаfreshKBase/Program. NativeSetStartUpFlag12215fb8маскируетbit0,
+Goотвергает-1/2/01. MakeTaskConfigurationTable121cbaed/Getter121cbecf:
+number|9000|startup*4000|protection*c00. Getterabsent=0,ноfullwriterdefaultsненулевые!
+Нативный defaultmemory snapshot7basepairs+GetStackRegisterAC0/64/1536иrawstarts
+b200/b240,size600совпадаетсо17словамиheader15..31. General layout не квалифицирован.
+Ghidra header-state-14 hash-pinned. Свежегоfullprojectwritercapture/hardwareнебыло.
+Далее42fixedheaderwords:globaloptionflags/passwordconversion/profilemapping;
+не копировать capturedheaderкакгенерацию. Полныйобраз пока не выдаётся.
+
 Последний этап: `SourceForTasks` проверяет все программы ресурса, уникальные
 TaskID/имена (casefold), IDs256..287. `CompileCXPTaskBlock` сортирует по ID,
 выдаёт288-word directory + записи; смещения от начала каталога. Все652 слова

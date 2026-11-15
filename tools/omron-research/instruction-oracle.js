@@ -38,7 +38,7 @@ setImmediate(()=>{
   const getBaseAddress=native(0x1d0137,'int',['pointer','int','pointer','pointer']);
   const setUseFB=native(0x1cf742,'void',['pointer','int']);
   const getUseFB=native(0x1cf79a,'int',['pointer']);
-  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1','fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1','fb-instance-compile-v1','fb-section-addresses-v1','task-properties-v1'].includes(request.probe))throw new Error('unsupported probe');
+  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1','fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1','fb-instance-compile-v1','fb-section-addresses-v1','task-properties-v1','task-configuration-v1'].includes(request.probe))throw new Error('unsupported probe');
   const programType=request.programType===undefined?0:request.programType;
   if(programType!==(request.probe==='fb-instance-compile-v1'?16:['fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1'].includes(request.probe)?32:0))throw new Error('invalid program type/probe combination');
   const compileContext=['fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1','fb-instance-compile-v1'].includes(request.probe);
@@ -104,6 +104,27 @@ setImmediate(()=>{
      const owned=[];
      const result={id:test.id,device:cpu.device,cpu:cpu.cpu,mnemonic:test.mnemonic,operands:test.operands,initialiseResult:null,operandResults:[],normalized:[],encodeResult:null,words:[],accepted:false};
      try{
+      if(request.probe==='task-configuration-v1'){
+       const p=test.taskConfiguration;if(!p || ![256,257,287].includes(p.number) || ![-1,0,1,2].includes(p.startup) || ![0,1].includes(p.protection))throw new Error('invalid task configuration case');
+       const context=Memory.alloc(0x4000);retained.push(context);kbaseCtor(context);
+       let program=null;
+       try{
+        if(setPLC(context,string(cpu.device,owned),string(cpu.cpu,owned))!==1)throw new Error('local SetPLC failed');
+        setUseFB(context,1);setBCD(context);
+        const size=library.base.add(0x2726bc).readU32();if(size!==752)throw new Error('unreviewed program size');
+        program=Memory.alloc(size);retained.push(program);native(0x1d5677,'pointer',['pointer'])(program);
+        native(0x1d6216,'void',['pointer','int'])(program,0);
+        if(native(0x215f70,'int',['pointer','pointer','int'])(program,context,p.number)!==1)throw new Error('local SetTaskID failed');
+        const startupResult=native(0x215fb8,'int',['pointer','pointer','int'])(program,context,p.startup);
+        const protectionResult=native(0x21602c,'int',['pointer','pointer','int'])(program,context,p.protection);
+        native(0x1cbaed,'void',['pointer','pointer'])(context,program);
+        const word=native(0x1cbecf,'uint32',['pointer','int'])(context,p.number),absent=native(0x1cbecf,'uint32',['pointer','int'])(context,258);
+        const name=string('',owned),firstSize=Memory.alloc(4),secondSize=Memory.alloc(4);
+        native(0x1ce752,'void',['pointer','pointer','pointer','pointer'])(context,name,firstSize,secondSize);
+        const bases=[];for(let i=0;i<7;i++)bases.push({address:context.add(0x2da0+i*0x20).readU32(),size:context.add(0x2da4+i*0x20).readU32()});
+        result.taskConfiguration={number:p.number,startupResult,startup:native(0x12cc0,'int',['pointer'])(program),protectionResult,protection:native(0x12ca0,'int',['pointer'])(program),word,absent,bases,stack:{name:text(name.readPointer()),firstSize:firstSize.readS32(),secondSize:secondSize.readS32(),start:context.add(0x2ea0).readU32(),otherStart:context.add(0x2ea8).readU32(),size:context.add(0x2eac).readU32()}};
+       }finally{if(program!==null)native(0x1d5c77,'void',['pointer'])(program);kbaseDtor(context);}
+      }
       if(request.probe==='task-properties-v1'){
        const p=test.taskProperties;if(!p || !Number.isInteger(p.number) || p.number < -2 || p.number > 65535 || ![0,1].includes(p.protection) || !/^[A-Za-z0-9_]{0,25}$/.test(p.name))throw new Error('invalid task property case');
        const size=library.base.add(0x2726bc).readU32();if(size!==752)throw new Error('unreviewed program size');

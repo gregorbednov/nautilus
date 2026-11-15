@@ -97,7 +97,7 @@ func TestTaskRecordMetadataAndBoundaries(t *testing.T) {
 	for _, edit := range []struct{ field, value string }{
 		{"TaskID", "255"}, {"TaskID", "288"}, {"TaskID", "289"}, {"TaskID", "-1"}, {"TaskID", "0256"},
 		{"Name", `""`}, {"Name", `"` + strings.Repeat("A", 25) + `"`}, {"Name", `"Задача"`}, {"Name", `"A B"`},
-		{"Protection.Enabled", "1"}, {"OpStart", "0"},
+		{"Protection.Enabled", "1"}, {"OpStart", "2"},
 	} {
 		doc := callDocument(t, "cj1m.cxp")
 		callField(t, doc, symbolProgram+"."+edit.field).Value = edit.value

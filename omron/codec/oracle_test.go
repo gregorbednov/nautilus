@@ -19,6 +19,7 @@ import (
 )
 
 type inputCase struct {
+	TaskConfiguration    *taskConfigurationInput    `json:"taskConfiguration,omitempty"`
 	TaskProperties       *taskPropertiesInput       `json:"taskProperties,omitempty"`
 	NextEnable           *nextEnableInput           `json:"nextEnable,omitempty"`
 	DefinitionProperties *definitionPropertiesInput `json:"definitionProperties,omitempty"`
@@ -33,6 +34,7 @@ type inputCase struct {
 	Operands             []string                   `json:"operands"`
 }
 type nativeResult struct {
+	TaskConfiguration  *taskConfigurationResult    `json:"taskConfiguration"`
 	TaskProperties     *taskPropertiesResult       `json:"taskProperties"`
 	NextEnable         *nextEnableResult           `json:"nextEnable"`
 	InstanceStages     []controlStage              `json:"instanceStages"`
@@ -222,13 +224,14 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 	const compiler = "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141"
 	programType := 0
 	decodeProbe := probe == "fb-native-decode-v1" || probe == "fb-instance-decode-v1"
+	configurationProbe := probe == "task-configuration-v1"
 	if probe == "fb-body-operands-v1" || probe == "fb-native-decode-v1" || probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" || probe == "fb-definition-properties-v1" {
 		programType = 32
 	}
 	if probe == "fb-instance-compile-v1" || probe == "fb-instance-decode-v1" {
 		programType = 16
 	}
-	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1" && !decodeProbe && probe != "fb-body-context-v1" && probe != "fb-instruction-compile-v1" && probe != "fb-definition-properties-v1" && probe != "fb-instance-compile-v1" && probe != "fb-section-addresses-v1" && probe != "task-properties-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
+	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1" && !decodeProbe && !configurationProbe && probe != "fb-body-context-v1" && probe != "fb-instruction-compile-v1" && probe != "fb-definition-properties-v1" && probe != "fb-instance-compile-v1" && probe != "fb-section-addresses-v1" && probe != "task-properties-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
 		t.Fatal("unsupported oracle provenance")
 	}
 	assets := map[string][]byte{}
@@ -376,6 +379,14 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				t.Fatal("orphan case")
 			}
 			want := cases[caseIndex]
+			if configurationProbe {
+				p, r := want.TaskConfiguration, row.TaskConfiguration
+				if p == nil || r == nil || r.Number != p.Number || r.Startup != p.Startup&1 || r.Protection != p.Protection || r.StartupResult != 1 || r.ProtectionResult != 1 || row.Mnemonic != "NOP" || len(row.Operands) != 0 {
+					t.Fatal("task configuration request/readback mismatch")
+				}
+			} else if want.TaskConfiguration != nil || row.TaskConfiguration != nil {
+				t.Fatal("unexpected task configuration")
+			}
 			if probe == "task-properties-v1" {
 				if want.TaskProperties == nil || row.TaskProperties == nil || row.Mnemonic != "NOP" || len(row.Operands) != 0 {
 					t.Fatal("missing task properties")

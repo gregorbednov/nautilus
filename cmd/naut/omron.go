@@ -90,7 +90,10 @@ const omronUsage = `naut omron — independent CJ1 source tools, rung compilatio
       No task configuration, global header or complete N1 image.
   naut omron compile-resource-body -model MODEL -resource PATH -number NAME=N -timer-mode bcd -next-enable 0,0,0,0,0,0,0 FILE
       Compose both FB sections, task directory and task records; check FB call links.
-      Fragment only: no global header, task configuration, initial data or full N1.
+      Also report the separate task configuration table; no global header or full N1.
+  naut omron compile-task-configuration -model MODEL -resource PATH -timer-mode bcd FILE
+      Generate header task configuration metadata (OpStart0/1, unprotected).
+      Does not compile task bodies or generate the complete N1 header/image.
   naut omron status CONNECTION-FLAGS
       Read CPU identity and status; never change its mode.
   naut omron read CONNECTION-FLAGS ADDRESS [COUNT]
@@ -152,6 +155,8 @@ func runOmron(args []string) int {
 		err = omronCompileTaskBlock(args[1:])
 	case "compile-resource-body":
 		err = omronCompileResourceBody(args[1:])
+	case "compile-task-configuration":
+		err = omronCompileTaskConfiguration(args[1:])
 	case "compile-rungs":
 		err = omronCompileRungs(args[1:])
 	case "status", "read", "upload", "serve":
