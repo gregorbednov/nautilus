@@ -10,6 +10,51 @@ in the big-endian N1 file; event buffers instead contain x86 little-endian words
 
 ## Prefix records
 
+### Independent scalar instance record generation
+
+`compiler.CompileCXPFBInstance` and `naut omron compile-fb-instance -model MODEL
+-instance 'Resource[0].GlobalVariables.POUInstances.Instance[0]' -timer-mode bcd
+FILE` generate the observed runtime frame from CXP declarations and saved base
+bindings. Both instances on both CPU fixtures match all54 record words: ten
+header words and44 code containers, covered by17 generated spans. No executable
+words are copied from a saved image. IDs, body TaskID and absolute bases come
+from source; mutation tests change their corresponding operands.
+
+The supported interface is two scalar word inputs followed by one BOOL input,
+and one BOOL output, plus implicit EN/ENO. Allocation uses the existing offline
+scalar rules. MemoryAllocated must be true, OnlineEditDiffExpand zero, sizes
+must equal the logical frame and fit the private regions. The compiler uses
+saved addresses; it does not choose placement, audit other instances for
+overlap, validate all global symbol bindings, initialize stored variable values,
+assemble sections/tasks or create a deployable N1. Initial values are not
+emitted even when declarations contain them. Other interface shapes fail.
+
+The frame is FBIN; five base assignments; LD FI/RSET FI/#SET ENO; explicit
+inputs in reverse order; implicit EN input; FBBCALL; ENO and explicit output
+transfers; FBIRET. Only this generated control sequence is qualified. Header
+fields are instance ID, zero, total length and seven register sizes. The last
+two are zero in this scope. Native writer121c28ef writes ID from program+e4,
+zero, code length+10 and0x1c bytes from program+f4. SetBaseRegisterSize121d6276
+accepts indices0..6. Constructor defaults and saved images corroborate zeros.
+
+Evidence: `codec/testdata/instance-decode-*` contains four real PLC_Program
+decodes in programType16 (two saved frames on two CPUs); `instance-compile-*`
+contains110 normal instruction compiles,96 accepted and14 rejected. Raw Compile
+results remain separate from measured SetCIIFlag(true) and SetCCFlags stages.
+Generated moves/transfers receive CII; FBBCALL also receives CC flags. These
+stages qualify70 component comparisons. The three FI/ENO bit controls use the
+saved whole frames plus the programType16 final pass in hash-pinned
+`ghidra-instruction-compile.json.gz`, not a successful fresh whole-program
+compile. A normal program-object experiment timed out before cases and was
+discarded; it supplies no qualification. `ghidra-instance-envelope-10.json.gz`
+preserves InsertFBIN, SetBaseRegisterSize and SetFBBaseBodyNum evidence.
+
+CLI reports savedPlacementUsed=true, storageInitialized=false,
+globalPlacementAudited=false, linked=false and hardwareQualified=false.
+The unchanged ordinary instruction probe, with explicit BCD mode, reproduced
+all24 previous observations after adding the new research modes. Linux ARM64
+cross-building is checked separately from execution; no hardware was contacted.
+
 The two N1 fixtures have identical FB prefixes. Header word0x23 points
 to definitions at330; word0x24 points to instances at380; the task directory
 starts at496. The native writer in CompileMultipleProgramsAndProduceBinaryFile

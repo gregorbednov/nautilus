@@ -6,7 +6,8 @@ function emit(kind,fields){console.log('CJ1_INSTRUCTION '+JSON.stringify(Object.
 function text(address){let value='';for(let i=0;i<1024;i++){const n=address.add(i).readU8();if(!n)return value;value+=String.fromCharCode(n);}throw new Error('string bound exceeded');}
 setImmediate(()=>{
  try{
-  if(Process.arch!=='ia32' || request.probe!=='fb-native-decode-v1' || request.programType!==32 || request.timerCounterMode!=='bcd' || request.cases.length>512)throw new Error('unsupported decode request');
+  const programType=request.probe==='fb-native-decode-v1'?32:request.probe==='fb-instance-decode-v1'?16:-1;
+  if(Process.arch!=='ia32' || request.programType!==programType || programType<0 || request.timerCounterMode!=='bcd' || request.cases.length>512)throw new Error('unsupported decode request');
   const library=Module.load(request.binary);library.ensureInitialized();
   const native=(rva,result,args,abi='thiscall')=>new NativeFunction(library.base.add(rva),result,args,abi);
   const initLanguage=native(0x1ba0e1,'void',[],'mscdecl');
@@ -28,7 +29,7 @@ setImmediate(()=>{
   if(objectSize<0x2f0 || objectSize>0x1000)throw new Error('unreviewed PLC_Program size');
   const retained=[];
   function string(value,owned){const object=Memory.alloc(4),chars=Memory.allocUtf8String(value);retained.push(object,chars);stringCtor(object,chars);owned.push(object);return object;}
-  emit('begin',{probe:request.probe,compilerSHA256:request.compilerSHA256,requestSHA256:request.requestSHA256,fridaVersion:Frida.version,architecture:Process.arch,programType:32,unitVersion:null,timerCounterMode:'bcd',fullProgramCompiled:false,objectSize});
+  emit('begin',{probe:request.probe,compilerSHA256:request.compilerSHA256,requestSHA256:request.requestSHA256,fridaVersion:Frida.version,architecture:Process.arch,programType,unitVersion:null,timerCounterMode:'bcd',fullProgramCompiled:false,objectSize});
   initLanguage();
   const kbase=Memory.alloc(0x4000);retained.push(kbase);kbaseCtor(kbase);
   const owned=[];
@@ -46,7 +47,7 @@ setImmediate(()=>{
      test.code.forEach((word,i)=>buffer.add(i*4).writeU32(word));
      programCtor(program);
      try{
-      setProgramType(program,32);
+      setProgramType(program,programType);
       decompile(program,kbase,buffer,test.code.length);
       // AddToProgram121d62a8 adds to CPtrList at +210. MFC node is next/prev/data.
       const list=program.add(0x210),expected=list.add(12).readU32();

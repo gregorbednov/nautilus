@@ -1,0 +1,415 @@
+[
+  {
+    "id": "instance-0",
+    "mnemonic": "FBIN",
+    "operands": [
+      "0"
+    ]
+  },
+  {
+    "id": "instance-1",
+    "mnemonic": "FBIN",
+    "operands": [
+      "3"
+    ]
+  },
+  {
+    "id": "instance-2",
+    "mnemonic": "FBIN",
+    "operands": [
+      "2047"
+    ]
+  },
+  {
+    "id": "instance-3",
+    "mnemonic": "FBIN",
+    "operands": [
+      "2048"
+    ]
+  },
+  {
+    "id": "instance-4",
+    "mnemonic": "FBIN",
+    "operands": [
+      "-1"
+    ]
+  },
+  {
+    "id": "instance-5",
+    "mnemonic": "FBIN",
+    "operands": [
+      "&0"
+    ]
+  },
+  {
+    "id": "return",
+    "mnemonic": "FBIRET",
+    "operands": []
+  },
+  {
+    "id": "instance-7",
+    "mnemonic": "~MOVRW(561)",
+    "operands": [
+      "T3072",
+      "BR0"
+    ]
+  },
+  {
+    "id": "instance-8",
+    "mnemonic": "~MOVRW(561)",
+    "operands": [
+      "T3074",
+      "BR0"
+    ]
+  },
+  {
+    "id": "instance-9",
+    "mnemonic": "~MOVRW(561)",
+    "operands": [
+      "T4095",
+      "BR0"
+    ]
+  },
+  {
+    "id": "instance-10",
+    "mnemonic": "~MOVRW(561)",
+    "operands": [
+      "C3072",
+      "BR1"
+    ]
+  },
+  {
+    "id": "instance-11",
+    "mnemonic": "~MOVR(560)",
+    "operands": [
+      "H512",
+      "BR3"
+    ]
+  },
+  {
+    "id": "instance-12",
+    "mnemonic": "~MOVR(560)",
+    "operands": [
+      "H515",
+      "BR3"
+    ]
+  },
+  {
+    "id": "instance-13",
+    "mnemonic": "~MOVR(560)",
+    "operands": [
+      "H1407",
+      "BR3"
+    ]
+  },
+  {
+    "id": "instance-14",
+    "mnemonic": "~MOVR(560)",
+    "operands": [
+      "H1408",
+      "BR4"
+    ]
+  },
+  {
+    "id": "instance-15",
+    "mnemonic": "~MOVL(498)",
+    "operands": [
+      "#9FFF",
+      "BR2"
+    ]
+  },
+  {
+    "id": "instance-16",
+    "mnemonic": "~MOVL(498)",
+    "operands": [
+      "#00009FFF",
+      "BR2"
+    ]
+  },
+  {
+    "id": "instance-17",
+    "mnemonic": "~MOVL(498)",
+    "operands": [
+      "#0",
+      "BR2"
+    ]
+  },
+  {
+    "id": "instance-18",
+    "mnemonic": "~MOVL(498)",
+    "operands": [
+      "#FFFF",
+      "BR2"
+    ]
+  },
+  {
+    "id": "instance-19",
+    "mnemonic": "LD",
+    "operands": [
+      "FI0"
+    ]
+  },
+  {
+    "id": "instance-20",
+    "mnemonic": "LD",
+    "operands": [
+      "FI3"
+    ]
+  },
+  {
+    "id": "instance-21",
+    "mnemonic": "LD",
+    "operands": [
+      "FI2047"
+    ]
+  },
+  {
+    "id": "instance-22",
+    "mnemonic": "LD",
+    "operands": [
+      "FI2048"
+    ]
+  },
+  {
+    "id": "instance-23",
+    "mnemonic": "RSET",
+    "operands": [
+      "FI0"
+    ]
+  },
+  {
+    "id": "instance-24",
+    "mnemonic": "RSET",
+    "operands": [
+      "FI3"
+    ]
+  },
+  {
+    "id": "instance-25",
+    "mnemonic": "RSET",
+    "operands": [
+      "FI2047"
+    ]
+  },
+  {
+    "id": "instance-26",
+    "mnemonic": "RSET",
+    "operands": [
+      "FI2048"
+    ]
+  },
+  {
+    "id": "instance-27",
+    "mnemonic": "#SET",
+    "operands": [
+      "0,BR3"
+    ]
+  },
+  {
+    "id": "instance-28",
+    "mnemonic": "#SET",
+    "operands": [
+      "1,BR3"
+    ]
+  },
+  {
+    "id": "instance-29",
+    "mnemonic": "#SET",
+    "operands": [
+      "15,BR3"
+    ]
+  },
+  {
+    "id": "instance-30",
+    "mnemonic": "#SET",
+    "operands": [
+      "16,BR3"
+    ]
+  },
+  {
+    "id": "instance-31",
+    "mnemonic": "#SET",
+    "operands": [
+      "2047,BR3"
+    ]
+  },
+  {
+    "id": "instance-32",
+    "mnemonic": "~BMOV(559)",
+    "operands": [
+      ",-IR62",
+      "0,BR3"
+    ]
+  },
+  {
+    "id": "instance-33",
+    "mnemonic": "~BMOV(559)",
+    "operands": [
+      "0,BR3",
+      ",IR62+"
+    ]
+  },
+  {
+    "id": "instance-34",
+    "mnemonic": "~MOV(021)",
+    "operands": [
+      ",-IR63",
+      "0,BR3"
+    ]
+  },
+  {
+    "id": "instance-35",
+    "mnemonic": "~BMOV(559)",
+    "operands": [
+      ",-IR62",
+      "1,BR3"
+    ]
+  },
+  {
+    "id": "instance-36",
+    "mnemonic": "~BMOV(559)",
+    "operands": [
+      "1,BR3",
+      ",IR62+"
+    ]
+  },
+  {
+    "id": "instance-37",
+    "mnemonic": "~MOV(021)",
+    "operands": [
+      ",-IR63",
+      "1,BR3"
+    ]
+  },
+  {
+    "id": "instance-38",
+    "mnemonic": "~BMOV(559)",
+    "operands": [
+      ",-IR62",
+      "2,BR3"
+    ]
+  },
+  {
+    "id": "instance-39",
+    "mnemonic": "~BMOV(559)",
+    "operands": [
+      "2,BR3",
+      ",IR62+"
+    ]
+  },
+  {
+    "id": "instance-40",
+    "mnemonic": "~MOV(021)",
+    "operands": [
+      ",-IR63",
+      "2,BR3"
+    ]
+  },
+  {
+    "id": "instance-41",
+    "mnemonic": "~BMOV(559)",
+    "operands": [
+      ",-IR62",
+      "3,BR3"
+    ]
+  },
+  {
+    "id": "instance-42",
+    "mnemonic": "~BMOV(559)",
+    "operands": [
+      "3,BR3",
+      ",IR62+"
+    ]
+  },
+  {
+    "id": "instance-43",
+    "mnemonic": "~MOV(021)",
+    "operands": [
+      ",-IR63",
+      "3,BR3"
+    ]
+  },
+  {
+    "id": "instance-44",
+    "mnemonic": "~BMOV(559)",
+    "operands": [
+      ",-IR62",
+      "16,BR3"
+    ]
+  },
+  {
+    "id": "instance-45",
+    "mnemonic": "~BMOV(559)",
+    "operands": [
+      "16,BR3",
+      ",IR62+"
+    ]
+  },
+  {
+    "id": "instance-46",
+    "mnemonic": "~MOV(021)",
+    "operands": [
+      ",-IR63",
+      "16,BR3"
+    ]
+  },
+  {
+    "id": "instance-47",
+    "mnemonic": "~BMOV(559)",
+    "operands": [
+      ",-IR62",
+      "2047,BR3"
+    ]
+  },
+  {
+    "id": "instance-48",
+    "mnemonic": "~BMOV(559)",
+    "operands": [
+      "2047,BR3",
+      ",IR62+"
+    ]
+  },
+  {
+    "id": "instance-49",
+    "mnemonic": "~MOV(021)",
+    "operands": [
+      ",-IR63",
+      "2047,BR3"
+    ]
+  },
+  {
+    "id": "instance-50",
+    "mnemonic": "FBBCALL",
+    "operands": [
+      "&0"
+    ]
+  },
+  {
+    "id": "instance-51",
+    "mnemonic": "FBBCALL",
+    "operands": [
+      "&1024"
+    ]
+  },
+  {
+    "id": "instance-52",
+    "mnemonic": "FBBCALL",
+    "operands": [
+      "&2047"
+    ]
+  },
+  {
+    "id": "instance-53",
+    "mnemonic": "FBBCALL",
+    "operands": [
+      "&2048"
+    ]
+  },
+  {
+    "id": "instance-54",
+    "mnemonic": "FBBCALL",
+    "operands": [
+      "1024"
+    ]
+  }
+]

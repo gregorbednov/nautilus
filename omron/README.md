@@ -2,6 +2,13 @@
 
 The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
 
+`naut omron compile-fb-instance -model MODEL -instance PATH -timer-mode bcd FILE`
+now generates the observed scalar FB runtime frame and ten-word instance header
+from CXP, using saved placement. All54 words match both instances on both CPU
+fixtures. Scope: word,word,BOOL inputs and BOOL output plus EN/ENO. Storage
+initialization, global placement audit, section/task linking and the complete
+N1 image remain pending; see `docs/design/omron-fb-format.md` for evidence limits.
+
 * `cxp`: bounded PKWARE DCL decoding; complete CXP/CXT assignment trees;
   Windows-1251, Windows-1252 and UTF-8; lossless original/CXT preservation;
   canonical CXT writing and literal-token CXP packing; textual rung edits.

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "b7611947376df694eb5d8570aed7b74b10b0c2a8697cc1a42abf16309802bcc3",
+  "programType": 16,
+  "unitVersion": null,
+  "timerCounterMode": "bcd",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "probe": "fb-instance-decode-v1",
+  "artifacts": {
+    "cases": {
+      "path": "instance-decode-cases.json",
+      "sha256": "b7611947376df694eb5d8570aed7b74b10b0c2a8697cc1a42abf16309802bcc3",
+      "bytes": 2123
+    },
+    "events": {
+      "path": "instance-decode-events.jsonl.gz",
+      "sha256": "3f28ee18fd7343b158466659a451e52589db4c1c4d8a133f383a9fce3f277b1d",
+      "bytes": 1238,
+      "encoding": "gzip",
+      "decodedSHA256": "52fe8af967fd9c5b12f79ad739471bce8a273cdf6ba3329ae01df90948124a99"
+    },
+    "script": {
+      "path": "instance-decode-run.js.gz",
+      "sha256": "e27d278f956b5e0d4972bf053a1ff9203a67a590780c9eb06c2c4e081348642a",
+      "bytes": 2796,
+      "encoding": "gzip",
+      "decodedSHA256": "6a34d49098b188f7e5931d17a644616c549af92d4f3cef016d6ce81a022ac881"
+    },
+    "template": {
+      "path": "instance-decode-template.js",
+      "sha256": "bfc79fb1a74c2e08818c02aeac45a0e846885d53a2f1fc6f18b5c76822cdef73",
+      "bytes": 5666
+    },
+    "worker": {
+      "path": "instance-decode-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    }
+  }
+}

@@ -15,6 +15,24 @@
 
 ## Что уже реализовано
 
+Последний этап: `compiler.CompileCXPFBInstance` / CLI `compile-fb-instance
+-model MODEL -instance 'Resource[0].GlobalVariables.POUInstances.Instance[0]'
+-timer-mode bcd FILE`. Из CXP генерируются все54 слова записи экземпляра
+(10 заголовок +44 runtime frame), полное совпадение двух экземпляров на обеих
+моделях,17 служебных диапазонов. Поддержан интерфейс word,word,BOOL -> BOOL,
+с EN/ENO и прежним офлайн-скалярным размещением. Абсолютные адреса берутся
+из сохранённых BR-полей; новые адреса не выбираются, пересечения экземпляров
+и все global symbol bindings не проверяются. Начальные значения не выдаются.
+Отчёт явно показывает savedPlacementUsed=true, storageInitialized=false,
+globalPlacementAudited=false, linked=false, hardwareQualified=false.
+Эталоны instance-decode-* (4 штатных decode), instance-compile-* (110 Compile,
+96 accepted/14 rejected) и ghidra-instance-envelope-10 hash-pinned. CII/CC
+подтверждены штатными setters; LD FI/RSET FI/#SET ENO — целыми сохранёнными
+буферами и статическим final pass. Новая компиляция целого экземпляра не
+подтверждена: program-object probe завершён по таймауту до cases, helper удалён.
+Далее — инициализация хранения, проверка размещения/идентичности символов,
+заголовки секций, связывание задач и полный N1. Аппаратной проверки нет.
+
 Новейший этап: `compiler.CompileCXPFBDefinition` / CLI `compile-fb-definition
 -model MODEL -definition PATH -number 0 -timer-mode bcd FILE` генерируют из CXP
 полную отдельную запись определения BLINK:23 слова кода с FBBN/FBBRET и23 слова

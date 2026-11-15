@@ -29,6 +29,7 @@ setImmediate(()=>{
   const encode=native(0x16d735,'int',['pointer','pointer']);
   const resetCII=native(0x175e8a,'void',['pointer']);
   const setCC=native(0x175e61,'void',['pointer']);
+  const setCII=native(0x175eb3,'void',['pointer','pointer','int']);
   const generateInvocation=native(0x171499,'int',['pointer','pointer','pointer','int']);
   const finishInvocation=native(0x17166f,'int',['pointer','pointer']);
   const stringToType=native(0x175f7c,'uint32',['pointer'],'mscdecl');
@@ -37,11 +38,11 @@ setImmediate(()=>{
   const getBaseAddress=native(0x1d0137,'int',['pointer','int','pointer','pointer']);
   const setUseFB=native(0x1cf742,'void',['pointer','int']);
   const getUseFB=native(0x1cf79a,'int',['pointer']);
-  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1','fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1'].includes(request.probe))throw new Error('unsupported probe');
+  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1','fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1','fb-instance-compile-v1'].includes(request.probe))throw new Error('unsupported probe');
   const programType=request.programType===undefined?0:request.programType;
-  if(programType!==(['fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1'].includes(request.probe)?32:0))throw new Error('invalid program type/probe combination');
-  const compileContext=['fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1'].includes(request.probe);
-  const useCompile=['fb-instruction-compile-v1','fb-definition-properties-v1'].includes(request.probe);
+  if(programType!==(request.probe==='fb-instance-compile-v1'?16:['fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1'].includes(request.probe)?32:0))throw new Error('invalid program type/probe combination');
+  const compileContext=['fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1','fb-instance-compile-v1'].includes(request.probe);
+  const useCompile=['fb-instruction-compile-v1','fb-definition-properties-v1','fb-instance-compile-v1'].includes(request.probe);
   let arrayCtor,arrayDtor,arraySet,compileInstruction,isCompiled;
   if(useCompile){
    const mfc=Process.enumerateModules().find(x=>x.name.toLowerCase()==='mfc42.dll');if(!mfc)throw new Error('missing MFC42');
@@ -89,7 +90,7 @@ setImmediate(()=>{
     const descriptor=kbase.add(0x2d50).readPointer();
     const profile={device:cpu.device,cpu:cpu.cpu,selector:descriptor.add(0x44).readU32(),familyMaskLow:descriptor.add(0x68).readU32(),familyMaskHigh:descriptor.add(0x6c).readU32(),timerModeBcd:bcd,timerModeBinary:binary};
     if(compileContext)profile.useFunctionBlocks=getUseFB(kbase);
-    if(['fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1'].includes(request.probe)){
+    if(['fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1','fb-instance-compile-v1'].includes(request.probe)){
      profile.bases=[];
      for(let index=0;index<5;index++){
       const name=string('',profileStrings),size=Memory.alloc(4),address=Memory.alloc(4),secondSize=Memory.alloc(4);
@@ -133,6 +134,10 @@ setImmediate(()=>{
           const state=snapshot(instance);result.words=state.words;result.flags=state.flags;
           for(let i=0;i<result.arity;i++){const record=instance.add(0x10).readPointer().add(i*0x30);result.operandResults.push(record.readU32());result.normalized.push({value:record.add(4).readU32(),flags:record.add(8).readU32()});}
           result.accepted=result.compileResult===1 && result.compiledFlag!==0 && result.words.length>0;
+          if(result.accepted && request.probe==='fb-instance-compile-v1'){
+           setCII(instance,kbase,1);result.instanceStages=[Object.assign({operation:'SetCIIFlag(true)'},snapshot(instance))];
+           if(test.mnemonic==='FBBCALL'){setCC(instance);result.instanceStages.push(Object.assign({operation:'SetCCFlags'},snapshot(instance)));}
+          }
           if(!result.accepted)result.words=[];
          }finally{arrayDtor(array);}
         }else{

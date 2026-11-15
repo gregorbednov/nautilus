@@ -31,6 +31,7 @@ type inputCase struct {
 	Operands             []string                   `json:"operands"`
 }
 type nativeResult struct {
+	InstanceStages     []controlStage              `json:"instanceStages"`
 	Properties         *definitionPropertiesResult `json:"properties"`
 	CompileResult      *int                        `json:"compileResult"`
 	CompiledFlag       *int                        `json:"compiledFlag"`
@@ -216,10 +217,14 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 	}
 	const compiler = "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141"
 	programType := 0
+	decodeProbe := probe == "fb-native-decode-v1" || probe == "fb-instance-decode-v1"
 	if probe == "fb-body-operands-v1" || probe == "fb-native-decode-v1" || probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" || probe == "fb-definition-properties-v1" {
 		programType = 32
 	}
-	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1" && probe != "fb-native-decode-v1" && probe != "fb-body-context-v1" && probe != "fb-instruction-compile-v1" && probe != "fb-definition-properties-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
+	if probe == "fb-instance-compile-v1" || probe == "fb-instance-decode-v1" {
+		programType = 16
+	}
+	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1" && !decodeProbe && probe != "fb-body-context-v1" && probe != "fb-instruction-compile-v1" && probe != "fb-definition-properties-v1" && probe != "fb-instance-compile-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
 		t.Fatal("unsupported oracle provenance")
 	}
 	assets := map[string][]byte{}
@@ -247,7 +252,7 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 			t.Fatal("duplicate fixture case")
 		}
 		ids[test.ID] = true
-		if probe != "fb-native-decode-v1" && (len(test.Code) != 0 || test.SourceSHA256 != "" || test.SourceOffsetWords != 0 || test.Mutation != nil) {
+		if !decodeProbe && (len(test.Code) != 0 || test.SourceSHA256 != "" || test.SourceOffsetWords != 0 || test.Mutation != nil) {
 			t.Fatal("decode inputs presented as encode evidence")
 		}
 	}
@@ -304,7 +309,7 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 		}
 		switch row.Kind {
 		case "begin":
-			if (probe == "fb-native-decode-v1" && row.ObjectSize != 752) || (probe != "fb-native-decode-v1" && row.ObjectSize != 0) {
+			if (decodeProbe && row.ObjectSize != 752) || (!decodeProbe && row.ObjectSize != 0) {
 				t.Fatal("native object size mismatch")
 			}
 			if row.Probe != probe {
@@ -314,14 +319,14 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				t.Fatal("library configuration mismatch")
 			}
 		case "profile":
-			if probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" || probe == "fb-definition-properties-v1" {
+			if probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" || probe == "fb-definition-properties-v1" || probe == "fb-instance-compile-v1" {
 				if row.UseFunctionBlocks == nil || *row.UseFunctionBlocks != 1 {
 					t.Fatal("FB mode readback mismatch")
 				}
 			} else if row.UseFunctionBlocks != nil {
 				t.Fatal("unexpected FB mode readback")
 			}
-			if probe == "fb-body-operands-v1" || probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" || probe == "fb-definition-properties-v1" {
+			if probe == "fb-body-operands-v1" || probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" || probe == "fb-definition-properties-v1" || probe == "fb-instance-compile-v1" {
 				wantBases := []nativeBase{{0, "T3072", 60416, 1024}, {1, "C3072", 64512, 1024}, {2, "DIFF8191", 40959, 0}, {3, "H512", 55808, 896}, {4, "H1408", 56704, 128}}
 				if !reflect.DeepEqual(row.Bases, wantBases) {
 					t.Fatal("base register readback differs", row.Bases)
@@ -351,10 +356,10 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				}
 			}
 		case "case":
-			if probe != "fb-native-decode-v1" && (len(row.Decoded) != 0 || row.SourceSHA256 != "" || row.SourceOffsetWords != 0) {
+			if !decodeProbe && (len(row.Decoded) != 0 || row.SourceSHA256 != "" || row.SourceOffsetWords != 0) {
 				t.Fatal("decode results presented as compile evidence")
 			}
-			if probe != "fb-instruction-compile-v1" && probe != "fb-definition-properties-v1" && (row.CompileResult != nil || row.CompiledFlag != nil) {
+			if probe != "fb-instruction-compile-v1" && probe != "fb-definition-properties-v1" && probe != "fb-instance-compile-v1" && (row.CompileResult != nil || row.CompiledFlag != nil) {
 				t.Fatal("instruction compile presented as encode-only evidence")
 			}
 			if probe != "control-bits-v1" && len(row.ControlStages) != 0 {
@@ -367,6 +372,29 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				t.Fatal("orphan case")
 			}
 			want := cases[caseIndex]
+			if probe != "fb-instance-compile-v1" && len(row.InstanceStages) != 0 {
+				t.Fatal("unexpected instance postamble stages")
+			}
+			if probe == "fb-instance-compile-v1" && row.Accepted {
+				expected := 1
+				if row.Mnemonic == "FBBCALL" {
+					expected = 2
+				}
+				if len(row.InstanceStages) != expected || row.InstanceStages[0].Operation != "SetCIIFlag(true)" {
+					t.Fatal("missing instance CII stages")
+				}
+				stage := append([]uint32(nil), row.Words...)
+				stage[0] |= 0x20000000
+				if !reflect.DeepEqual(row.InstanceStages[0].Words, stage) {
+					t.Fatal("instance CII mutation differs")
+				}
+				if expected == 2 {
+					stage[0] |= 0x023e0000
+					if row.InstanceStages[1].Operation != "SetCCFlags" || !reflect.DeepEqual(row.InstanceStages[1].Words, stage) {
+						t.Fatal("instance call CC mutation differs")
+					}
+				}
+			}
 			if probe == "fb-definition-properties-v1" {
 				if want.DefinitionProperties == nil || row.Properties == nil {
 					t.Fatal("missing definition properties")
@@ -405,7 +433,7 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 			if row.ID != want.ID || row.Mnemonic != want.Mnemonic || !reflect.DeepEqual(row.Operands, want.Operands) || row.Device != profile.device || row.CPU != profile.cpu {
 				t.Fatal("case input correlation mismatch")
 			}
-			if probe == "fb-native-decode-v1" {
+			if decodeProbe {
 				if !row.Accepted || row.Initialise != 0 || row.EncodeResult != nil || len(row.OperandResults) != 0 || row.SourceSHA256 != want.SourceSHA256 || row.SourceOffsetWords != want.SourceOffsetWords || !reflect.DeepEqual(row.Words, want.Code) || len(row.Decoded) == 0 {
 					t.Fatal("incomplete or changed native decode result")
 				}
@@ -419,7 +447,7 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				if offset != len(want.Code) {
 					t.Fatal("incomplete decoded word coverage")
 				}
-			} else if probe == "fb-instruction-compile-v1" || probe == "fb-definition-properties-v1" {
+			} else if probe == "fb-instruction-compile-v1" || probe == "fb-definition-properties-v1" || probe == "fb-instance-compile-v1" {
 				if row.CompileResult == nil || row.CompiledFlag == nil || row.EncodeResult != nil || row.Initialise != 1 || len(row.OperandResults) != len(want.Operands) {
 					t.Fatal("incomplete instruction compile result")
 				}
