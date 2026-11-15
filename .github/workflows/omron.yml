@@ -52,6 +52,7 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           go test ./omron/um -fuzz FuzzParseN1 -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/um -fuzz FuzzN1FBPrefix -fuzztime 5s -parallel 2 -timeout 60s
           go test ./omron/codec -fuzz FuzzDecodeInstruction -fuzztime 5s -parallel 2 -timeout 60s
           go test ./omron/compiler -fuzz FuzzCompileRungs -fuzztime 5s -parallel 2 -timeout 60s
           go test ./omron/cxp -fuzz FuzzSymbolTableRows -fuzztime 5s -parallel 2 -timeout 60s

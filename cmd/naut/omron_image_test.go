@@ -41,3 +41,20 @@ func TestOmronImageCLI(t *testing.T) {
 		}
 	}
 }
+
+func TestOmronImageFunctionBlocksCLI(t *testing.T) {
+	data, err := captureOmronBodyCommand(t, omronImage, []string{"-function-blocks", "../../omron/um/testdata/cj1h-baseline.n1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report struct {
+		um.N1Report
+		FunctionBlocks um.N1FunctionBlocks
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.FunctionBlocks.Definitions) != 1 || report.FunctionBlocks.Definitions[0].NameASCII != "BLINK" || len(report.FunctionBlocks.Instances) != 2 || report.HardwareQualified || report.FunctionBlocks.HardwareQualified {
+		t.Fatal("invalid FB inspection report")
+	}
+}

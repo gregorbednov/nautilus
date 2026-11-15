@@ -1,5 +1,28 @@
 # Native encoding findings from the installed Windows compiler
 
+## FB records, allocation anchors and post-encoding (2026-11-15)
+
+The [FB format research](omron-fb-format.md) now documents the prefix writer,
+23-word definition and10-word instance headers, BLINK's23-container definition
+code and two44-container instance buffers. Both instance buffers match complete
+hash-pinned runtime observations. The independent read-only inspector exposes
+these records with `inspect-image -function-blocks`, preserves relative code
+and rejects unsupported layouts atomically.
+
+Saved POUInstances metadata T3072/H512 versus T3074/H515 matches exactly five
+changed initialization fields. This is an allocation anchor, not an allocator.
+Two new portable capsules preserve236 internal-primitive observations without
+enabling these forms in the public codec. In particular FBIN #0400 is interpreted
+as decimal400 in the measured normal-context API, unlike a public hex literal.
+
+The same FBICALL object changes from b2410806 to927f0806 between EncodeFunction
+and Serialize, with unchanged operands and flags00080040 to000800c0. That lifecycle
+control is now a test. It establishes that per-instruction templates are not
+final FB code; the complete transformation rule is still unknown. Ghidra exports
+for the native writer and candidate post-encoding passes are hash-pinned under
+um/testdata. FB graph lowering, relative allocation and call generation remain
+unfinished, and no new full-project CX compile or PLC execution occurred.
+
 ## Section separators and unsigned CMP (2026-11-15)
 
 The former six unknown containers in task1 are two CMP(020) #DEAD #DEAD section

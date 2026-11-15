@@ -38,3 +38,17 @@ with no capture errors. Raw event SHA-256 is
 It differs from baseline at exactly byte3283 (00 -> 0F), the first code
 container of task256 (e205e000 -> e205e00f). This single comparison does not
 qualify a general address encoder.
+
+The optional FB-prefix inspector now identifies one BLINK definition (record
+word334, length46, header23, code23) and two instances (records388/442, length54,
+header10, code44). Definition and instance sections begin at330/380. Both saved
+instance buffers match complete176-byte runtime GetProgramBinary events in the
+hash-pinned existing CJ1H/CJ1M logs. Relative code remains opaque.
+
+`fb-writer-ghidra.json.gz` preserves an actual Ghidra12.1.4 selected-function
+export including CompileMultipleProgramsAndProduceBinaryFile121c28ef; it shows
+the header sizes/counts and prefix serialization. `fb-postencode-ghidra.json.gz`
+preserves CreateTemporariesAndDoAsicFix121dea55 and DoAsicFixAndReturns121de87c.
+Compressed/decoded hashes and compiler provenance are checked by tests. These
+exports aid research; their inferred types are not a recovered compiler ABI.
+See [the format findings](../../../docs/design/omron-fb-format.md).

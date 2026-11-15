@@ -51,6 +51,9 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   entry/exit wrappers and opaque instruction containers. Unknown register/FB
   data and all input bytes are preserved. Supported layout is verified against
   matching CJ1M/CJ1H compiler captures; this is not a full native decompiler.
+  `inspect-image -function-blocks` now inventories the observed N1 definition
+  and instance records, including opaque code and retained headers. Both saved
+  BLINK instances match complete runtime buffers. See [FB evidence and limits](../docs/design/omron-fb-format.md).
 
 **There is no full-project CJ1 executable compiler or deploy command yet.** Import
 bundles are source/research artifacts, not runnable Nautilus projects. The full

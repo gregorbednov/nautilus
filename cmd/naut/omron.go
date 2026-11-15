@@ -36,6 +36,7 @@ const omronUsage = `naut omron — independent CJ1 source tools, rung compilatio
   naut omron inspect-image [-format n1] FILE
       Inspect a captured native N1 compiler image: tasks and code sizes.
       Preserve unknown data; does not decompile, compile or deploy it.
+      Add -function-blocks to inspect the qualified FB definition/instance layout.
   naut omron compile-rungs -model MODEL [-timer-mode bcd|binary] -rung PATH FILE
       Compile selected textual CXP/CXT rungs into JSON instruction containers.
       Repeat -rung for a contiguous selection in one program (project order).

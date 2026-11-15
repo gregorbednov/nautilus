@@ -13,6 +13,7 @@ import (
 func omronImage(args []string) error {
 	flags := flag.NewFlagSet("omron inspect-image", flag.ContinueOnError)
 	format := flags.String("format", "n1", "explicit compiler image format (n1)")
+	functionBlocks := flags.Bool("function-blocks", false, "inspect the qualified FB prefix layout; relative code remains opaque")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -34,5 +35,15 @@ func omronImage(args []string) error {
 	}
 	output := json.NewEncoder(os.Stdout)
 	output.SetIndent("", "  ")
+	if *functionBlocks {
+		blocks, err := image.FunctionBlocks()
+		if err != nil {
+			return err
+		}
+		return output.Encode(struct {
+			um.N1Report
+			FunctionBlocks *um.N1FunctionBlocks `json:"functionBlocks"`
+		}{image.Summary(), blocks})
+	}
 	return output.Encode(image.Summary())
 }

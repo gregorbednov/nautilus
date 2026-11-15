@@ -156,3 +156,9 @@ These representations deliberately remain separate.
 The library-default result is not hardware qualification. The complete target
 still requires the full instruction/CPU/unit matrix, FB and task compilation,
 image generation, download/read-back and execution tests.
+
+Internal FB primitive research adds236 observations in separate `fb-*` capsules.
+They remain outside this public codec: identifier syntax is context-dependent,
+and captured FBICALL code changes after initial encoding. See the
+[FB format investigation](../../docs/design/omron-fb-format.md). These observations
+must not be treated as qualified ordinary instruction forms.

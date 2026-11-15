@@ -152,6 +152,9 @@ func TestN1CyclicWrapperAndCodePageName(t *testing.T) {
 	if !task.IndependentIRDR || len(task.Code) != 1 || task.NameASCII != "" || !bytes.Equal(task.NameBytes, []byte{0xd2, 0xe5, 0xf1}) {
 		t.Fatalf("wrapper or code-page bytes lost: %+v", task)
 	}
+	if fb, err := image.FunctionBlocks(); err != nil || len(fb.Definitions) != 0 || len(fb.Instances) != 0 {
+		t.Fatal("empty prefix misclassified", err)
+	}
 }
 
 func FuzzParseN1(f *testing.F) {
@@ -165,6 +168,25 @@ func FuzzParseN1(f *testing.F) {
 		image, err := ParseN1(data)
 		if err == nil && !bytes.Equal(image.Original(), data) {
 			t.Fatal("accepted image not preserved")
+		}
+		if err == nil {
+			blocks, fbErr := image.FunctionBlocks()
+			if fbErr != nil {
+				if blocks != nil {
+					t.Fatal("partial FB inventory on failure")
+				}
+				return
+			}
+			for _, def := range blocks.Definitions {
+				if uint64(def.OffsetWords)+uint64(def.LengthWords) > uint64(image.DirectoryOffsetWords) || len(def.Header) != 23 || uint32(len(def.Code))+23 != def.LengthWords {
+					t.Fatal("unbounded definition range")
+				}
+			}
+			for _, instance := range blocks.Instances {
+				if uint64(instance.OffsetWords)+uint64(instance.LengthWords) > uint64(image.DirectoryOffsetWords) || len(instance.Header) != 10 || uint32(len(instance.Code))+10 != instance.LengthWords {
+					t.Fatal("unbounded instance range")
+				}
+			}
 		}
 	})
 }
