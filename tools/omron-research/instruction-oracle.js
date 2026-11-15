@@ -38,13 +38,13 @@ setImmediate(()=>{
   const getBaseAddress=native(0x1d0137,'int',['pointer','int','pointer','pointer']);
   const setUseFB=native(0x1cf742,'void',['pointer','int']);
   const getUseFB=native(0x1cf79a,'int',['pointer']);
-  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1','fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1','fb-instance-compile-v1','fb-section-addresses-v1','task-properties-v1','task-configuration-v1'].includes(request.probe))throw new Error('unsupported probe');
+  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1','fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1','fb-instance-compile-v1','fb-section-addresses-v1','task-properties-v1','task-configuration-v1','program-object-v1'].includes(request.probe))throw new Error('unsupported probe');
   const programType=request.programType===undefined?0:request.programType;
   if(programType!==(request.probe==='fb-instance-compile-v1'?16:['fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1'].includes(request.probe)?32:0))throw new Error('invalid program type/probe combination');
   const compileContext=['fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1','fb-instance-compile-v1'].includes(request.probe);
   const useCompile=['fb-instruction-compile-v1','fb-definition-properties-v1','fb-instance-compile-v1'].includes(request.probe);
   let arrayCtor,arrayDtor,arraySet,compileInstruction,isCompiled;
-  if(useCompile){
+  if(useCompile || request.probe==='program-object-v1'){
    const mfc=Process.enumerateModules().find(x=>x.name.toLowerCase()==='mfc42.dll');if(!mfc)throw new Error('missing MFC42');
    const getProc=new NativeFunction(Process.getModuleByName('kernel32.dll').getExportByName('GetProcAddress'),'pointer',['pointer','pointer'],'stdcall');
    const ctorThunk=library.base.add(0x24e332);
@@ -104,6 +104,49 @@ setImmediate(()=>{
      const owned=[];
      const result={id:test.id,device:cpu.device,cpu:cpu.cpu,mnemonic:test.mnemonic,operands:test.operands,initialiseResult:null,operandResults:[],normalized:[],encodeResult:null,words:[],accepted:false};
      try{
+      if(request.probe==='program-object-v1'){
+       const input=test.programInstructions;if(!Array.isArray(input) || input.length<1 || input.length>16)throw new Error('invalid program object input');
+       const size=library.base.add(0x2726bc).readU32();if(size!==752)throw new Error('program size');
+       const program=Memory.alloc(size);retained.push(program);native(0x1d5677,'pointer',['pointer'])(program);
+       try{
+        native(0x1d6216,'void',['pointer','int'])(program,0);
+        if(native(0x215f70,'int',['pointer','pointer','int'])(program,kbase,256)!==1)throw new Error('SetTaskID');
+        if(native(0x215fb8,'int',['pointer','pointer','int'])(program,kbase,1)!==1)throw new Error('SetStartUpFlag');
+        native(0x12d80,'void',['pointer','pointer'])(program,string('Probe',owned));
+        native(0x1cbaed,'void',['pointer','pointer'])(kbase,program);
+        const bound=program.add(0x248).readPointer().equals(kbase);if(!bound)throw new Error('normal owner binding failed');
+        emit('stage',{id:test.id,device:cpu.device,cpu:cpu.cpu,stage:'owner-bound'});
+        for(const instruction of input){
+         if(!['LD','OUT','NOP','END'].includes(instruction.mnemonic)||!Array.isArray(instruction.operands)||instruction.operands.length>1)throw new Error('unreviewed program instruction');
+         const array=Memory.alloc(20);retained.push(array);arrayCtor(array);
+         try{instruction.operands.forEach((operand,i)=>{if(typeof operand!=='string'||!/^[W][0-9]{1,3}\.[0-9]{1,2}$/.test(operand))throw new Error('invalid direct program operand');const chars=Memory.allocUtf8String(operand);retained.push(chars);arraySet(array,i,chars);});const mnemonic=Memory.allocUtf8String(instruction.mnemonic);retained.push(mnemonic);const child=native(0x1e3bde,'pointer',['pointer','pointer','pointer'])(program,mnemonic,array);if(child.isNull())throw new Error('GenerateInst failed');if(test.programCII===true)setCII(child,kbase,1);native(0x1d62a8,'void',['pointer','pointer'])(program,child);}finally{arrayDtor(array);}
+        }
+        emit('stage',{id:test.id,device:cpu.device,cpu:cpu.cpu,stage:'before-compile'});
+        const compiled=native(0x1e3eef,'int',['pointer','pointer','int'])(program,kbase,0);
+        emit('stage',{id:test.id,device:cpu.device,cpu:cpu.cpu,stage:'after-compile'});
+        const count=program.add(0x1ec).readS32();if(count<1||count>256)throw new Error('program code size');
+        const buffer=Memory.alloc(count*4+16);retained.push(buffer);
+        const end=native(0x1d68cf,'pointer',['pointer','pointer'])(program,buffer);if(end.sub(buffer).toInt32()!==count*4)throw new Error('program copy length');
+        const words=[];for(let i=0;i<count;i++)words.push(buffer.add(i*4).readU32());
+        result.programObject={ownerBound:bound,compileResult:compiled,ciiEnabled:test.programCII===true,words};
+        if(test.programFile===true){
+         if(typeof request.outputDirectory!=='string'||!/^E:[\\/]/i.test(request.outputDirectory)||!/^[A-Za-z0-9_-]{1,48}$/.test(test.id))throw new Error('invalid owned output path');
+         const mfc=Process.enumerateModules().find(x=>x.name.toLowerCase()==='mfc42.dll'),getProc=new NativeFunction(Process.getModuleByName('kernel32.dll').getExportByName('GetProcAddress'),'pointer',['pointer','pointer'],'stdcall');
+         const ordinal=(n,result,args)=>new NativeFunction(getProc(mfc.base,ptr(n)),result,args,'thiscall');
+         const programs=Memory.alloc(20),errors=Memory.alloc(20);retained.push(programs,errors);ordinal(500,'pointer',['pointer'])(programs);arrayCtor(errors);
+         try{
+          ordinal(5860,'void',['pointer','int','pointer'])(programs,0,program);
+          const path=request.outputDirectory+'\\'+cpu.device+'-'+test.id+'.n1',chars=Memory.allocUtf8String(path);retained.push(chars);
+          emit('stage',{id:test.id,device:cpu.device,cpu:cpu.cpu,stage:'before-file'});
+          const returned=native(0x1c28ef,'int',['pointer','pointer','pointer','int','int','int','int','pointer'])(kbase,programs,errors,1,0,65535,0,chars);
+          const count=errors.add(8).readS32();if(count<0||count>128)throw new Error('error list bound');
+          const fileResult={returned,errorCount:count,path,byteLength:0,fileHex:''};
+          if(returned===1){const file=new File(path,'rb');try{const bytes=file.readBytes(65537);if(bytes.byteLength>65536)throw new Error('file bound');fileResult.byteLength=bytes.byteLength;fileResult.fileHex=Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');}finally{file.close();}}
+          result.programObject.file=fileResult;
+         }finally{arrayDtor(errors);ordinal(772,'void',['pointer'])(programs);}
+        }
+       }finally{native(0x1d5c77,'void',['pointer'])(program);}
+      }
       if(request.probe==='task-configuration-v1'){
        const p=test.taskConfiguration;if(!p || ![256,257,287].includes(p.number) || ![-1,0,1,2].includes(p.startup) || ![0,1].includes(p.protection))throw new Error('invalid task configuration case');
        const context=Memory.alloc(0x4000);retained.push(context);kbaseCtor(context);

@@ -15,6 +15,19 @@
 
 ## Что уже реализовано
 
+Новый этап16 ноября: снят блокер штатного создания PLC_Program в библиотечном
+oracle. MakeTaskConfigurationTable привязывает KBase; после GenerateInst,
+AddToProgram и Compile удалось вызвать штатный полный N1 writer без GUI.
+program-object-* содержит8 наблюдений (2 CPU ×2 программы ×2 состояния CII).
+Go-тест независимо проверяет все656/658 слов каждого минимального N1, включая
+header, configuration, directory и task record. Это исследовательский контекст,
+не компиляция полного CXP. Его default flags=08000000 и нулевые FB/stack поля
+отличаются от сохранённых проектов; production header по ним пока не выдаётся.
+GenerateInst очищает CII; штатный SetCIIFlag(true) даёт код, совпадающий с Go.
+GetProgramBinary возвращает end cursor. Ghidra15/16 закреплены хешами.
+Следующий шаг: provenance настроек header, поля KBase29c/2a0/2a4, связь с CXP;
+затем явная модель заголовка и полная независимая сборка с проверкой по oracle.
+
 Последний этап: `CompileCXPTaskConfiguration` / CLI `compile-task-configuration
 -model MODEL -resource PATH -timer-mode bcd FILE` генерирует288-word таблицу
 конфигурации из header[42..329], полное совпадение с обоими N1. Unused slots

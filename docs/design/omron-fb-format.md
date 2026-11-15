@@ -849,3 +849,15 @@ outer image so malformed prefix records reach the new reader. The built CLI
 reports BLINK,23 definition containers and two44-container instances. Linux
 ARM64 ELF cross-build passes; Linux execution, new full-project CX captures and
 hardware execution were not performed.
+
+## Minimal owned-program writer qualification (16 November 2026)
+
+The `codec/testdata/program-object-*` capsule qualifies normal PLC_Program
+construction, native object compilation and complete minimal N1 writing without
+GUI automation. All words of eight files match independent Go expectations;
+see its README for call order, CII state and provenance. Default KBase output
+has flags08000000 and zero FB/stack configuration, unlike the captured source
+projects. It is evidence for writer geometry, not a production header template.
+Copy/overwrite/extended protection fields are2ac/2b0/2bc, respectively;
+29c/2a0/2a4 remain unresolved. Global image generation and storage initialization
+are still open acceptance gates.

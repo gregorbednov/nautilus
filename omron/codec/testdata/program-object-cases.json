@@ -1,0 +1,78 @@
+[
+  {
+    "mnemonic": "NOP",
+    "programInstructions": [
+      {
+        "operands": [],
+        "mnemonic": "END"
+      }
+    ],
+    "operands": [],
+    "id": "end-false",
+    "programCII": false,
+    "programFile": true
+  },
+  {
+    "mnemonic": "NOP",
+    "programInstructions": [
+      {
+        "operands": [
+          "W0.00"
+        ],
+        "mnemonic": "LD"
+      },
+      {
+        "operands": [
+          "W0.01"
+        ],
+        "mnemonic": "OUT"
+      },
+      {
+        "operands": [],
+        "mnemonic": "END"
+      }
+    ],
+    "operands": [],
+    "id": "direct-false",
+    "programCII": false,
+    "programFile": true
+  },
+  {
+    "mnemonic": "NOP",
+    "programInstructions": [
+      {
+        "operands": [],
+        "mnemonic": "END"
+      }
+    ],
+    "operands": [],
+    "id": "end-true",
+    "programCII": true,
+    "programFile": true
+  },
+  {
+    "mnemonic": "NOP",
+    "programInstructions": [
+      {
+        "operands": [
+          "W0.00"
+        ],
+        "mnemonic": "LD"
+      },
+      {
+        "operands": [
+          "W0.01"
+        ],
+        "mnemonic": "OUT"
+      },
+      {
+        "operands": [],
+        "mnemonic": "END"
+      }
+    ],
+    "operands": [],
+    "id": "direct-true",
+    "programCII": true,
+    "programFile": true
+  }
+]

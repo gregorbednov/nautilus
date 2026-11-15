@@ -16,12 +16,13 @@ param(
  [switch]$FBSectionProbe,
  [switch]$TaskPropertiesProbe,
  [switch]$TaskConfigurationProbe,
+ [switch]$ProgramObjectProbe,
 	[ValidateSet('library-default','bcd','binary')][string]$TimerCounterMode='library-default',
  [string]$Frida=(Join-Path $PSScriptRoot '..\..\..\tools\frida-17.26.3\frida-inject.exe')
 )
 $ErrorActionPreference='Stop'
 if(($DecodeProbe -or $InstanceDecodeProbe) -and $TimerCounterMode -ne 'bcd'){throw 'Decode probe requires an explicit BCD profile'}
-if(([int]$ControlProbe.IsPresent+[int]$InvocationProbe.IsPresent+[int]$ParameterProbe.IsPresent+[int]$FBBodyProbe.IsPresent+[int]$DecodeProbe.IsPresent+[int]$FBContextProbe.IsPresent+[int]$FBCompileProbe.IsPresent+[int]$FBDefinitionProbe.IsPresent+[int]$InstanceDecodeProbe.IsPresent+[int]$FBInstanceCompileProbe.IsPresent+[int]$FBSectionProbe.IsPresent+[int]$TaskPropertiesProbe.IsPresent+[int]$TaskConfigurationProbe.IsPresent) -gt 1){throw 'Select only one research probe'}
+if(([int]$ControlProbe.IsPresent+[int]$InvocationProbe.IsPresent+[int]$ParameterProbe.IsPresent+[int]$FBBodyProbe.IsPresent+[int]$DecodeProbe.IsPresent+[int]$FBContextProbe.IsPresent+[int]$FBCompileProbe.IsPresent+[int]$FBDefinitionProbe.IsPresent+[int]$InstanceDecodeProbe.IsPresent+[int]$FBInstanceCompileProbe.IsPresent+[int]$FBSectionProbe.IsPresent+[int]$TaskPropertiesProbe.IsPresent+[int]$TaskConfigurationProbe.IsPresent+[int]$ProgramObjectProbe.IsPresent) -gt 1){throw 'Select only one research probe'}
 $binary='C:\Program Files (x86)\OMRON\CX-One\CX-Programmer\CX-Pdata.dll'
 $compilerHash='a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141'
 if((Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant() -ne $compilerHash){throw 'Unreviewed compiler binary'}
@@ -33,6 +34,15 @@ $inputCases=@(Get-Content -LiteralPath $casesPath -Raw | ConvertFrom-Json)
 if($inputCases.Count -eq 0 -or $inputCases.Count -gt 512){throw 'Invalid case count'}
 $ids=@{}
 foreach($case in $inputCases){
+ if($ProgramObjectProbe -and ($case.id -cnotmatch '^[A-Za-z0-9_-]{1,48}$' -or $case.mnemonic -cne 'NOP' -or @($case.operands).Count -ne 0 -or $case.programInstructions -isnot [array] -or $case.programInstructions.Count -eq 0 -or $case.programInstructions.Count -gt 16)){throw 'Invalid program object input'}
+ if($ProgramObjectProbe){
+  if($case.programCII -isnot [bool] -or $case.programFile -isnot [bool]){throw 'Program object requires explicit boolean programCII/programFile'}
+  foreach($instruction in $case.programInstructions){
+   $arity=0;if($instruction.mnemonic -cin @('LD','OUT')){$arity=1}
+   if($instruction.mnemonic -cnotin @('LD','OUT','NOP','END') -or $instruction.operands -isnot [array] -or $instruction.operands.Count -ne $arity){throw 'Invalid owned program instruction'}
+   foreach($operand in $instruction.operands){if($operand -isnot [string] -or $operand -cnotmatch '^W[0-9]{1,3}\.[0-9]{1,2}$'){throw 'Invalid direct program operand'}}
+  }
+ }
  if($TaskConfigurationProbe -and ($case.mnemonic -cne 'NOP' -or @($case.operands).Count -ne 0 -or $null -eq $case.taskConfiguration -or $case.taskConfiguration.number -notin @(256,257,287) -or $case.taskConfiguration.startup -notin @(-1,0,1,2) -or $case.taskConfiguration.protection -notin @(0,1))){throw 'Invalid task configuration'}
  if($TaskPropertiesProbe -and ($case.mnemonic -cne 'NOP' -or @($case.operands).Count -ne 0 -or $null -eq $case.taskProperties -or $case.taskProperties.name -cnotmatch '^[A-Za-z0-9_]{0,25}$' -or $case.taskProperties.number -lt -2 -or $case.taskProperties.number -gt 65535 -or $case.taskProperties.protection -notin @(0,1))){throw 'Invalid task properties'}
  if($FBSectionProbe -and ($case.mnemonic -cne 'NOP' -or @($case.operands).Count -ne 0 -or $null -eq $case.nextEnable -or $case.nextEnable.index -lt -1 -or $case.nextEnable.index -gt 7 -or $case.nextEnable.value -lt -2147483648 -or $case.nextEnable.value -gt 2147483647)){throw 'Invalid next-enable probe'}
@@ -67,6 +77,7 @@ if($FBInstanceCompileProbe){$request.probe='fb-instance-compile-v1';$request.pro
 if($FBSectionProbe){$request.probe='fb-section-addresses-v1'}
 if($TaskPropertiesProbe){$request.probe='task-properties-v1'}
 if($TaskConfigurationProbe){$request.probe='task-configuration-v1'}
+if($ProgramObjectProbe){$request.probe='program-object-v1';$request.outputDirectory=$destination}
 $script='const request = '+($request | ConvertTo-Json -Compress -Depth 8)+";`n"+(Get-Content -LiteralPath (Join-Path $destination 'oracle-source.js') -Raw)
 $scriptPath=Join-Path $destination 'oracle.js'
 [IO.File]::WriteAllText($scriptPath,$script,(New-Object Text.UTF8Encoding($false)))
@@ -103,6 +114,7 @@ if($FBInstanceCompileProbe){$provenance.probe='fb-instance-compile-v1';$provenan
 if($FBSectionProbe){$provenance.probe='fb-section-addresses-v1'}
 if($TaskPropertiesProbe){$provenance.probe='task-properties-v1'}
 if($TaskConfigurationProbe){$provenance.probe='task-configuration-v1'}
+if($ProgramObjectProbe){$provenance.probe='program-object-v1'}
 $provenance | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $destination 'provenance.json') -Encoding utf8
 Write-Output ('RESULT='+$destination)
 Write-Output ('CASES='+(2*$inputCases.Count))

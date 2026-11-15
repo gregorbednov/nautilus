@@ -19,6 +19,9 @@ import (
 )
 
 type inputCase struct {
+	ProgramInstructions  []programInstruction       `json:"programInstructions,omitempty"`
+	ProgramCII           *bool                      `json:"programCII,omitempty"`
+	ProgramFile          *bool                      `json:"programFile,omitempty"`
 	TaskConfiguration    *taskConfigurationInput    `json:"taskConfiguration,omitempty"`
 	TaskProperties       *taskPropertiesInput       `json:"taskProperties,omitempty"`
 	NextEnable           *nextEnableInput           `json:"nextEnable,omitempty"`
@@ -34,6 +37,8 @@ type inputCase struct {
 	Operands             []string                   `json:"operands"`
 }
 type nativeResult struct {
+	Stage              string                      `json:"stage"`
+	ProgramObject      *programObjectResult        `json:"programObject"`
 	TaskConfiguration  *taskConfigurationResult    `json:"taskConfiguration"`
 	TaskProperties     *taskPropertiesResult       `json:"taskProperties"`
 	NextEnable         *nextEnableResult           `json:"nextEnable"`
@@ -225,13 +230,14 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 	programType := 0
 	decodeProbe := probe == "fb-native-decode-v1" || probe == "fb-instance-decode-v1"
 	configurationProbe := probe == "task-configuration-v1"
+	programProbe := probe == "program-object-v1"
 	if probe == "fb-body-operands-v1" || probe == "fb-native-decode-v1" || probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" || probe == "fb-definition-properties-v1" {
 		programType = 32
 	}
 	if probe == "fb-instance-compile-v1" || probe == "fb-instance-decode-v1" {
 		programType = 16
 	}
-	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1" && !decodeProbe && !configurationProbe && probe != "fb-body-context-v1" && probe != "fb-instruction-compile-v1" && probe != "fb-definition-properties-v1" && probe != "fb-instance-compile-v1" && probe != "fb-section-addresses-v1" && probe != "task-properties-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
+	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1" && !decodeProbe && !configurationProbe && !programProbe && probe != "fb-body-context-v1" && probe != "fb-instruction-compile-v1" && probe != "fb-definition-properties-v1" && probe != "fb-instance-compile-v1" && probe != "fb-section-addresses-v1" && probe != "task-properties-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
 		t.Fatal("unsupported oracle provenance")
 	}
 	assets := map[string][]byte{}
@@ -259,6 +265,13 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 			t.Fatal("duplicate fixture case")
 		}
 		ids[test.ID] = true
+		if programProbe {
+			if len(test.ProgramInstructions) < 1 || len(test.ProgramInstructions) > 16 || test.ProgramCII == nil || test.ProgramFile == nil {
+				t.Fatal("missing program inputs")
+			}
+		} else if len(test.ProgramInstructions) != 0 || test.ProgramCII != nil || test.ProgramFile != nil {
+			t.Fatal("unexpected program inputs")
+		}
 		if !decodeProbe && (len(test.Code) != 0 || test.SourceSHA256 != "" || test.SourceOffsetWords != 0 || test.Mutation != nil) {
 			t.Fatal("decode inputs presented as encode evidence")
 		}
@@ -271,13 +284,14 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 	}
 	requestText := strings.TrimSuffix(strings.TrimPrefix(string(parts[0]), "const request = "), ";")
 	var request struct {
-		ProgramType *int        `json:"programType"`
-		Probe       string      `json:"probe"`
-		Binary      string      `json:"binary"`
-		Compiler    string      `json:"compilerSHA256"`
-		Hash        string      `json:"requestSHA256"`
-		Cases       []inputCase `json:"cases"`
-		TimerMode   string      `json:"timerCounterMode"`
+		ProgramType     *int        `json:"programType"`
+		Probe           string      `json:"probe"`
+		Binary          string      `json:"binary"`
+		Compiler        string      `json:"compilerSHA256"`
+		Hash            string      `json:"requestSHA256"`
+		Cases           []inputCase `json:"cases"`
+		TimerMode       string      `json:"timerCounterMode"`
+		OutputDirectory string      `json:"outputDirectory"`
 	}
 	if err := json.Unmarshal([]byte(requestText), &request); err != nil || request.Binary != `C:\Program Files (x86)\OMRON\CX-One\CX-Programmer\CX-Pdata.dll` || request.Compiler != compiler || request.Hash != manifest.Request || !reflect.DeepEqual(request.Cases, cases) {
 		t.Fatal("script input mismatch", err)
@@ -295,6 +309,7 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 	results := []nativeResult{}
 	profileIndex := -1
 	caseIndex := 0
+	stageIndex := 0
 	done := false
 	profiles := []struct {
 		device, cpu string
@@ -325,6 +340,18 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 			if sequence != 0 || row.Compiler != compiler || row.Request != manifest.Request || row.Architecture != "ia32" || row.ProgramType == nil || *row.ProgramType != programType || row.UnitVersion != nil || row.TimerMode != manifest.TimerMode || row.FullProgram == nil || *row.FullProgram {
 				t.Fatal("library configuration mismatch")
 			}
+		case "stage":
+			if !programProbe || profileIndex < 0 || caseIndex >= len(cases) {
+				t.Fatal("orphan program stage")
+			}
+			stages := []string{"owner-bound", "before-compile", "after-compile"}
+			if *cases[caseIndex].ProgramFile {
+				stages = append(stages, "before-file")
+			}
+			if stageIndex >= len(stages) || row.Stage != stages[stageIndex] || row.ID != cases[caseIndex].ID || row.Device != profiles[profileIndex].device || row.CPU != profiles[profileIndex].cpu {
+				t.Fatal("program stage correlation mismatch")
+			}
+			stageIndex++
 		case "profile":
 			if probe == "fb-body-context-v1" || probe == "fb-instruction-compile-v1" || probe == "fb-definition-properties-v1" || probe == "fb-instance-compile-v1" {
 				if row.UseFunctionBlocks == nil || *row.UseFunctionBlocks != 1 {
@@ -379,6 +406,29 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				t.Fatal("orphan case")
 			}
 			want := cases[caseIndex]
+			if programProbe {
+				count := 3
+				if *want.ProgramFile {
+					count++
+				}
+				if stageIndex != count {
+					t.Fatal("missing program stage")
+				}
+				stageIndex = 0
+				r := row.ProgramObject
+				if r == nil || !r.OwnerBound || r.CompileResult != 1 || r.CIIEnabled != *want.ProgramCII || len(r.Words) == 0 || len(r.Words) > 256 {
+					t.Fatal("program compile/readback mismatch")
+				}
+				if *want.ProgramFile {
+					if r.File == nil || r.File.Path != request.OutputDirectory+`\`+row.Device+"-"+want.ID+".n1" {
+						t.Fatal("program file path mismatch")
+					}
+				} else if r.File != nil {
+					t.Fatal("unexpected program file")
+				}
+			} else if row.ProgramObject != nil {
+				t.Fatal("unexpected program result")
+			}
 			if configurationProbe {
 				p, r := want.TaskConfiguration, row.TaskConfiguration
 				if p == nil || r == nil || r.Number != p.Number || r.Startup != p.Startup&1 || r.Protection != p.Protection || r.StartupResult != 1 || r.ProtectionResult != 1 || row.Mnemonic != "NOP" || len(row.Operands) != 0 {
