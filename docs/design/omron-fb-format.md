@@ -121,6 +121,37 @@ copies the existing buffer. Candidate research boundaries are
 CreateTemporariesAndDoAsicFix121dea55 and DoAsicFixAndReturns121de87c; actual
 Ghidra output is preserved in `fb-postencode-ghidra.json.gz`.
 
+The next stage identified AddtoInvoke_Postamble1217170b as the invocation-specific
+owner. It compiles the new instruction normally, then handles FBEND separately
+as9000080e. Otherwise SetCIIFlag12175eb3 clears bit20000000 (only for a compiled
+object); when the resulting word has class `(word & c0000000) == 80000000`,
+SetCCFlags12175e61 applies023e0000. ResetCIIflag12175e8a is the unguarded clear
+primitive. Other contexts, including DoPrePostAmble121dd444, use different
+sequences; this is not a rewrite for every FB or ordinary instruction.
+
+54 fresh `control-bits-v1` observations measure the two primitive operations
+without altering baseline EncodeFunction words. All nine old trace changes now
+match the independent Go postamble operation, including FBEND and contact forms.
+Four `invocation-skeleton-v1` observations invoke normal GenerateInvocationCode
+and GenerateEndOfInvocationCode1217166f on normally constructed objects, for
+both CPUs and both boolean options. No compiled flag or code buffer is forged.
+The native lists confirm OR CF115, optional BMOV PF0 ,IR62+, then the BMOV ,-IR62
+PF0 / FBEND epilogue. The option's wider caller-state meaning remains unqualified.
+
+GenerateEndOfInvocationCode emits `&%d` from the owned list count at object+48
+plus one. The fresh unfinished skeletons produce headers3/2 for list counts2/1;
+the captured complete call has nine instructions after its header and count10.
+This counts logical instructions, not the26 code containers. The internal
+`fbcode` assembler reproduces that26-container call using the five initial
+encoded body controls. Private operand lowering is still supplied, not derived
+from CXP: this qualifies the envelope, not complete source compilation.
+
+The new raw capsules are under codec/testdata/control-* and invocation-*.
+Their probe tags are checked against the manifest, literal injected request and
+begin event; encode-only loaders reject a probe capsule. Ghidra caller/control
+exports are hash-pinned under internal/fbcode/testdata. A cold encode-only smoke
+run kept all54 baseline instruction results unchanged after the tool extension.
+
 The call macro in task0 occupies code indices26..51 after LD ON at25. Its
 FBCALL operand is10, while FBICALL carries instance0/body1024. Therefore the
 FBCALL operand must not be assumed to be the saved InstanceNum.
@@ -133,8 +164,11 @@ Unknown prefix variants, counts, lengths, wrappers and ambiguous numbering fail
 atomically; ordinary inspection still preserves opaque data through Original().
 Returned slices are copies. Unknown internal instructions remain opaque.
 
-Next: trace post-encode transformation with known object context, qualify type
-codes and graph pins, then reproduce relative allocation and the call macro
+Next: qualify type codes and graph pins, then reproduce relative allocation and
+the body transfer instructions from source. Trace other post-encode contexts
+as needed; the invocation-specific operation above is now reconstructed. The call
+frame alone does not qualify its body operands or caller state.
+Reproduce the complete call
 from source. Independent FB generation must not copy executable sections from
 the captured N1. New controlled full-project cases are still needed for changed
 ports, multiple calls, empty/disabled calls, state and timers.

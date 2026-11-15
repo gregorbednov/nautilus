@@ -1,0 +1,18 @@
+[
+  {
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL",
+    "invocationOption": false,
+    "id": "invocation-option-false"
+  },
+  {
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL",
+    "invocationOption": true,
+    "id": "invocation-option-true"
+  }
+]

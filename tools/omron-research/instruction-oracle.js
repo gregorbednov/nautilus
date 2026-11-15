@@ -27,9 +27,20 @@ setImmediate(()=>{
   const initialise=native(0x16a9e0,'int',['pointer','pointer','pointer','int']);
   const operandEncode=native(0x32d70,'uint32',['pointer','pointer','pointer','pointer','int','int']);
   const encode=native(0x16d735,'int',['pointer','pointer']);
+  const resetCII=native(0x175e8a,'void',['pointer']);
+  const setCC=native(0x175e61,'void',['pointer']);
+  const generateInvocation=native(0x171499,'int',['pointer','pointer','pointer','int']);
+  const finishInvocation=native(0x17166f,'int',['pointer','pointer']);
+  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1'].includes(request.probe))throw new Error('unsupported probe');
+  function snapshot(instance){
+   const count=instance.add(0x34).readU8();if(count>128)throw new Error('control snapshot bound exceeded');
+   const buffer=instance.add(0xc).readPointer();if(count && buffer.isNull())throw new Error('missing control buffer');
+   const words=[];for(let i=0;i<count;i++)words.push(buffer.add(i*4).readU32());
+   return {words,flags:instance.add(0x30).readU32()};
+  }
   const retained=[];
   function string(value,owned){const object=Memory.alloc(4);const chars=Memory.allocUtf8String(value);retained.push(object,chars);stringCtor(object,chars);owned.push(object);return object;}
-  emit('begin',{compilerSHA256:request.compilerSHA256,requestSHA256:request.requestSHA256,fridaVersion:Frida.version,architecture:Process.arch,programType:0,unitVersion:null,timerCounterMode:timerMode,fullProgramCompiled:false});
+  emit('begin',{compilerSHA256:request.compilerSHA256,requestSHA256:request.requestSHA256,fridaVersion:Frida.version,architecture:Process.arch,programType:0,unitVersion:null,timerCounterMode:timerMode,fullProgramCompiled:false,probe:request.probe});
   initLanguage();
   const kbase=Memory.alloc(0x4000);retained.push(kbase);kbaseCtor(kbase);
   const profileStrings=[];
@@ -70,6 +81,36 @@ setImmediate(()=>{
          const buffer=instance.add(0x0c).readPointer();
          for(let i=0;i<wordCount;i++)result.words.push(buffer.add(i*4).readU32());
          result.accepted=result.encodeResult===0 && result.words.length>0;
+         if(result.accepted && request.probe==='control-bits-v1'){
+          result.flagsBeforeControl=instance.add(0x30).readU32();
+          resetCII(instance);
+          const cleared=snapshot(instance);
+          setCC(instance);
+          const cc=snapshot(instance);
+          result.controlStages=[Object.assign({operation:'ResetCIIflag'},cleared),Object.assign({operation:'SetCCFlags'},cc)];
+         }
+         if(result.accepted && request.probe==='invocation-skeleton-v1'){
+          if(test.mnemonic!=='FBCALL' || test.operands.length!==1 || test.operands[0]!=='&0' || typeof test.invocationOption!=='boolean')throw new Error('invalid invocation probe case');
+          // Both CObList members are normally constructed by InstructionInst.
+          // These methods use their normal list/compile APIs; no flags or code
+          // buffers are injected into the object to bypass native compilation.
+          const generated=generateInvocation(instance,kbase,instance.add(0x58),test.invocationOption?1:0);
+          const before=snapshot(instance);
+          function readList(offset){
+           const list=instance.add(offset),expected=list.add(12).readU32();if(expected>128)throw new Error('invocation list bound exceeded');
+           let node=list.add(4).readPointer();const seen=new Set(),instructions=[];
+           while(!node.isNull()){
+            if(instructions.length>=expected || seen.has(node.toString()))throw new Error('invalid invocation list');seen.add(node.toString());
+            const child=node.add(8).readPointer();
+            instructions.push(Object.assign({mnemonic:text(child.add(0x38).readPointer())},snapshot(child)));
+            node=node.readPointer();
+           }
+           if(instructions.length!==expected)throw new Error('invocation list count mismatch');return instructions;
+          }
+          const preamble=readList(0x3c),epilogue=readList(0x58);
+          const finished=finishInvocation(instance,kbase);
+          result.invocation={option:test.invocationOption,generateResult:generated,finishResult:finished,before,after:snapshot(instance),preamble,epilogue};
+         }
         }
        }
       }

@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/joyautomation/nautilus/omron/cxp"
+	"github.com/joyautomation/nautilus/omron/internal/fbcode"
 )
 
 func TestFunctionBlockPrefixAndCapturedBuffers(t *testing.T) {
@@ -164,6 +165,35 @@ func TestSavedPOUBasesMatchNativeInstances(t *testing.T) {
 	}
 }
 
+func TestInvocationFrameMatchesCapturedCall(t *testing.T) {
+	// Body inputs are known initial encoder controls, not yet generated from
+	// CXP ports. This qualifies frame assembly, not private-operand lowering.
+	body := [][]uint32{
+		{0xb2410140, 0x61400100, 0x5517f009},
+		{0xb2410140, 0x61400100, 0x5517f009},
+		{0xb2410147, 0x620c004e, 0x5717e009},
+		{0xb2410806, 0x61440000, 0x65440400, 0x80000000},
+		{0xb2410147, 0x6317e001, 0x560de011},
+	}
+	frame, err := fbcode.AssembleInvocation(8, body, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"cj1h-baseline.n1", "cj1m-input-bit.n1"} {
+		data, err := os.ReadFile("testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		image, err := ParseN1(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(frame) != 26 || !reflect.DeepEqual(frame, image.Tasks[0].Code[26:52]) {
+			t.Fatal("invocation frame differs from captured call", name)
+		}
+	}
+}
+
 func TestFBWriterStaticProvenance(t *testing.T) {
 	for _, spec := range []struct{ file, compressed, decoded, entry, method string }{
 		{"fb-writer-ghidra.json.gz", "fa082fa617be0adb3b556f1eaec222b1e20912f79c679474b423f20a0f9260de", "93c66727eb129335a7f91a71d3aff0a3020c46746d6e2484605882aa19126c5b", "121c28ef", "CompileMultipleProgramsAndProduceBinaryFile"},
@@ -236,6 +266,7 @@ func TestFBICALLChangesBetweenEncodingAndSerialization(t *testing.T) {
 	}
 	encoded := map[string]event{}
 	found := 0
+	changed := 0
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 4096), 1<<20)
 	for scanner.Scan() {
@@ -252,6 +283,25 @@ func TestFBICALLChangesBetweenEncodingAndSerialization(t *testing.T) {
 		}
 		if row.Kind == "serialized-instruction" {
 			before, ok := encoded[row.Instance]
+			if ok && before.Code != row.Code {
+				decode := func(text string) []uint32 {
+					raw, err := hex.DecodeString(text)
+					if err != nil || len(raw) == 0 || len(raw)%4 != 0 {
+						t.Fatal("invalid changed code buffer", err)
+					}
+					words := make([]uint32, len(raw)/4)
+					for i := range words {
+						words[i] = binary.LittleEndian.Uint32(raw[i*4:])
+					}
+					return words
+				}
+				initial, final := decode(before.Code), decode(row.Code)
+				rebuilt, err := fbcode.InvocationPostamble(8, initial, len(initial) == 1 && initial[0] == 0xb000080e)
+				if err != nil || !reflect.DeepEqual(rebuilt, final) {
+					t.Fatal("postamble does not explain captured transformation", before.Code, row.Code, err)
+				}
+				changed++
+			}
 			if ok && before.Code == "060841b2000044610004446500000080" {
 				if row.Code != "06087f92000044610004446500000080" || row.Flags != before.Flags|0x80 {
 					t.Fatal("FBICALL post-encode control changed")
@@ -263,8 +313,8 @@ func TestFBICALLChangesBetweenEncodingAndSerialization(t *testing.T) {
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if found != 1 {
-		t.Fatal("missing FBICALL lifecycle control", found)
+	if found != 1 || changed != 9 {
+		t.Fatal("missing invocation lifecycle controls", found, changed)
 	}
 }
 

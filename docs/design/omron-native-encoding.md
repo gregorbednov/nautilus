@@ -1,5 +1,24 @@
 # Native encoding findings from the installed Windows compiler
 
+## Invocation postamble and frame reconstruction (2026-11-15)
+
+AddtoInvoke_Postamble1217170b explains the saved invocation changes: compiled
+postambles clear CII through SetCIIFlag; word-class80000000 instructions also
+receive CC mask023e0000. FBEND is a separate9000080e case. Ghidra caller/control
+exports are hash-pinned in internal/fbcode/testdata. The independent internal Go
+operation matches all nine old lifecycle changes; it is not applied globally.
+
+54 new primitive observations and four normal-object invocation-generation
+observations confirm the bit operations and skeleton lists. The probe modes
+preserve baseline words, use normal constructors/destructors and are explicitly
+tagged so ordinary encode-only fixtures cannot silently change meaning.
+GenerateInvocationCode/GenerateEndOfInvocationCode confirm the count-plus-one
+header and fixed preamble/epilogue. With the five known initial encoded body
+controls, Go assembly equals the complete26-container saved BLINK call in both
+N1 fixtures. The body controls are not yet compiled from CXP, so this is a
+qualified frame stage rather than an FB compiler or complete native image.
+See [the updated FB findings](omron-fb-format.md).
+
 ## FB records, allocation anchors and post-encoding (2026-11-15)
 
 The [FB format research](omron-fb-format.md) now documents the prefix writer,

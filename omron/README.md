@@ -54,6 +54,10 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   `inspect-image -function-blocks` now inventories the observed N1 definition
   and instance records, including opaque code and retained headers. Both saved
   BLINK instances match complete runtime buffers. See [FB evidence and limits](../docs/design/omron-fb-format.md).
+* `internal/fbcode`: qualified invocation postamble operations and a frame
+  assembler for already encoded/allocated transfer instructions. It matches all
+  26 containers of the saved BLINK call, but does not lower CXP operands or graph
+  pins and is not enabled by the source compiler.
 
 **There is no full-project CJ1 executable compiler or deploy command yet.** Import
 bundles are source/research artifacts, not runnable Nautilus projects. The full

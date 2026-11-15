@@ -86,6 +86,22 @@ probe). For a BCD probe, use `-Cases .\omron\codec\testdata\timer-bcd-cases.json
 with `-TimerCounterMode bcd` and a new output directory. All three mode capsules
 are portable; none changes the Windows installation or a user project.
 
+Two explicit research switches extend the normal path:
+
+* `-ControlProbe` tags the capsule `control-bits-v1`, preserving baseline words
+  and then calling normal ResetCIIflag / SetCCFlags methods. It records both
+  snapshots separately. These operations do not imply public instruction support.
+* `-InvocationProbe` tags it `invocation-skeleton-v1` and requires FBCALL &0
+  cases with an explicit JSON `invocationOption` boolean. It invokes normal
+  GenerateInvocationCode / GenerateEndOfInvocationCode, recording the two owned
+  CObList contents and deferred-header snapshots. Constructors/destructors and
+  native compilation are used; no compiled flags or code words are injected.
+
+The switches are mutually exclusive. Fixture verification checks probe tags in
+the manifest, literal request and begin event, and correlates the boolean option.
+Encode-only loading refuses tagged probes. Existing encode-only behavior is
+unchanged. See [the FB investigation](../../docs/design/omron-fb-format.md).
+
 This is a low-level instruction oracle, not whole-program compilation:
 programType=0 and unit version remains unknown. Timer mode is explicitly
 recorded; the default run leaves it at the library default. It skips

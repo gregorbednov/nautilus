@@ -19,37 +19,64 @@ import (
 )
 
 type inputCase struct {
-	ID       string   `json:"id"`
-	Mnemonic string   `json:"mnemonic"`
-	Operands []string `json:"operands"`
+	InvocationOption *bool    `json:"invocationOption,omitempty"`
+	ID               string   `json:"id"`
+	Mnemonic         string   `json:"mnemonic"`
+	Operands         []string `json:"operands"`
 }
 type nativeResult struct {
-	Schema         int      `json:"schemaVersion"`
-	Kind           string   `json:"kind"`
-	Sequence       int      `json:"sequence"`
-	ID             string   `json:"id"`
-	Device         string   `json:"device"`
-	CPU            string   `json:"cpu"`
-	Mnemonic       string   `json:"mnemonic"`
-	Operands       []string `json:"operands"`
-	Accepted       bool     `json:"accepted"`
-	Initialise     int      `json:"initialiseResult"`
-	OperandResults []uint32 `json:"operandResults"`
-	EncodeResult   *int     `json:"encodeResult"`
-	Words          []uint32 `json:"words"`
-	Selector       uint32   `json:"selector"`
-	Low            uint32   `json:"familyMaskLow"`
-	High           uint32   `json:"familyMaskHigh"`
-	Compiler       string   `json:"compilerSHA256"`
-	Request        string   `json:"requestSHA256"`
-	Architecture   string   `json:"architecture"`
-	ProgramType    *int     `json:"programType"`
-	UnitVersion    *string  `json:"unitVersion"`
-	TimerMode      string   `json:"timerCounterMode"`
-	FullProgram    *bool    `json:"fullProgramCompiled"`
-	CaseCount      int      `json:"caseCount"`
-	ModeBCD        *int     `json:"timerModeBcd"`
-	ModeBinary     *int     `json:"timerModeBinary"`
+	Invocation         *invocationResult `json:"invocation"`
+	Probe              string            `json:"probe"`
+	FlagsBeforeControl uint32            `json:"flagsBeforeControl"`
+	ControlStages      []controlStage    `json:"controlStages"`
+	Schema             int               `json:"schemaVersion"`
+	Kind               string            `json:"kind"`
+	Sequence           int               `json:"sequence"`
+	ID                 string            `json:"id"`
+	Device             string            `json:"device"`
+	CPU                string            `json:"cpu"`
+	Mnemonic           string            `json:"mnemonic"`
+	Operands           []string          `json:"operands"`
+	Accepted           bool              `json:"accepted"`
+	Initialise         int               `json:"initialiseResult"`
+	OperandResults     []uint32          `json:"operandResults"`
+	EncodeResult       *int              `json:"encodeResult"`
+	Words              []uint32          `json:"words"`
+	Selector           uint32            `json:"selector"`
+	Low                uint32            `json:"familyMaskLow"`
+	High               uint32            `json:"familyMaskHigh"`
+	Compiler           string            `json:"compilerSHA256"`
+	Request            string            `json:"requestSHA256"`
+	Architecture       string            `json:"architecture"`
+	ProgramType        *int              `json:"programType"`
+	UnitVersion        *string           `json:"unitVersion"`
+	TimerMode          string            `json:"timerCounterMode"`
+	FullProgram        *bool             `json:"fullProgramCompiled"`
+	CaseCount          int               `json:"caseCount"`
+	ModeBCD            *int              `json:"timerModeBcd"`
+	ModeBinary         *int              `json:"timerModeBinary"`
+}
+
+type controlStage struct {
+	Operation string   `json:"operation"`
+	Words     []uint32 `json:"words"`
+	Flags     uint32   `json:"flags"`
+}
+
+type invocationResult struct {
+	Option         bool                    `json:"option"`
+	GenerateResult int                     `json:"generateResult"`
+	FinishResult   int                     `json:"finishResult"`
+	Before         controlStage            `json:"before"`
+	After          controlStage            `json:"after"`
+	Preamble       []invocationInstruction `json:"preamble"`
+	Epilogue       []invocationInstruction `json:"epilogue"`
+}
+
+type invocationInstruction struct {
+	Mnemonic string   `json:"mnemonic"`
+	Words    []uint32 `json:"words"`
+	Flags    uint32   `json:"flags"`
 }
 type oracleArtifact struct {
 	Path     string `json:"path"`
@@ -59,6 +86,7 @@ type oracleArtifact struct {
 	Decoded  string `json:"decodedSHA256"`
 }
 type oracleManifest struct {
+	Probe       string                    `json:"probe"`
 	Schema      int                       `json:"schemaVersion"`
 	Method      string                    `json:"method"`
 	Compiler    string                    `json:"compilerSHA256"`
@@ -108,6 +136,10 @@ func libraryResults(t *testing.T) []nativeResult {
 }
 
 func loadLibraryResults(t *testing.T, manifestName string, expected int) []nativeResult {
+	return loadLibraryProbeResults(t, manifestName, expected, "")
+}
+
+func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, probe string) []nativeResult {
 	t.Helper()
 	metadata, err := os.ReadFile(filepath.Join("testdata", manifestName))
 	if err != nil {
@@ -118,7 +150,7 @@ func loadLibraryResults(t *testing.T, manifestName string, expected int) []nativ
 		t.Fatal(err)
 	}
 	const compiler = "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141"
-	if manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != 0 || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
+	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != 0 || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
 		t.Fatal("unsupported oracle provenance")
 	}
 	assets := map[string][]byte{}
@@ -155,6 +187,7 @@ func loadLibraryResults(t *testing.T, manifestName string, expected int) []nativ
 	}
 	requestText := strings.TrimSuffix(strings.TrimPrefix(string(parts[0]), "const request = "), ";")
 	var request struct {
+		Probe     string      `json:"probe"`
 		Binary    string      `json:"binary"`
 		Compiler  string      `json:"compilerSHA256"`
 		Hash      string      `json:"requestSHA256"`
@@ -166,6 +199,9 @@ func loadLibraryResults(t *testing.T, manifestName string, expected int) []nativ
 	}
 	if request.TimerMode != manifest.TimerMode && !(request.TimerMode == "" && manifest.TimerMode == "library-default") {
 		t.Fatal("script timer mode mismatch")
+	}
+	if request.Probe != probe {
+		t.Fatal("script probe mode mismatch")
 	}
 	rows := strings.Split(strings.TrimSpace(string(assets["events"])), "\n")
 	results := []nativeResult{}
@@ -192,6 +228,9 @@ func loadLibraryResults(t *testing.T, manifestName string, expected int) []nativ
 		}
 		switch row.Kind {
 		case "begin":
+			if row.Probe != probe {
+				t.Fatal("library probe mode mismatch")
+			}
 			if sequence != 0 || row.Compiler != compiler || row.Request != manifest.Request || row.Architecture != "ia32" || row.ProgramType == nil || *row.ProgramType != 0 || row.UnitVersion != nil || row.TimerMode != manifest.TimerMode || row.FullProgram == nil || *row.FullProgram {
 				t.Fatal("library configuration mismatch")
 			}
@@ -218,10 +257,20 @@ func loadLibraryResults(t *testing.T, manifestName string, expected int) []nativ
 				}
 			}
 		case "case":
+			if probe == "" && (len(row.ControlStages) != 0 || row.Invocation != nil) {
+				t.Fatal("control probe presented as encode-only evidence")
+			}
 			if profileIndex < 0 || caseIndex >= len(cases) {
 				t.Fatal("orphan case")
 			}
 			want := cases[caseIndex]
+			if probe == "invocation-skeleton-v1" {
+				if want.InvocationOption == nil || row.Invocation == nil || row.Invocation.Option != *want.InvocationOption {
+					t.Fatal("invocation option correlation mismatch")
+				}
+			} else if row.Invocation != nil || want.InvocationOption != nil {
+				t.Fatal("unexpected invocation probe data")
+			}
 			profile := profiles[profileIndex]
 			if row.ID != want.ID || row.Mnemonic != want.Mnemonic || !reflect.DeepEqual(row.Operands, want.Operands) || row.Device != profile.device || row.CPU != profile.cpu {
 				t.Fatal("case input correlation mismatch")

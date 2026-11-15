@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "096644a36433ccf097f40e25fbbe8af6e71930d0587f2069d71668f0d11ff190",
+  "programType": 0,
+  "unitVersion": null,
+  "timerCounterMode": "bcd",
+  "probe": "control-bits-v1",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "artifacts": {
+    "cases": {
+      "path": "control-cases.json",
+      "sha256": "096644a36433ccf097f40e25fbbe8af6e71930d0587f2069d71668f0d11ff190",
+      "bytes": 2491
+    },
+    "events": {
+      "path": "control-events.jsonl.gz",
+      "sha256": "6b893cb3a54d2facf7135792e468897afa36a366e18d5f5dd5166edde8e0371c",
+      "bytes": 2381,
+      "encoding": "gzip",
+      "decodedSHA256": "2c7bc15cae77bbfc41b7bb4dcea3039a97119b25eda355ed4f8f4944b8cc8305"
+    },
+    "script": {
+      "path": "control-run.js.gz",
+      "sha256": "83ffa33254c4f715e6fc1b7d18da9bc8f36859bf36bb6a83fcc5cba352d45987",
+      "bytes": 2821,
+      "encoding": "gzip",
+      "decodedSHA256": "34ddc30f2916d469d56615a928cb1db57bc294459f62127c2d4b50f4bf8ab131"
+    },
+    "template": {
+      "path": "control-template.js",
+      "sha256": "0b2420b422acddeeccabe3fc666ae837a8f39f0e6e59f5d3274f811bb1c1bc42",
+      "bytes": 6515
+    },
+    "worker": {
+      "path": "control-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    }
+  }
+}

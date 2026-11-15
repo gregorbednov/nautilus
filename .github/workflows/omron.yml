@@ -58,6 +58,7 @@ jobs:
           go test ./omron/cxp -fuzz FuzzSymbolTableRows -fuzztime 5s -parallel 2 -timeout 60s
           go test ./omron/compiler -fuzz FuzzScopedBindings -fuzztime 5s -parallel 2 -timeout 60s
           go test ./omron/compiler -fuzz FuzzCXPProgramBody -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/internal/fbcode -fuzz FuzzInvocationPostamble -fuzztime 5s -parallel 2 -timeout 60s
       - name: Linux ARM64 cross-build (execution not qualified here)
         env:
           GOOS: linux
