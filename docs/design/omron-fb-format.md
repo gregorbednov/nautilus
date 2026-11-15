@@ -10,6 +10,46 @@ in the big-endian N1 file; event buffers instead contain x86 little-endian words
 
 ## Prefix records
 
+### Instance section generation with explicit next-enable state
+
+`compiler.CompileCXPFBInstanceSection(profile, doc, resource, [7]uint32{})`
+and CLI `compile-fb-instance-section -model MODEL -resource 'Resource[0]'
+-timer-mode bcd -next-enable 0,0,0,0,0,0,0 FILE` generate the complete observed
+instance section: eight header words plus audited records. All116 words match
+offsets380..495 in both native fixtures. Record spans are section-relative:
+offsets8/62, length54 each. Removing the second source instance/symbol produces
+62 words and count1. Empty sections must be omitted by the future linker;
+this API rejects them.
+
+Ghidra identifies the seven fields as the array written by
+`PLC_KBase::SetNextEnableAddress`121cf6e3 at KBase+2d7c+index*4. Constructor
+121b96e5 explicitly zeros all seven elements. Archived writer121c28ef writes
+instance count followed by these28 bytes, then individual records. Literal
+displacement candidates are121b9ace (constructor),121c5b07 (writer),121cf706
+(setter). This search is not proof against aliased accesses. Raw archives
+`ghidra-section-fields-11.json.gz` and `ghidra-section-setter-12.json.gz` are
+hash-pinned in codec tests.
+
+`section-addresses-*` preserves74 observations (37 per CPU): normal setter calls,
+before/after readbacks and clearing through the same setter; ordinary NOP
+encoding is retained separately. There are70 successful setter calls for
+indices0..6 and four rejections for -1/7. Values0,1,65535,-1,2147483647 are
+preserved as32-bit words. Native acceptance does not establish address validity.
+No object fields, code buffers or compiled flags are forged.
+
+Production deliberately accepts only explicit all-zero next-enable state.
+CLI omission, wrong arity, noncanonical integers and nonzero state fail without
+partial output. State is not inferred from frame sizes or CXP. Mapping is
+established; how project settings/allocation choose nonzero values remains
+unknown. Evidence combines saved whole sections, normal setters and static
+writer assembly, not a fresh successful full-project writer invocation.
+
+JSON marks sectionGenerated/nextEnableExplicit and both instance audits true,
+but globalPlacementAudited/storageInitialized/linked/hardwareQualified false.
+Saved placement is still used. This is not a full N1 or a PLC wire payload.
+Definition sections, task envelopes/linking, initial storage, nonzero-state
+derivation and full-project/hardware qualification remain open.
+
 ### Resource-wide instance identity and placement audit
 
 `compiler.CompileCXPFBInstances` / CLI `compile-fb-instances -model MODEL
@@ -39,9 +79,9 @@ and BCD profile. No new addresses or section header are generated.
 
 The native writer121c28ef writes the instance section's count followed by
 0x1c bytes from KBase+0x2d7c, independently of each instance's seven sizes at
-program+0xf4. Both saved section headers contain seven zeros; their general
-meaning and generation remain unqualified. Do not replace these words with
-summed instance footprints or assume they are always zero.
+program+0xf4. These are now identified as SetNextEnableAddress state, with the
+explicit-zero section API described above. Do not replace them with summed
+instance footprints or assume arbitrary projects always use zero.
 
 ### Independent scalar instance record generation
 

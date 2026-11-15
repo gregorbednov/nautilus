@@ -6,6 +6,17 @@ a PLC. Keep original projects unchanged; use the generated copies for experiment
 
 ## Portable evidence audit
 
+`Invoke-CJ1InstructionOracle.ps1 -FBSectionProbe -TimerCounterMode bcd` accepts
+NOP cases with `nextEnable:{index,value}`. It calls normal SetNextEnableAddress,
+records seven words before/after, clears through the same setter and retains
+ordinary NOP encoding separately. The74-row capsule is `section-addresses-*`.
+Setter acceptance is not qualification of nonzero executable project state.
+
+Ghidra script `ExportCJ1FieldReferences.java OUTPUT.json HEX-DISPLACEMENT...`
+searches literal little-endian32-bit displacements in executable blocks. Results
+are candidate byte matches, not receiver-type or instruction-boundary proof;
+export enclosing functions separately with `ExportCJ1Functions.java`.
+
 `Read-CJ1TypeLibrary.ps1 -Binary PATH -ExpectedSHA256 HASH -Output NEW.json`
 reads embedded type-library enums and function signatures with system
 LoadTypeLibEx(REGKIND_NONE). It creates no vendor COM object and does not register

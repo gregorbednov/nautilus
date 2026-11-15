@@ -19,6 +19,7 @@ import (
 )
 
 type inputCase struct {
+	NextEnable           *nextEnableInput           `json:"nextEnable,omitempty"`
 	DefinitionProperties *definitionPropertiesInput `json:"definitionProperties,omitempty"`
 	Code                 []uint32                   `json:"code,omitempty"`
 	SourceSHA256         string                     `json:"sourceSHA256,omitempty"`
@@ -31,6 +32,7 @@ type inputCase struct {
 	Operands             []string                   `json:"operands"`
 }
 type nativeResult struct {
+	NextEnable         *nextEnableResult           `json:"nextEnable"`
 	InstanceStages     []controlStage              `json:"instanceStages"`
 	Properties         *definitionPropertiesResult `json:"properties"`
 	CompileResult      *int                        `json:"compileResult"`
@@ -224,7 +226,7 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 	if probe == "fb-instance-compile-v1" || probe == "fb-instance-decode-v1" {
 		programType = 16
 	}
-	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1" && !decodeProbe && probe != "fb-body-context-v1" && probe != "fb-instruction-compile-v1" && probe != "fb-definition-properties-v1" && probe != "fb-instance-compile-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
+	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1" && !decodeProbe && probe != "fb-body-context-v1" && probe != "fb-instruction-compile-v1" && probe != "fb-definition-properties-v1" && probe != "fb-instance-compile-v1" && probe != "fb-section-addresses-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
 		t.Fatal("unsupported oracle provenance")
 	}
 	assets := map[string][]byte{}
@@ -372,6 +374,13 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				t.Fatal("orphan case")
 			}
 			want := cases[caseIndex]
+			if probe == "fb-section-addresses-v1" {
+				if want.NextEnable == nil || row.NextEnable == nil || row.NextEnable.Index != want.NextEnable.Index || row.NextEnable.Value != want.NextEnable.Value || row.Mnemonic != "NOP" || len(row.Operands) != 0 {
+					t.Fatal("next-enable request/result mismatch")
+				}
+			} else if want.NextEnable != nil || row.NextEnable != nil {
+				t.Fatal("unexpected next-enable observation")
+			}
 			if probe != "fb-instance-compile-v1" && len(row.InstanceStages) != 0 {
 				t.Fatal("unexpected instance postamble stages")
 			}

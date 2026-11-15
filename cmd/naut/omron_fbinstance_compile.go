@@ -5,6 +5,8 @@ import (
 	"errors"
 	"flag"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/joyautomation/nautilus/omron/codec"
 	"github.com/joyautomation/nautilus/omron/compiler"
@@ -12,19 +14,30 @@ import (
 )
 
 func omronCompileFBInstance(args []string) error {
-	return omronCompileFBInstanceCommand(args, false)
+	return omronCompileFBInstanceCommand(args, false, false)
 }
 
 func omronCompileFBInstances(args []string) error {
-	return omronCompileFBInstanceCommand(args, true)
+	return omronCompileFBInstanceCommand(args, true, false)
 }
 
-func omronCompileFBInstanceCommand(args []string, all bool) error {
+func omronCompileFBInstanceSection(args []string) error {
+	return omronCompileFBInstanceCommand(args, true, true)
+}
+
+func omronCompileFBInstanceCommand(args []string, all, section bool) error {
 	command, scopeFlag := "compile-fb-instance", "instance"
 	if all {
 		command, scopeFlag = "compile-fb-instances", "resource"
 	}
+	if section {
+		command = "compile-fb-instance-section"
+	}
 	flags := flag.NewFlagSet("omron "+command, flag.ContinueOnError)
+	var nextText string
+	if section {
+		flags.StringVar(&nextText, "next-enable", "", "explicit seven decimal values; only all-zero state is qualified")
+	}
 	model := flags.String("model", "", "explicit qualified CPU model")
 	instance := flags.String(scopeFlag, "", "fully qualified source scope")
 	timerMode := flags.String("timer-mode", "", "explicit timer mode (bcd)")
@@ -34,6 +47,20 @@ func omronCompileFBInstanceCommand(args []string, all bool) error {
 	}
 	if flags.NArg() != 1 || *model == "" || *instance == "" || *timerMode != "bcd" {
 		return errors.New(command + " requires -model MODEL -" + scopeFlag + " PATH -timer-mode bcd FILE")
+	}
+	var next [7]uint32
+	if section {
+		parts := strings.Split(nextText, ",")
+		if len(parts) != 7 {
+			return errors.New("section requires explicit -next-enable 0,0,0,0,0,0,0")
+		}
+		for i, part := range parts {
+			value, err := strconv.ParseUint(part, 10, 32)
+			if err != nil || strconv.FormatUint(value, 10) != part {
+				return errors.New("next-enable values must be canonical unsigned decimal integers")
+			}
+			next[i] = uint32(value)
+		}
 	}
 	data, err := readOmronFile(flags.Arg(0))
 	if err != nil {
@@ -46,7 +73,10 @@ func omronCompileFBInstanceCommand(args []string, all bool) error {
 	profile := codec.Profile{Model: *model, TimerCounterMode: codec.TimerModeBCD}
 	var result any
 	format := "cj1-fb-instance-record-containers"
-	if all {
+	if section {
+		result, err = compiler.CompileCXPFBInstanceSection(profile, doc, *instance, next)
+		format = "cj1-fb-instance-section-containers"
+	} else if all {
 		result, err = compiler.CompileCXPFBInstances(profile, doc, *instance)
 		format = "cj1-fb-instance-record-set"
 	} else {
@@ -66,10 +96,12 @@ func omronCompileFBInstanceCommand(args []string, all bool) error {
 		GlobalPlacementAudited  bool   `json:"globalPlacementAudited"`
 		InstanceIdentityAudited bool   `json:"instanceIdentityAudited"`
 		InstanceOverlapAudited  bool   `json:"instanceOverlapAudited"`
+		NextEnableExplicit      bool   `json:"nextEnableExplicit"`
+		SectionGenerated        bool   `json:"sectionGenerated"`
 		Linked                  bool   `json:"linked"`
 		HardwareQualified       bool   `json:"hardwareQualified"`
 		Result                  any    `json:"result"`
-	}{SchemaVersion: 1, Format: format, SourceSHA256: doc.SHA256, Model: *model, TimerCounterMode: *timerMode, SavedPlacementUsed: true, InstanceIdentityAudited: all, InstanceOverlapAudited: all, Result: result}
+	}{SchemaVersion: 1, Format: format, SourceSHA256: doc.SHA256, Model: *model, TimerCounterMode: *timerMode, SavedPlacementUsed: true, InstanceIdentityAudited: all, InstanceOverlapAudited: all, NextEnableExplicit: section, SectionGenerated: section, Result: result}
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(report)

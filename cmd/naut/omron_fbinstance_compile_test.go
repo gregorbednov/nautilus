@@ -60,3 +60,32 @@ func TestOmronCompileFBInstancesCLI(t *testing.T) {
 		}
 	}
 }
+
+func TestOmronCompileFBInstanceSectionCLI(t *testing.T) {
+	for _, spec := range []struct{ file, model string }{{"cj1m.cxp", "CJ1M CPU21"}, {"cj1h.cxp", "CJ1H-H CPU65"}} {
+		args := []string{"-model", spec.model, "-resource", "Resource[0]", "-timer-mode", "bcd", "-next-enable", "0,0,0,0,0,0,0", "../../omron/cxp/testdata/" + spec.file}
+		data, err := captureOmronBodyCommand(t, omronCompileFBInstanceSection, args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var report struct {
+			Format                                                                                string
+			SectionGenerated, NextEnableExplicit, InstanceIdentityAudited, InstanceOverlapAudited bool
+			GlobalPlacementAudited, StorageInitialized, Linked, HardwareQualified                 bool
+			Result                                                                                compiler.FBInstanceSection
+		}
+		if err := json.Unmarshal(data, &report); err != nil {
+			t.Fatal(err)
+		}
+		if report.Format != "cj1-fb-instance-section-containers" || !report.SectionGenerated || !report.NextEnableExplicit || !report.InstanceIdentityAudited || !report.InstanceOverlapAudited || report.GlobalPlacementAudited || report.StorageInitialized || report.Linked || report.HardwareQualified || len(report.Result.Words) != 116 || len(report.Result.Records) != 2 {
+			t.Fatal("invalid section report", string(data))
+		}
+	}
+	for _, next := range []string{"", "0,0", "0,0,0,0,0,0,1", "0,0,0,0,0,0,-1", "0,0,0,0,0,0,01", "0,0,0,0,0,0,4294967296"} {
+		args := []string{"-model", "CJ1M CPU21", "-resource", "Resource[0]", "-timer-mode", "bcd", "-next-enable", next, "../../omron/cxp/testdata/cj1m.cxp"}
+		data, err := captureOmronBodyCommand(t, omronCompileFBInstanceSection, args)
+		if err == nil || len(data) != 0 {
+			t.Fatal("unqualified next state emitted output", next, string(data), err)
+		}
+	}
+}

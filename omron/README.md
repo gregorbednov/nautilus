@@ -2,6 +2,13 @@
 
 The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
 
+`naut omron compile-fb-instance-section -model MODEL -resource PATH -timer-mode bcd
+-next-enable 0,0,0,0,0,0,0 FILE` generates the observed full instance section;
+all116 words match both saved native fixtures. The seven header fields are
+SetNextEnableAddress state, separate from instance footprints. Only an explicit
+zero state is qualified. No initial storage, inferred next-enable values or
+complete image linking is generated; see the FB format document for evidence.
+
 `naut omron compile-fb-instances -model MODEL -resource PATH -timer-mode bcd FILE`
 compiles all saved global FB instance records after checking their global symbol
 identities and pairwise T/H memory overlap. Local instances and local names

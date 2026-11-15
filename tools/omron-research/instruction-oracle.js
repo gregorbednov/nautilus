@@ -38,7 +38,7 @@ setImmediate(()=>{
   const getBaseAddress=native(0x1d0137,'int',['pointer','int','pointer','pointer']);
   const setUseFB=native(0x1cf742,'void',['pointer','int']);
   const getUseFB=native(0x1cf79a,'int',['pointer']);
-  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1','fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1','fb-instance-compile-v1'].includes(request.probe))throw new Error('unsupported probe');
+  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1','fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1','fb-instance-compile-v1','fb-section-addresses-v1'].includes(request.probe))throw new Error('unsupported probe');
   const programType=request.programType===undefined?0:request.programType;
   if(programType!==(request.probe==='fb-instance-compile-v1'?16:['fb-body-operands-v1','fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1'].includes(request.probe)?32:0))throw new Error('invalid program type/probe combination');
   const compileContext=['fb-body-context-v1','fb-instruction-compile-v1','fb-definition-properties-v1','fb-instance-compile-v1'].includes(request.probe);
@@ -104,6 +104,15 @@ setImmediate(()=>{
      const owned=[];
      const result={id:test.id,device:cpu.device,cpu:cpu.cpu,mnemonic:test.mnemonic,operands:test.operands,initialiseResult:null,operandResults:[],normalized:[],encodeResult:null,words:[],accepted:false};
      try{
+      if(request.probe==='fb-section-addresses-v1'){
+       const p=test.nextEnable;if(!p || !Number.isInteger(p.index) || p.index < -1 || p.index > 7 || !Number.isInteger(p.value) || p.value < -2147483648 || p.value > 2147483647)throw new Error('invalid next-enable case');
+       const setNext=native(0x1cf6e3,'int',['pointer','int','int']);
+       const readNext=()=>{const a=[];for(let i=0;i<7;i++)a.push(kbase.add(0x2d7c+i*4).readU32());return a;};
+       const before=readNext();
+       const returned=setNext(kbase,p.index,p.value),after=readNext();
+       for(let i=0;i<7;i++)if(setNext(kbase,i,0)!==1)throw new Error('reset through setter failed');
+       result.nextEnable={index:p.index,value:p.value,returned,before,after,cleared:readNext()};
+      }
       if(request.probe==='fb-definition-properties-v1'){
        const p=test.definitionProperties;if(!p || !Number.isInteger(p.number) || !Number.isInteger(p.inputCount) || !Number.isInteger(p.outputCount))throw new Error('invalid definition properties');
        const size=library.base.add(0x2726bc).readU32();if(size!==752)throw new Error('unreviewed program size');
