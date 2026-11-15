@@ -19,6 +19,7 @@ import (
 )
 
 type inputCase struct {
+	HeaderOptions        *codec.N1TaskOptions       `json:"headerOptions,omitempty"`
 	ProgramInstructions  []programInstruction       `json:"programInstructions,omitempty"`
 	ProgramCII           *bool                      `json:"programCII,omitempty"`
 	ProgramFile          *bool                      `json:"programFile,omitempty"`
@@ -269,7 +270,7 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 			if len(test.ProgramInstructions) < 1 || len(test.ProgramInstructions) > 16 || test.ProgramCII == nil || test.ProgramFile == nil {
 				t.Fatal("missing program inputs")
 			}
-		} else if len(test.ProgramInstructions) != 0 || test.ProgramCII != nil || test.ProgramFile != nil {
+		} else if len(test.ProgramInstructions) != 0 || test.ProgramCII != nil || test.ProgramFile != nil || test.HeaderOptions != nil {
 			t.Fatal("unexpected program inputs")
 		}
 		if !decodeProbe && (len(test.Code) != 0 || test.SourceSHA256 != "" || test.SourceOffsetWords != 0 || test.Mutation != nil) {
@@ -418,6 +419,9 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				r := row.ProgramObject
 				if r == nil || !r.OwnerBound || r.CompileResult != 1 || r.CIIEnabled != *want.ProgramCII || len(r.Words) == 0 || len(r.Words) > 256 {
 					t.Fatal("program compile/readback mismatch")
+				}
+				if !reflect.DeepEqual(r.HeaderOptions, want.HeaderOptions) {
+					t.Fatal("header options request/readback mismatch")
 				}
 				if *want.ProgramFile {
 					if r.File == nil || r.File.Path != request.OutputDirectory+`\`+row.Device+"-"+want.ID+".n1" {

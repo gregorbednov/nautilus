@@ -15,6 +15,17 @@
 
 ## Что уже реализовано
 
+Новый этап16 ноября: `codec.EncodeN1TaskFlags(profile, N1TaskOptions)` генерирует
+пять подтверждённых битов header[6] из явных настроек. IR/DR=20000000,
+binary timer=40000000, Extended TIM Hold=08000000, copy/overwrite=2000/4000.
+Новые header-options-bcd/binary-* содержат64 штатных наблюдения: все комбинации
+четырёх bool-настроек, два режима таймеров и два CPU. Каждый из656 слов каждого
+N1 проверяется независимо; меняется только header[6]. Старые8 файлов также
+проходят replay. Ghidra18 доказывает поля29c=IR/DR,2a0=BCD,2a4=Extended TIM Hold;
+это снимает прежнюю неопределённость, но mapping этих настроек к CXP ещё открыт.
+В текущем CXT нет прямо названных scalar-полей. Не выводить их из UI/defaults.
+Полный global header, FB/stack memory setup, initialization и hardware не готовы.
+
 Новый этап16 ноября: снят блокер штатного создания PLC_Program в библиотечном
 oracle. MakeTaskConfigurationTable привязывает KBase; после GenerateInst,
 AddToProgram и Compile удалось вызвать штатный полный N1 writer без GUI.

@@ -37,6 +37,12 @@ foreach($case in $inputCases){
  if($ProgramObjectProbe -and ($case.id -cnotmatch '^[A-Za-z0-9_-]{1,48}$' -or $case.mnemonic -cne 'NOP' -or @($case.operands).Count -ne 0 -or $case.programInstructions -isnot [array] -or $case.programInstructions.Count -eq 0 -or $case.programInstructions.Count -gt 16)){throw 'Invalid program object input'}
  if($ProgramObjectProbe){
   if($case.programCII -isnot [bool] -or $case.programFile -isnot [bool]){throw 'Program object requires explicit boolean programCII/programFile'}
+  if($null -ne $case.headerOptions){
+   if($case.programFile -ne $true){throw 'Header options require a native output file'}
+   $keys=@('independentIRDR','extendedTIMHold','copyProhibited','overwriteProhibited')
+   if(@($case.headerOptions.PSObject.Properties).Count -ne $keys.Count){throw 'Invalid header options shape'}
+   foreach($key in $keys){if($case.headerOptions.$key -isnot [bool]){throw 'Header options require explicit booleans'}}
+  }
   foreach($instruction in $case.programInstructions){
    $arity=0;if($instruction.mnemonic -cin @('LD','OUT')){$arity=1}
    if($instruction.mnemonic -cnotin @('LD','OUT','NOP','END') -or $instruction.operands -isnot [array] -or $instruction.operands.Count -ne $arity){throw 'Invalid owned program instruction'}

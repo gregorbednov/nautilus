@@ -107,6 +107,17 @@ setImmediate(()=>{
       if(request.probe==='program-object-v1'){
        const input=test.programInstructions;if(!Array.isArray(input) || input.length<1 || input.length>16)throw new Error('invalid program object input');
        const size=library.base.add(0x2726bc).readU32();if(size!==752)throw new Error('program size');
+       let headerOptions=null;
+       if(test.headerOptions!==undefined){
+        const options=test.headerOptions,keys=['independentIRDR','extendedTIMHold','copyProhibited','overwriteProhibited'];
+        if(!options||Object.keys(options).length!==keys.length||keys.some(k=>typeof options[k]!=='boolean')||test.programFile!==true)throw new Error('invalid header options');
+        headerOptions={};
+        for(const [key,setter,getter] of [['independentIRDR',0x128c0,0x128e0],['extendedTIMHold',0x1cf715,0x1cf72e],['copyProhibited',0x12620,0x12660],['overwriteProhibited',0x12640,0x12680]]){
+         native(setter,'void',['pointer','int'])(kbase,options[key]?1:0);
+         const actual=native(getter,'int',['pointer'])(kbase);if(actual!==(options[key]?1:0))throw new Error('header option readback mismatch');
+         headerOptions[key]=actual!==0;
+        }
+       }
        const program=Memory.alloc(size);retained.push(program);native(0x1d5677,'pointer',['pointer'])(program);
        try{
         native(0x1d6216,'void',['pointer','int'])(program,0);
@@ -129,6 +140,7 @@ setImmediate(()=>{
         const end=native(0x1d68cf,'pointer',['pointer','pointer'])(program,buffer);if(end.sub(buffer).toInt32()!==count*4)throw new Error('program copy length');
         const words=[];for(let i=0;i<count;i++)words.push(buffer.add(i*4).readU32());
         result.programObject={ownerBound:bound,compileResult:compiled,ciiEnabled:test.programCII===true,words};
+        if(headerOptions!==null)result.programObject.headerOptions=headerOptions;
         if(test.programFile===true){
          if(typeof request.outputDirectory!=='string'||!/^E:[\\/]/i.test(request.outputDirectory)||!/^[A-Za-z0-9_-]{1,48}$/.test(test.id))throw new Error('invalid owned output path');
          const mfc=Process.enumerateModules().find(x=>x.name.toLowerCase()==='mfc42.dll'),getProc=new NativeFunction(Process.getModuleByName('kernel32.dll').getExportByName('GetProcAddress'),'pointer',['pointer','pointer'],'stdcall');

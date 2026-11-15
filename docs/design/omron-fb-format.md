@@ -10,6 +10,18 @@ in the big-endian N1 file; event buffers instead contain x86 little-endian words
 
 ## Prefix records
 
+### Qualified ordinary-task option flags
+
+`codec.EncodeN1TaskFlags(profile, N1TaskOptions)` generates five header[6] bits
+from explicit options. Independent IR/DR is20000000, binary timers40000000,
+Extended TIM Hold08000000, copy/overwrite prohibition2000/4000. The64 native
+matrix files cover all four Boolean options, both timer modes and both CPUs;
+portable Go replay checks every word and confirms no other fields change.
+Ghidra18 proves29c=independent IR/DR,2a0=BCD,2a4=Extended TIM Hold. Extended
+password protection uses2bc instead. These findings supersede the unresolved
+field notes below. CXP provenance is still unknown; explicit options are required.
+Other flags, FB/stack state and full global header generation remain open.
+
 ### Header task configuration and startup control
 
 The global header is42 fixed words plus288 task-configuration words.

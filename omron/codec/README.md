@@ -162,3 +162,15 @@ They remain outside this public codec: identifier syntax is context-dependent,
 and captured FBICALL code changes after initial encoding. See the
 [FB format investigation](../../docs/design/omron-fb-format.md). These observations
 must not be treated as qualified ordinary instruction forms.
+
+## N1 task header flags
+
+`EncodeN1TaskFlags(profile, N1TaskOptions)` independently encodes the five
+qualified header bits for ordinary unprotected task images: independent IR/DR,
+binary timer mode, Extended TIM Hold, copy prohibition and overwrite prohibition.
+An explicit BCD/binary mode and one of the two qualified CPU profiles are required.
+All64 option/CPU/mode combinations match complete native minimal N1 files;
+the portable replay checks every word. Options are explicit because their CXP
+source provenance is still unresolved. This is not a complete global header:
+FB-derived states, protection checks, allocation, passwords and memory setup
+remain separate qualification work. See testdata/header-options-README.md.

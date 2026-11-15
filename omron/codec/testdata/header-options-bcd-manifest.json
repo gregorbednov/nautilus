@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "7b4fa58448cbd11b97a96c3699cca925e8251a1f38bbb7f0d61cf96bcd32a9e6",
+  "programType": 0,
+  "unitVersion": null,
+  "timerCounterMode": "bcd",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "probe": "program-object-v1",
+  "artifacts": {
+    "cases": {
+      "path": "header-options-bcd-cases.json",
+      "sha256": "7b4fa58448cbd11b97a96c3699cca925e8251a1f38bbb7f0d61cf96bcd32a9e6",
+      "bytes": 6411
+    },
+    "events": {
+      "path": "header-options-bcd-events.jsonl.gz",
+      "sha256": "555868ee2753c018751ffa363ff57213ee574c160a26442be2bd83108edb8e40",
+      "bytes": 4751,
+      "encoding": "gzip",
+      "decodedSHA256": "2cc39c9f51f8a4aab7f87b0cb913ad50eb87914d5e6bf746733f8f362124ed44"
+    },
+    "script": {
+      "path": "header-options-bcd-run.js.gz",
+      "sha256": "a7a46ca749fe4f129dd2c146b5dadc00550edf62d84adcffa2b86efdd451a4b5",
+      "bytes": 7167,
+      "encoding": "gzip",
+      "decodedSHA256": "cf0689a9b3b9307947583358a5a52c1954cca1b6c852df99c14e96e4f6e87a80"
+    },
+    "template": {
+      "path": "header-options-bcd-template.js",
+      "sha256": "7e02e38ad41e80aa1890ae898e39d696ad012697f0a8461e2a17d693b4deb732",
+      "bytes": 25940
+    },
+    "worker": {
+      "path": "header-options-bcd-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    }
+  }
+}

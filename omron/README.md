@@ -2,6 +2,12 @@
 
 The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
 
+`codec.EncodeN1TaskFlags` now generates five header option bits from explicit
+IR/DR, timer mode, Extended TIM Hold and copy/overwrite settings. All64 native
+CPU/mode/option combinations match in portable Go replay. This API covers ordinary
+unprotected tasks; CXP option provenance and the rest of the global header remain
+open. Native defaults are not silently substituted for project settings.
+
 `compile-task-configuration -model MODEL -resource PATH -timer-mode bcd FILE`
 generates all288 header task-configuration words, matching both native fixtures.
 Task startup now supports OpStart0/1; protected tasks remain rejected. The

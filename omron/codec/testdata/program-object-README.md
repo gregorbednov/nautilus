@@ -40,7 +40,8 @@ storage initialization, linking of complete project images or hardware acceptanc
 
 Ghidra exports 15/16 pin GenerateInst/AddToProgram/GetProgramBinary and header
 option APIs. Copy prohibition is KBase+0x2ac, overwrite +0x2b0, extended
-protection +0x2bc. Fields +0x29c/+0x2a0/+0x2a4 are still unresolved and must
-not be assigned those names. ConvertPasswordString reverses bytes in each
+protection +0x2bc. Later Ghidra18 and the header-options matrix resolve fields
++0x29c/+0x2a0/+0x2a4 as independent IR/DR, timer mode and Extended TIM Hold;
+see header-options-README.md. ConvertPasswordString reverses bytes in each
 four-byte group for an eight-byte buffer; it is not a password authenticator.
 No real passwords or protected projects were involved.

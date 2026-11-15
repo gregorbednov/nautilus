@@ -1,0 +1,306 @@
+[
+  {
+    "id": "flags-0",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": false,
+      "extendedTIMHold": false,
+      "copyProhibited": false,
+      "overwriteProhibited": false
+    }
+  },
+  {
+    "id": "flags-1",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": true,
+      "extendedTIMHold": false,
+      "copyProhibited": false,
+      "overwriteProhibited": false
+    }
+  },
+  {
+    "id": "flags-2",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": false,
+      "extendedTIMHold": true,
+      "copyProhibited": false,
+      "overwriteProhibited": false
+    }
+  },
+  {
+    "id": "flags-3",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": true,
+      "extendedTIMHold": true,
+      "copyProhibited": false,
+      "overwriteProhibited": false
+    }
+  },
+  {
+    "id": "flags-4",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": false,
+      "extendedTIMHold": false,
+      "copyProhibited": true,
+      "overwriteProhibited": false
+    }
+  },
+  {
+    "id": "flags-5",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": true,
+      "extendedTIMHold": false,
+      "copyProhibited": true,
+      "overwriteProhibited": false
+    }
+  },
+  {
+    "id": "flags-6",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": false,
+      "extendedTIMHold": true,
+      "copyProhibited": true,
+      "overwriteProhibited": false
+    }
+  },
+  {
+    "id": "flags-7",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": true,
+      "extendedTIMHold": true,
+      "copyProhibited": true,
+      "overwriteProhibited": false
+    }
+  },
+  {
+    "id": "flags-8",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": false,
+      "extendedTIMHold": false,
+      "copyProhibited": false,
+      "overwriteProhibited": true
+    }
+  },
+  {
+    "id": "flags-9",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": true,
+      "extendedTIMHold": false,
+      "copyProhibited": false,
+      "overwriteProhibited": true
+    }
+  },
+  {
+    "id": "flags-10",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": false,
+      "extendedTIMHold": true,
+      "copyProhibited": false,
+      "overwriteProhibited": true
+    }
+  },
+  {
+    "id": "flags-11",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": true,
+      "extendedTIMHold": true,
+      "copyProhibited": false,
+      "overwriteProhibited": true
+    }
+  },
+  {
+    "id": "flags-12",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": false,
+      "extendedTIMHold": false,
+      "copyProhibited": true,
+      "overwriteProhibited": true
+    }
+  },
+  {
+    "id": "flags-13",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": true,
+      "extendedTIMHold": false,
+      "copyProhibited": true,
+      "overwriteProhibited": true
+    }
+  },
+  {
+    "id": "flags-14",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": false,
+      "extendedTIMHold": true,
+      "copyProhibited": true,
+      "overwriteProhibited": true
+    }
+  },
+  {
+    "id": "flags-15",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "mnemonic": "END",
+        "operands": []
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "headerOptions": {
+      "independentIRDR": true,
+      "extendedTIMHold": true,
+      "copyProhibited": true,
+      "overwriteProhibited": true
+    }
+  }
+]
