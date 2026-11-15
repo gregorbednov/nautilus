@@ -56,6 +56,7 @@ jobs:
           go test ./omron/codec -fuzz FuzzDecodeInstruction -fuzztime 5s -parallel 2 -timeout 60s
           go test ./omron/compiler -fuzz FuzzCompileRungs -fuzztime 5s -parallel 2 -timeout 60s
           go test ./omron/cxp -fuzz FuzzSymbolTableRows -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/cxp -fuzz FuzzFBCallPlan -fuzztime 5s -parallel 2 -timeout 60s
           go test ./omron/compiler -fuzz FuzzScopedBindings -fuzztime 5s -parallel 2 -timeout 60s
           go test ./omron/compiler -fuzz FuzzCXPProgramBody -fuzztime 5s -parallel 2 -timeout 60s
           go test ./omron/internal/fbcode -fuzz FuzzInvocationPostamble -fuzztime 5s -parallel 2 -timeout 60s

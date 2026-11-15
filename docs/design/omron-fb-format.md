@@ -158,6 +158,34 @@ FBCALL operand must not be assumed to be the saved InstanceNum.
 
 ## Inspector and next qualification
 
+### Source call planning
+
+`cxp.Document.PlanFBCall` and `naut omron inspect-fb-call -program PATH -rung
+PATH FILE` now read the observed seven-cell, single-call scalar layout. This
+separate source-plan API does not enable graphical compilation. It requires one
+LD enable, one FBCALL, three inputs, one output and the measured connecting wire;
+other geometry/operations fail atomically. Declaration counts, duplicate cells,
+pin rows, instance type/number, definition identity and call-version agreement
+are checked. Only saved global FB instance references are qualified for this
+inventory; local-instance records and allocation are not implemented.
+
+Serialized element order is not parameter order: the original IN cell precedes
+the two numeric inputs in storage. Inputs at rows2/3/4 correspond to PV/PN/IN
+in PouVarList input-declaration order; output row2 corresponds to OUT. The plan
+retains all seven declarations, their raw numeric codes and source lines.
+Local-over-global source bindings supply #100, #100,4.14 and W1.01; LD ON resolves
+to W1.00. Saved source identifiers supply instance0 and definition TaskID1024.
+No signedness or native nDATA_TYPE conversion is inferred from PouVarList.
+
+A fixture-specific transport test feeds the plan into the previously qualified
+scalar/frame primitives. With explicit transport controls for the observed
+type0/type1 cases and an explicit FBICALL recipe, all27 containers, including
+the LD before the call, match both saved N1 fixtures. This is a controlled bridge
+test, not a production declaration-type mapping or complete source compiler.
+The CLI reports compiled=false and typeCodesQualified=false. Corrupt geometry,
+stale versions, count mismatches, aliases and unsupported metadata have negative
+tests; cell ordering and source edits have separate regression tests.
+
 ### Scalar parameter generation
 
 AddOperandPreamble121749ea is now independently measured through the research

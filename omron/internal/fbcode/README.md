@@ -46,4 +46,9 @@ The captured full call test now generates its four transfers from typed source
 operands; the FBICALL and port ordering remain explicit controls. CXP graph
 resolution, declaration-type mapping and allocation are still not implemented.
 
+The next source-plan bridge test reads `cxp.PlanFBCall` and verifies the complete
+27-container LD+call against both captures. Port selection/order, bindings and
+identifiers now come from CXP; the fixture's transport-type mapping and FBICALL
+recipe remain explicit test controls. No production source compiler is enabled.
+
 See [the complete FB research](../../../docs/design/omron-fb-format.md).

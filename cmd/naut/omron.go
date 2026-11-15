@@ -25,6 +25,9 @@ const omronUsage = `naut omron — independent CJ1 source tools, rung compilatio
 
   naut omron inspect [-encoding auto|utf-8|windows-1251|windows-1252] FILE
       JSON CPU/source inventory, including graphical and function-block rungs.
+  naut omron inspect-fb-call -program PATH -rung PATH [-encoding ...] FILE
+      Inspect the observed single-call scalar layout, declarations and bindings.
+      Retain numeric type codes; does not compile the graph or allocate memory.
   naut omron unpack [-encoding ...] FILE
       Write the exact uncompressed CXT bytes to stdout.
   naut omron import [-encoding ...] -o NEW-DIRECTORY FILE
@@ -81,6 +84,8 @@ func runOmron(args []string) int {
 		err = omronSource(args[0], args[1:])
 	case "inspect-image":
 		err = omronImage(args[1:])
+	case "inspect-fb-call":
+		err = omronFBCall(args[1:])
 	case "compile-program-body":
 		err = omronCompileProgramBody(args[1:])
 	case "compile-rungs":

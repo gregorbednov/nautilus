@@ -7,6 +7,10 @@ The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
   canonical CXT writing and literal-token CXP packing; textual rung edits.
   Program-scoped symbol inventories retain global/local declaration types,
   addresses and locations, including unqualified auto/FB entries.
+  `PlanFBCall` inspects the observed seven-cell scalar call layout, matches pins
+  by row to declaration order, resolves source symbols and correlates the saved
+  global instance/definition/version. Numeric declaration types remain raw;
+  this is source planning, not graph compilation or memory allocation.
 * `il`: independent lexical instruction model: source spelling, mnemonic,
   leading `@`/`%`, decimal function label and opaque operands (including quoted
   text). `inspect` exposes parsed instructions and source-located syntax errors;
@@ -81,6 +85,9 @@ Flags precede positional arguments, as elsewhere in the CLI.
 
 ```sh
 bin/naut omron inspect omron/cxp/testdata/cj1m.cxp
+bin/naut omron inspect-fb-call -program 'Resource[0].Programs.Program[0]' \
+  -rung 'Resource[0].Programs.Program[0].Sections.Sec[0].ProgramData.R[4]' \
+  omron/cxp/testdata/cj1m.cxp
 bin/naut omron unpack omron/cxp/testdata/cj1m.cxp > /tmp/project.cxt
 bin/naut omron import -o /tmp/lift-import omron/cxp/testdata/cj1m.cxp
 bin/naut omron inspect-image -format n1 omron/um/testdata/cj1h-baseline.n1
