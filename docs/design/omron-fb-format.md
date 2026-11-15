@@ -158,6 +158,44 @@ FBCALL operand must not be assumed to be the saved InstanceNum.
 
 ## Inspector and next qualification
 
+### Symbolic definition body
+
+`cxp.Document.SourceForFBDefinition` and `naut omron inspect-fb-definition
+-definition PATH FILE` now read the observed CSV-cell definition format directly
+from CXP/CXT. The result retains declarations, typed symbolic references,
+implicit EN/ENO, comments and source locations. It contains no allocated addresses
+or native code; CLI flags `compiled`, `addressesAllocated` and
+`hardwareQualified` remain false.
+
+The bounded layout is seven columns on one row: contiguous contacts, optional
+trailing wires and one OUT, SET, RSET or TIMH(015) terminal. Contacts are ordered
+by coordinates rather than serialized cell indices. Duplicate coordinates,
+branches, gaps before later contacts, disabled networks, unknown fields/forms,
+missing references and incompatible operand types are rejected atomically.
+This does not qualify other graphical layouts or a general IEC type checker.
+
+Both original BLINK definitions yield six networks and15 symbolic instructions:
+LDNOT/ANDNOT/AND/TIMH; LD/TIMH; LD/OUT; LD/OUT; LD/AND/SET; LDNOT/RSET.
+An independent test compares their opcode skeleton and instruction widths with
+all19 body containers between the saved FBBN/FBBRET wrappers on both CPUs.
+It explicitly masks operand fields; this proves order/negation, not allocation
+or a byte-exact body compiler. Renamed declarations and shuffled cell storage,
+malformed graphs and bounded cell fuzzing are covered separately.
+
+A fresh24-observation native capsule, `codec/testdata/fb-body-*`, records a
+failed physical-to-relative method. `FBBodyProbe` sets OperandEncode's program
+type to32 and reads base registers through normal library APIs. Both profiles
+report T3072/1024, C3072/1024, DIFF8191/0, H512/896 and H1408/128. H512..H515
+bit operands and H513/H514 timer presets still fail with8955. T3072/T3073
+contacts encode as ordinary absolute timer addresses, not the saved relative
+forms. Eight cases succeed and16 fail. Merely selecting program type32 does
+not reproduce native definition operands; ordinary H bounds remain unchanged.
+The capsule verifier checks manifest/request/begin program type and profile
+readbacks. A cold default-mode smoke retained the same24 physical results.
+
+Next: inspect native FB operand translation/decompilation and qualify changed
+definitions before implementing relative address allocation and body encoding.
+
 ### Standalone source call compilation
 
 `compiler.CompileCXPFBCallBody` and `naut omron compile-fb-call-body` now generate

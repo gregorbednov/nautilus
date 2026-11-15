@@ -33,7 +33,11 @@ setImmediate(()=>{
   const finishInvocation=native(0x17166f,'int',['pointer','pointer']);
   const stringToType=native(0x175f7c,'uint32',['pointer'],'mscdecl');
   const operandPreamble=native(0x1749ea,'void',['pointer','pointer','pointer','pointer','int','int','uint32','int','pointer','int','int']);
-  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1'].includes(request.probe))throw new Error('unsupported probe');
+  const getBase=native(0x1ce6a1,'int',['pointer','int','pointer','pointer']);
+  const getBaseAddress=native(0x1d0137,'int',['pointer','int','pointer','pointer']);
+  if(request.probe!==undefined && !['control-bits-v1','invocation-skeleton-v1','parameter-transfer-v1','fb-body-operands-v1'].includes(request.probe))throw new Error('unsupported probe');
+  const programType=request.programType===undefined?0:request.programType;
+  if(programType!==(request.probe==='fb-body-operands-v1'?32:0))throw new Error('invalid program type/probe combination');
   function snapshot(instance){
    const count=instance.add(0x34).readU8();if(count>128)throw new Error('control snapshot bound exceeded');
    const buffer=instance.add(0xc).readPointer();if(count && buffer.isNull())throw new Error('missing control buffer');
@@ -53,7 +57,7 @@ setImmediate(()=>{
    }
    if(instructions.length!==expected)throw new Error('invocation list count mismatch');return instructions;
   }
-  emit('begin',{compilerSHA256:request.compilerSHA256,requestSHA256:request.requestSHA256,fridaVersion:Frida.version,architecture:Process.arch,programType:0,unitVersion:null,timerCounterMode:timerMode,fullProgramCompiled:false,probe:request.probe});
+  emit('begin',{compilerSHA256:request.compilerSHA256,requestSHA256:request.requestSHA256,fridaVersion:Frida.version,architecture:Process.arch,programType,unitVersion:null,timerCounterMode:timerMode,fullProgramCompiled:false,probe:request.probe});
   initLanguage();
   const kbase=Memory.alloc(0x4000);retained.push(kbase);kbaseCtor(kbase);
   const profileStrings=[];
@@ -67,7 +71,16 @@ setImmediate(()=>{
     const bcd=isBCD(kbase),binary=isBinary(kbase);
     if((bcd!==0 && bcd!==1) || binary!==1-bcd || (timerMode==='bcd' && bcd!==1) || (timerMode==='binary' && binary!==1))throw new Error('timer mode readback mismatch');
     const descriptor=kbase.add(0x2d50).readPointer();
-    emit('profile',{device:cpu.device,cpu:cpu.cpu,selector:descriptor.add(0x44).readU32(),familyMaskLow:descriptor.add(0x68).readU32(),familyMaskHigh:descriptor.add(0x6c).readU32(),timerModeBcd:bcd,timerModeBinary:binary});
+    const profile={device:cpu.device,cpu:cpu.cpu,selector:descriptor.add(0x44).readU32(),familyMaskLow:descriptor.add(0x68).readU32(),familyMaskHigh:descriptor.add(0x6c).readU32(),timerModeBcd:bcd,timerModeBinary:binary};
+    if(request.probe==='fb-body-operands-v1'){
+     profile.bases=[];
+     for(let index=0;index<5;index++){
+      const name=string('',profileStrings),size=Memory.alloc(4),address=Memory.alloc(4),secondSize=Memory.alloc(4);
+      if(getBase(kbase,index,name,size)!==1 || getBaseAddress(kbase,index,address,secondSize)!==1 || size.readS32()!==secondSize.readS32())throw new Error('base register readback failed');
+      profile.bases.push({index,name:text(name.readPointer()),address:address.readS32(),size:size.readS32()});
+     }
+    }
+    emit('profile',profile);
     for(const test of request.cases){
      const instance=Memory.alloc(0x100);retained.push(instance);instructionCtor(instance);
      const owned=[];
@@ -80,7 +93,7 @@ setImmediate(()=>{
        result.arity=definition.add(0xc0).readU8();
        if(result.arity===test.operands.length){
         for(let index=0;index<test.operands.length;index++){
-         const validation=operandEncode(definition,kbase,instance,string(test.operands[index],owned),index,0);
+         const validation=operandEncode(definition,kbase,instance,string(test.operands[index],owned),index,programType);
          result.operandResults.push(validation);
          const record=instance.add(0x10).readPointer().add(index*0x30);
          record.writeU32(validation); // Same caller contract as EncodeOperands.

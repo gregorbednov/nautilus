@@ -26,6 +26,7 @@ type inputCase struct {
 	Operands         []string        `json:"operands"`
 }
 type nativeResult struct {
+	Bases              []nativeBase      `json:"bases"`
 	Parameter          *parameterResult  `json:"parameter"`
 	Invocation         *invocationResult `json:"invocation"`
 	Probe              string            `json:"probe"`
@@ -57,6 +58,13 @@ type nativeResult struct {
 	CaseCount          int               `json:"caseCount"`
 	ModeBCD            *int              `json:"timerModeBcd"`
 	ModeBinary         *int              `json:"timerModeBinary"`
+}
+
+type nativeBase struct {
+	Index   int    `json:"index"`
+	Name    string `json:"name"`
+	Address int    `json:"address"`
+	Size    int    `json:"size"`
 }
 
 type parameterInput struct {
@@ -165,7 +173,11 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 		t.Fatal(err)
 	}
 	const compiler = "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141"
-	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != 0 || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
+	programType := 0
+	if probe == "fb-body-operands-v1" {
+		programType = 32
+	}
+	if manifest.Probe != probe || (probe != "" && probe != "control-bits-v1" && probe != "invocation-skeleton-v1" && probe != "parameter-transfer-v1" && probe != "fb-body-operands-v1") || manifest.Schema != 1 || manifest.Method != "native-library-calls-in-disposable-worker" || manifest.Compiler != compiler || manifest.UnitVersion != nil || manifest.ProgramType != programType || (manifest.TimerMode != "library-default" && manifest.TimerMode != "bcd" && manifest.TimerMode != "binary") || manifest.FullProgram || manifest.Hardware {
 		t.Fatal("unsupported oracle provenance")
 	}
 	assets := map[string][]byte{}
@@ -202,12 +214,13 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 	}
 	requestText := strings.TrimSuffix(strings.TrimPrefix(string(parts[0]), "const request = "), ";")
 	var request struct {
-		Probe     string      `json:"probe"`
-		Binary    string      `json:"binary"`
-		Compiler  string      `json:"compilerSHA256"`
-		Hash      string      `json:"requestSHA256"`
-		Cases     []inputCase `json:"cases"`
-		TimerMode string      `json:"timerCounterMode"`
+		ProgramType *int        `json:"programType"`
+		Probe       string      `json:"probe"`
+		Binary      string      `json:"binary"`
+		Compiler    string      `json:"compilerSHA256"`
+		Hash        string      `json:"requestSHA256"`
+		Cases       []inputCase `json:"cases"`
+		TimerMode   string      `json:"timerCounterMode"`
 	}
 	if err := json.Unmarshal([]byte(requestText), &request); err != nil || request.Binary != `C:\Program Files (x86)\OMRON\CX-One\CX-Programmer\CX-Pdata.dll` || request.Compiler != compiler || request.Hash != manifest.Request || !reflect.DeepEqual(request.Cases, cases) {
 		t.Fatal("script input mismatch", err)
@@ -217,6 +230,9 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 	}
 	if request.Probe != probe {
 		t.Fatal("script probe mode mismatch")
+	}
+	if (request.ProgramType == nil && programType != 0) || (request.ProgramType != nil && *request.ProgramType != programType) {
+		t.Fatal("script program type mismatch")
 	}
 	rows := strings.Split(strings.TrimSpace(string(assets["events"])), "\n")
 	results := []nativeResult{}
@@ -246,10 +262,18 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 			if row.Probe != probe {
 				t.Fatal("library probe mode mismatch")
 			}
-			if sequence != 0 || row.Compiler != compiler || row.Request != manifest.Request || row.Architecture != "ia32" || row.ProgramType == nil || *row.ProgramType != 0 || row.UnitVersion != nil || row.TimerMode != manifest.TimerMode || row.FullProgram == nil || *row.FullProgram {
+			if sequence != 0 || row.Compiler != compiler || row.Request != manifest.Request || row.Architecture != "ia32" || row.ProgramType == nil || *row.ProgramType != programType || row.UnitVersion != nil || row.TimerMode != manifest.TimerMode || row.FullProgram == nil || *row.FullProgram {
 				t.Fatal("library configuration mismatch")
 			}
 		case "profile":
+			if probe == "fb-body-operands-v1" {
+				wantBases := []nativeBase{{0, "T3072", 60416, 1024}, {1, "C3072", 64512, 1024}, {2, "DIFF8191", 40959, 0}, {3, "H512", 55808, 896}, {4, "H1408", 56704, 128}}
+				if !reflect.DeepEqual(row.Bases, wantBases) {
+					t.Fatal("base register readback differs", row.Bases)
+				}
+			} else if len(row.Bases) != 0 {
+				t.Fatal("unexpected base register readback")
+			}
 			if profileIndex >= 0 && caseIndex != len(cases) {
 				t.Fatal("incomplete preceding profile")
 			}

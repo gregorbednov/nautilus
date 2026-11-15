@@ -1,0 +1,89 @@
+[
+  {
+    "id": "relative-0",
+    "operands": [
+      "H512.00"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "relative-1",
+    "operands": [
+      "H512.02"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "relative-2",
+    "operands": [
+      "H512.15"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "relative-3",
+    "operands": [
+      "H513.00"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "relative-4",
+    "operands": [
+      "H515.00"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "relative-5",
+    "operands": [
+      "T3072"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "relative-6",
+    "operands": [
+      "T3073"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "relative-7",
+    "operands": [
+      "H511.00"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "relative-8",
+    "operands": [
+      "W0.00"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "relative-9",
+    "operands": [
+      "T3072",
+      "H513"
+    ],
+    "mnemonic": "TIMH"
+  },
+  {
+    "id": "relative-10",
+    "operands": [
+      "T3073",
+      "H514"
+    ],
+    "mnemonic": "TIMH"
+  },
+  {
+    "id": "relative-11",
+    "operands": [
+      "3072",
+      "H513"
+    ],
+    "mnemonic": "TIMH"
+  }
+]
