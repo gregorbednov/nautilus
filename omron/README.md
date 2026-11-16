@@ -2,18 +2,26 @@
 
 The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
 
+`naut omron compile-image -model MODEL -resource PATH -timer-mode bcd
+-settings SETTINGS.json -o NEW.n1 FILE` now builds the complete qualified N1
+from CXP/CXT and explicit options/memory/IDs. Both native4592-byte fixtures match
+exactly for their source recipes; unchanged sources give4604 bytes. Existing
+outputs are preserved. Instance containment and internal references are checked;
+storage initialization, source setting provenance and hardware remain open.
+See [usage and current scope](../docs/design/omron-n1-build.md).
+
 `codec.EncodeN1Header` now generates all42 fixed header words from explicit
 options, configured memory and section lengths. It matches both saved project
 headers. Twelve new complete files with a simple FB definition qualify changed
 FB/stack memory emission; every689-word file matches independent Go output.
-The CLI resource command still returns separate components; whole-CXP image
-linking, source option provenance and storage/hardware acceptance remain open.
+The resource-body command still returns separate components; compile-image now
+links them for the qualified scope. Source option and storage/hardware work remains.
 
 `codec.EncodeN1FBMemory` now generates the configured17-word FB/stack descriptor
 from explicit settings. It matches controlled native getters and the saved FB
 header's default values. The native writer emits it only when definitions exist;
 12 complete files without definitions correctly retain zero memory header fields.
-CXP stack provenance, wider FB layouts and full image assembly remain open;
+CXP stack provenance and wider FB layouts remain open;
 no default stack address is silently substituted for saved D0.
 
 `codec.EncodeN1TaskFlags` now generates five header option bits from explicit
@@ -26,7 +34,7 @@ open. Native defaults are not silently substituted for project settings.
 generates all288 header task-configuration words, matching both native fixtures.
 Task startup now supports OpStart0/1; protected tasks remain rejected. The
 resource-body command also reports this table separately, without changing its
-post-header words. Fixed-header integration and password handling remain pending.
+post-header words. Compile-image integrates the header; password handling remains pending.
 
 `compile-task-block` generates the288-word task directory and sorted records;
 all652 words match both native fixtures with their captured source recipes.
@@ -35,7 +43,7 @@ all652 words match both native fixtures with their captured source recipes.
 FB call links. All818 post-header words match both native images. Unchanged
 original source gives821 words. These fragments have no global N1 header or
 initial storage; task configuration is returned separately by the resource
-command. Complete images and hardware remain pending.
+command. Compile-image performs final linking; hardware remains pending.
 
 `naut omron compile-task-record -model MODEL -program PATH -timer-mode bcd FILE`
 generates a standalone task record, including its32-word header and entry/return.

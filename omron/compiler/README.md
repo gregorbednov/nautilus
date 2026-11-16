@@ -1,18 +1,28 @@
 # Selected native rung compiler
 
+`CompileCXPImage(profile, document, resource, settings)` now links the qualified
+FB prefix, task block, configuration table and fixed header into a complete N1.
+`Bytes()` returns a copy of the immutable generated file; component diagnostics
+retain local offsets and `Tasks` reports image-relative record offsets.
+Explicit zero option flags, AC0/64/1536 stack, definition IDs and zero next-enable
+state are required. Saved instance regions are checked against configured banks.
+Both4592-byte native fixtures match exactly for their source recipes; unchanged
+source produces4604 bytes. This does not initialize storage, infer opaque CXP
+settings or qualify hardware. See [build usage](../../docs/design/omron-n1-build.md).
+
 `CompileCXPTaskConfiguration` compiles only task metadata into the288-word
 header table at word42. All cells match both native headers. Source OpStart0/1
 controls bit4000 for present tasks; class/ID defaults remain in absent cells.
 `CompileCXPResourceBody` includes this table as a separate result. Its Words
-still exclude the global header; fixed options/password/profile state is pending.
+still exclude the global header; the full-image API composes it separately.
 
 `CompileCXPTaskBlock` compiles every qualified task, rejects duplicate IDs/names
 and emits a zero-initialized288-slot directory plus records in TaskID order.
 Directory offsets and aggregate spans are relative to the block. The complete
 652-word native block matches both captures. `CompileCXPResourceBody` adds the
 FB prefix, checks call-to-generated-record links and reproduces all818 words
-after the native global header. Full image generation stays closed; the task
-configuration table is returned separately.
+after the native global header. This fragment API returns configuration separately;
+the full-image API above performs final linking for the qualified scope.
 
 `CompileCXPTaskRecord` wraps the mixed sectioned program body in the observed
 zero-flag task record. It reads qualified metadata through `cxp.SourceForTask`,

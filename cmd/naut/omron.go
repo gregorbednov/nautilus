@@ -88,6 +88,9 @@ const omronUsage = `naut omron — independent CJ1 source tools, rung compilatio
   naut omron compile-task-block -model MODEL -resource PATH -timer-mode bcd FILE
       Generate the task directory and records sorted by TaskID.
       No task configuration, global header or complete N1 image.
+  naut omron compile-image -model MODEL -resource PATH -timer-mode bcd -settings SETTINGS.json -o NEW.n1 FILE
+      Link the qualified FB/task scope into a complete offline N1 file.
+      Explicit options/memory/IDs; saved placement; no storage initialization or hardware qualification.
   naut omron compile-resource-body -model MODEL -resource PATH -number NAME=N -timer-mode bcd -next-enable 0,0,0,0,0,0,0 FILE
       Compose both FB sections, task directory and task records; check FB call links.
       Also report the separate task configuration table; no global header or full N1.
@@ -112,8 +115,9 @@ CONNECTION-FLAGS:
   -serial /dev/ttyUSB0 -station 0 -baud 9600 -bits 7 -parity even -stop-bits 2
   -timeout 2s                (per exchange; no automatic retries)
 
-Full-project executable generation, deploy and full LD editing are not implemented
-yet. No Windows/vendor DLL dependency; physical hardware is not yet qualified.
+N1 generation covers the qualified FB/task subset with explicit settings.
+Deploy and full LD editing remain pending. No Windows/vendor DLL dependency;
+physical hardware is not yet qualified.
 `
 
 func runOmron(args []string) int {
@@ -155,6 +159,8 @@ func runOmron(args []string) int {
 		err = omronCompileTaskBlock(args[1:])
 	case "compile-resource-body":
 		err = omronCompileResourceBody(args[1:])
+	case "compile-image":
+		err = omronCompileImage(args[1:])
 	case "compile-task-configuration":
 		err = omronCompileTaskConfiguration(args[1:])
 	case "compile-rungs":

@@ -10,6 +10,17 @@ in the big-endian N1 file; event buffers instead contain x86 little-endian words
 
 ## Prefix records
 
+### Independent whole-file composition
+
+`compiler.CompileCXPImage` and CLI `compile-image` now link all generated
+components into N1 bytes, with explicit JSON options/memory/definition IDs.
+Both saved4592-byte files match exactly for their source recipes; unchanged
+CXP gives4604 bytes. Occupied instance regions must fit configured banks and
+the independent inspector validates file/FB extents before exposure. Current
+full-image options are zero flags, AC0/64/1536 and the existing nonempty scalar
+FB/task scope. Storage initialization, full global storage audit, source setting
+mapping, deployment and hardware qualification remain open. See omron-n1-build.md.
+
 ### Fixed header and controlled files with definitions
 
 `codec.EncodeN1Header` now generates42 fixed words from explicit options,

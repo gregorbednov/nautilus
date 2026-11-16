@@ -15,6 +15,19 @@
 
 ## Что уже реализовано
 
+Новый этап16 ноября: `compiler.CompileCXPImage` и CLI `compile-image` связывают
+полный N1 из CXP/CXT и явного JSON настроек. Параметры: -model/-resource,
+-timer-mode bcd, -settings FILE.json, -o NEW.n1. Образ совпадает с обоими4592-byte
+эталонами для их исходных рецептов; неизменённые CXP дают4604 bytes. Никакие
+исполняемые фрагменты не копируются из эталона. Добавлен containment-аудит
+экземпляров относительно заданных банков. Существующие файлы не перезаписываются;
+неоднозначный/неполный JSON отвергается. Первая full-image область: нулевые flags,
+явный AC0/64/1536, nonempty scalar FB prefix, прежние ограничения task/body.
+linked=true относится к N1; storageInitialized/globalStorageAudited/
+sourceSettingsVerified/hardwareQualified=false. Следующее: provenance настроек,
+инициализация/размещение и дальнейшая интеграция Nautilus/VSCode. Полная инструкция:
+docs/design/omron-n1-build.md; пример JSON в omron/compiler/testdata.
+
 Новый этап16 ноября: `codec.EncodeN1Header` генерирует42 фиксированных слова
 из явных настроек и длин секций. Все42 совпадают с обоими сохранёнными N1.
 Новый fb-memory-file-* содержит12 полных689-word N1 с ProbeFB, включая изменения

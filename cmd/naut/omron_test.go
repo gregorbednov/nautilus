@@ -85,8 +85,8 @@ func TestOmronInvalidConnectionBeforeDial(t *testing.T) {
 		t.Fatal("accepted malformed count")
 	}
 }
-func TestOmronDoesNotAdvertiseExecutableImport(t *testing.T) {
-	if !strings.Contains(omronUsage, "not implemented") || !strings.Contains(omronUsage, "not yet an executable") {
+func TestOmronSeparatesSourceImportImageCompileAndDeploy(t *testing.T) {
+	if !strings.Contains(omronUsage, "qualified FB/task subset") || !strings.Contains(omronUsage, "not yet an executable") || !strings.Contains(omronUsage, "Deploy and full LD editing remain pending") || !strings.Contains(omronUsage, "compile-image") {
 		t.Fatal("missing capability boundary")
 	}
 }
