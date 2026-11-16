@@ -174,3 +174,16 @@ the portable replay checks every word. Options are explicit because their CXP
 source provenance is still unresolved. This is not a complete global header:
 FB-derived states, protection checks, allocation, passwords and memory setup
 remain separate qualification work. See testdata/header-options-README.md.
+
+## Configured FB memory descriptor
+
+`EncodeN1FBMemory(profile, N1FBMemorySettings)` generates17 memory descriptor
+words from five explicit native bank settings and a stack split in native
+word-address units. Public getter results are verified for both CPUs; defaults
+match the saved FB header. Native SetStackRegister rejects firstSize>totalSize;
+Go also rejects unsupported banks, profiles, extents and noncanonical addresses.
+This descriptor is not automatically written: without FB definitions the native
+writer leaves header[15..31] zero. Controlled files prove that omission even
+when FB mode and memory settings are enabled. Changed descriptors still need
+full files with definitions, CXP provenance and storage/overlap qualification.
+See testdata/header-memory-README.md for evidence and supported limits.

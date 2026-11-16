@@ -28,6 +28,8 @@ func TestFBRelativeNativeAPIAndSignedOffsetEvidence(t *testing.T) {
 		{oracleArtifact{Path: "ghidra-header-options-15.json.gz", SHA256: "f8029e1bf287358af02633acff698c73e72a9ffb9634b4b0aadc551905d3086e", Bytes: 2923, Encoding: "gzip", Decoded: "3473baeb95026c6eb2cd9844a0247bcd52dc809f69d077a5db57859200bf1e40"}, []string{"12012620", "12012640", "120126a0", "121cb60a", "121e3bde", "121d62a8"}},
 		{oracleArtifact{Path: "ghidra-header-options-16.json.gz", SHA256: "ae48246a211eca0b64754129113a834078814d257236dedac1a3d3c4e1dc8e45", Bytes: 1721, Encoding: "gzip", Decoded: "e64a10152b4011ac28b0e16175e750238169358dbef6dcf90b7d2cefd1993f29"}, []string{"121d68cf", "12012660", "12012680", "120126c0", "12012960"}},
 		{oracleArtifact{Path: "ghidra-header-options-18.json.gz", SHA256: "9ded8ee7ab50515b270e7807d3499bb4bebd6fcf7f6a13d1a1dbb0c57542ce64", Bytes: 1781, Encoding: "gzip", Decoded: "1775d93cc70230fc18f404bea709ff6905662530e76f7241692ee49d62ef6d61"}, []string{"120128c0", "120128e0", "121cf715", "121cf72e", "121cf6b3", "121cf6cb", "12012aa0", "12012ac0", "12012760", "120127a0", "12012720"}},
+		{oracleArtifact{Path: "ghidra-header-memory-19.json.gz", SHA256: "90a209448b1e7dfc9cc703cf6323a697e7f1fd37686eb6215f4b241b2944f123", Bytes: 2799, Encoding: "gzip", Decoded: "ac3f9d73539706686fa9dc4d636e82b0f8c6f4874af28a9b1b0b93dbc421ead3"}, []string{"121ce5b2", "121ce6f1", "121ce6a1", "121d0137", "12012b20", "12012b40"}},
+		{oracleArtifact{Path: "ghidra-memory-address-20.json.gz", SHA256: "ddd242f102e0a816570d169e2306b97f8f3ca0f70f1ec63cf2811e4d10363343", Bytes: 4676, Encoding: "gzip", Decoded: "17fbcfb38b91e7d68e6202d77c0ff2ed4c6d21b7f351452cf7c52206b88f26fe"}, []string{"121cec67"}},
 	} {
 		var proof struct {
 			Engine, EngineVersion, SourceSHA256 string

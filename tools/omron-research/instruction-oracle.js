@@ -107,6 +107,31 @@ setImmediate(()=>{
       if(request.probe==='program-object-v1'){
        const input=test.programInstructions;if(!Array.isArray(input) || input.length<1 || input.length>16)throw new Error('invalid program object input');
        const size=library.base.add(0x2726bc).readU32();if(size!==752)throw new Error('program size');
+       let memory=null;
+       if(test.memorySettings!==undefined){
+        const settings=test.memorySettings;
+        if(!settings||Object.keys(settings).length!==2||!Array.isArray(settings.bases)||settings.bases.length!==5||!settings.stack||Object.keys(settings.stack).length!==3||test.programFile!==true)throw new Error('invalid memory settings');
+        setUseFB(kbase,1);if(getUseFB(kbase)!==1)throw new Error('memory FB mode');
+        const baseResults=[];
+        settings.bases.forEach((base,index)=>{
+         if(Object.keys(base).length!==2||!/^(T|C|H|DIFF)[0-9]{1,5}$/.test(base.address)||!Number.isInteger(base.size)||base.size<0||base.size>4096)throw new Error('invalid base setting');
+         baseResults.push(native(0x1ce5b2,'int',['pointer','int','pointer','int'])(kbase,index,string(base.address,owned),base.size));
+        });
+        const stack=settings.stack;
+        if(!/^(D|AC)[0-9]{1,5}$/.test(stack.address)||!Number.isInteger(stack.firstSize)||!Number.isInteger(stack.totalSize)||stack.firstSize<0||stack.firstSize>4096||stack.totalSize<1||stack.totalSize>4096)throw new Error('invalid stack setting');
+        const setStack=native(0x1ce6f1,'int',['pointer','pointer','int','int']);
+        if(setStack(kbase,string('AC0',owned),64,1536)!==1)throw new Error('stack reset failed');
+        const stackResult=setStack(kbase,string(stack.address,owned),stack.firstSize,stack.totalSize);
+        const bases=[];
+        for(let i=0;i<7;i++){
+         const name=string('',owned),size=Memory.alloc(4),address=Memory.alloc(4),secondSize=Memory.alloc(4);
+         if(getBase(kbase,i,name,size)!==1||getBaseAddress(kbase,i,address,secondSize)!==1||size.readS32()!==secondSize.readS32())throw new Error('memory base readback');
+         bases.push({name:text(name.readPointer()),address:address.readU32(),size:size.readS32()});
+        }
+        const name=string('',owned),firstSize=Memory.alloc(4),totalSize=Memory.alloc(4);
+        native(0x1ce752,'void',['pointer','pointer','pointer','pointer'])(kbase,name,firstSize,totalSize);
+        memory={baseResults,stackResult,bases,stack:{name:text(name.readPointer()),firstSize:firstSize.readS32(),totalSize:totalSize.readS32(),start:kbase.add(0x2ea0).readU32(),otherStart:kbase.add(0x2ea8).readU32(),size:kbase.add(0x2eac).readU32()}};
+       }
        let headerOptions=null;
        if(test.headerOptions!==undefined){
         const options=test.headerOptions,keys=['independentIRDR','extendedTIMHold','copyProhibited','overwriteProhibited'];
@@ -140,6 +165,7 @@ setImmediate(()=>{
         const end=native(0x1d68cf,'pointer',['pointer','pointer'])(program,buffer);if(end.sub(buffer).toInt32()!==count*4)throw new Error('program copy length');
         const words=[];for(let i=0;i<count;i++)words.push(buffer.add(i*4).readU32());
         result.programObject={ownerBound:bound,compileResult:compiled,ciiEnabled:test.programCII===true,words};
+        if(memory!==null)result.programObject.memory=memory;
         if(headerOptions!==null)result.programObject.headerOptions=headerOptions;
         if(test.programFile===true){
          if(typeof request.outputDirectory!=='string'||!/^E:[\\/]/i.test(request.outputDirectory)||!/^[A-Za-z0-9_-]{1,48}$/.test(test.id))throw new Error('invalid owned output path');

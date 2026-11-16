@@ -10,6 +10,18 @@ in the big-endian N1 file; event buffers instead contain x86 little-endian words
 
 ## Prefix records
 
+### Configured memory descriptor and emission guard
+
+`codec.EncodeN1FBMemory` independently computes17 words for header[15..31]
+from explicit five-bank settings and an AC/D stack split. Ghidra19/20 plus12
+native cases qualify setters/getters and numeric conversion. Defaults match
+the saved FB header. Writer121c28ef emits these fields only when definition
+count iStack_a70 is nonzero; FB mode by itself is insufficient. Replay verifies
+all12 complete no-definition files, where these fields stay zero. Changed
+descriptor emission with definitions and CXP stack provenance remain open.
+Explicit D0 gives10000, whereas AC0 givesb200; the saved source/default compiler
+state discrepancy must not be hidden by substituting a default in production.
+
 ### Qualified ordinary-task option flags
 
 `codec.EncodeN1TaskFlags(profile, N1TaskOptions)` generates five header[6] bits

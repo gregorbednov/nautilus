@@ -2,6 +2,13 @@
 
 The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
 
+`codec.EncodeN1FBMemory` now generates the configured17-word FB/stack descriptor
+from explicit settings. It matches controlled native getters and the saved FB
+header's default values. The native writer emits it only when definitions exist;
+12 complete files without definitions correctly retain zero memory header fields.
+CXP stack provenance, controlled changed-definition files and full image assembly
+remain open; no default stack address is silently substituted for saved D0.
+
 `codec.EncodeN1TaskFlags` now generates five header option bits from explicit
 IR/DR, timer mode, Extended TIM Hold and copy/overwrite settings. All64 native
 CPU/mode/option combinations match in portable Go replay. This API covers ordinary

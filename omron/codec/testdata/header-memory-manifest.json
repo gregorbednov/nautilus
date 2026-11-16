@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "59231d2a24600a1396d8eb896469da21de14af6438117a8c333ae7946d537fa5",
+  "programType": 0,
+  "unitVersion": null,
+  "timerCounterMode": "bcd",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "probe": "program-object-v1",
+  "artifacts": {
+    "cases": {
+      "path": "header-memory-cases.json",
+      "sha256": "59231d2a24600a1396d8eb896469da21de14af6438117a8c333ae7946d537fa5",
+      "bytes": 5739
+    },
+    "events": {
+      "path": "header-memory-events.jsonl.gz",
+      "sha256": "0db221b2ea83ba940b4f058b2630a8383ebfa4d5b05fb044b87e1d05651033e8",
+      "bytes": 4063,
+      "encoding": "gzip",
+      "decodedSHA256": "b2f1813d2a2a55d0270cb9ec88c715353f8afecd7c88f6490f19cf48b618c9a8"
+    },
+    "script": {
+      "path": "header-memory-run.js.gz",
+      "sha256": "cba1e0616fbc4e80ccdae3e2b69a3e5e99d5f883b60bf831f8f1fceca6942dac",
+      "bytes": 7689,
+      "encoding": "gzip",
+      "decodedSHA256": "5920d17f79fb78aeee6945e057053738b802e85a9caea18cc4efc2635dc5a207"
+    },
+    "template": {
+      "path": "header-memory-template.js",
+      "sha256": "00bf40b857f9f5a33019a7d75850d676fd3bab07329daca2b3d4cbaf1d45440b",
+      "bytes": 28215
+    },
+    "worker": {
+      "path": "header-memory-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    }
+  }
+}

@@ -18,6 +18,7 @@ type programInstruction struct {
 }
 
 type programObjectResult struct {
+	Memory        *memoryReadback      `json:"memory"`
 	HeaderOptions *codec.N1TaskOptions `json:"headerOptions"`
 	OwnerBound    bool                 `json:"ownerBound"`
 	CompileResult int                  `json:"compileResult"`
