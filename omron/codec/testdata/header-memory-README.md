@@ -49,6 +49,8 @@ with Invoke-CJ1InstructionOracle.ps1 -ProgramObjectProbe -TimerCounterMode bcd
 only Go and the archived assets. Attempts02/03/04 to construct a separate minimal
 FB definition returned Program::Compile0 and remain failed raw research outside
 the capsule; their helper was removed. They do not qualify a definition frontend.
+The later fb-memory-file corpus resolves the minimal-definition case, records
+the unreferenced-body warning and qualifies changed-memory emission in full files.
 
 Additional correction from Ghidra19: automatic allocation setters/getters
 12012b40/12012b20 access KBase224, not220. The writer's220/bit200 remains unresolved.

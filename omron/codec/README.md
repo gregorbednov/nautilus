@@ -184,6 +184,20 @@ match the saved FB header. Native SetStackRegister rejects firstSize>totalSize;
 Go also rejects unsupported banks, profiles, extents and noncanonical addresses.
 This descriptor is not automatically written: without FB definitions the native
 writer leaves header[15..31] zero. Controlled files prove that omission even
-when FB mode and memory settings are enabled. Changed descriptors still need
-full files with definitions, CXP provenance and storage/overlap qualification.
+when FB mode and memory settings are enabled. The later fb-memory-file corpus
+also qualifies changed descriptors in complete files with a simple definition.
+CXP provenance and storage/overlap qualification remain open.
 See testdata/header-memory-README.md for evidence and supported limits.
+
+## Fixed N1 header
+
+`EncodeN1Header(profile, options, layout, memory)` generates42 fixed words,
+excluding the separately generated task-configuration table. Layout supplies
+definition/instance section lengths and task-block length; offsets and total
+length are derived with bounded arithmetic. Explicit memory is required for
+definitions and omitted from the serialized header when definitions are absent.
+Supported ordinary-task flags, blank native name fields and zero password
+buffers complete the bounded scope. All42 words match both saved project
+headers, and full-file tests cover ordinary matrices and12 new FB files.
+This does not yet link CXP components or initialize project storage. See
+testdata/fb-memory-file-README.md for evidence and remaining limits.

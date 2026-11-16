@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "bc2212aa6c7d1b8fdbade47d2856042efc032f6d85951620cdbb0f18e2377bdc",
+  "programType": 0,
+  "unitVersion": null,
+  "timerCounterMode": "bcd",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "probe": "program-object-v1",
+  "artifacts": {
+    "cases": {
+      "path": "fb-memory-file-cases.json",
+      "sha256": "bc2212aa6c7d1b8fdbade47d2856042efc032f6d85951620cdbb0f18e2377bdc",
+      "bytes": 5931
+    },
+    "events": {
+      "path": "fb-memory-file-events.jsonl.gz",
+      "sha256": "c50b0457b12176b1e19b089f4bdf4b745825eff59c5ec292b898c49b88d8f9f0",
+      "bytes": 4517,
+      "encoding": "gzip",
+      "decodedSHA256": "5b96656f137df42d08d1b9f72397b7009ce9511abc160a68623435c51612610c"
+    },
+    "script": {
+      "path": "fb-memory-file-run.js.gz",
+      "sha256": "94d93004ff51b2098e758ac55178f290974c654f6abc899de2644d35ec6c2147",
+      "bytes": 8347,
+      "encoding": "gzip",
+      "decodedSHA256": "ff3de9680a1cbf2ff49253db95ccfd0df7ace68f7d300f2539d58ab788b005c2"
+    },
+    "template": {
+      "path": "fb-memory-file-template.js",
+      "sha256": "a81b3d62da4b91ef8be4a6b695e42387863d3b261afbae2f7b910a5347a4738d",
+      "bytes": 31781
+    },
+    "worker": {
+      "path": "fb-memory-file-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    }
+  }
+}

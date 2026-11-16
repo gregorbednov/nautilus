@@ -172,16 +172,42 @@ setImmediate(()=>{
          const mfc=Process.enumerateModules().find(x=>x.name.toLowerCase()==='mfc42.dll'),getProc=new NativeFunction(Process.getModuleByName('kernel32.dll').getExportByName('GetProcAddress'),'pointer',['pointer','pointer'],'stdcall');
          const ordinal=(n,result,args)=>new NativeFunction(getProc(mfc.base,ptr(n)),result,args,'thiscall');
          const programs=Memory.alloc(20),errors=Memory.alloc(20);retained.push(programs,errors);ordinal(500,'pointer',['pointer'])(programs);arrayCtor(errors);
+         let definition=null,messageHook=null,compileHook=null;
          try{
           ordinal(5860,'void',['pointer','int','pointer'])(programs,0,program);
+          if(test.programDefinition!==undefined){
+           if(test.programDefinition!==true||memory===null)throw new Error('invalid definition probe');
+           definition=Memory.alloc(size);retained.push(definition);native(0x1d5677,'pointer',['pointer'])(definition);
+           native(0x1d6216,'void',['pointer','int'])(definition,32);
+           native(0x12e60,'void',['pointer','int'])(definition,0);native(0x21eb8f,'void',['pointer','int'])(definition,0);
+           native(0x12d80,'void',['pointer','pointer'])(definition,string('ProbeFB',owned));
+           if(native(0x21b323,'int',['pointer','int'])(definition,1)!==1||native(0x21b34b,'int',['pointer','int'])(definition,1)!==1||native(0x1d6276,'int',['pointer','int','int'])(definition,3,1)!==1)throw new Error('definition properties');
+           native(0x1cbaed,'void',['pointer','pointer'])(kbase,definition);
+           if(!definition.add(0x248).readPointer().equals(kbase))throw new Error('definition owner');
+           for(const [mnemonic,operand] of [['LD','0,BR3'],['OUT','1,BR3']]){
+            const array=Memory.alloc(20);retained.push(array);arrayCtor(array);
+            try{const chars=Memory.allocUtf8String(mnemonic),value=Memory.allocUtf8String(operand);retained.push(chars,value);arraySet(array,0,value);const child=native(0x1e3bde,'pointer',['pointer','pointer','pointer'])(definition,chars,array);if(child.isNull())throw new Error('definition instruction');setCII(child,kbase,1);if(!native(0x16b3e3,'int',['pointer'])(child))throw new Error('uncompiled definition instruction');native(0x1d62a8,'void',['pointer','pointer'])(definition,child);}finally{arrayDtor(array);}
+           }
+           const observation={compileResults:[],messages:[],errorCount:0,warningCount:0,words:[]};result.programObject.definition=observation;
+           messageHook=Interceptor.attach(library.base.add(0x1ea1e5),{onEnter(args){if(args[0].equals(definition.add(0x278))||args[0].equals(definition.add(0x294))){if(observation.messages.length>=16)throw new Error('message bound');observation.messages.push(text(args[1]));}}});
+           compileHook=Interceptor.attach(library.base.add(0x1e3eef),{onEnter(){this.selected=this.context.ecx.equals(definition);},onLeave(value){if(this.selected){if(observation.compileResults.length>=8)throw new Error('compile count bound');observation.compileResults.push(value.toInt32());}}});
+           Interceptor.flush();ordinal(5860,'void',['pointer','int','pointer'])(programs,1,definition);
+          }
           const path=request.outputDirectory+'\\'+cpu.device+'-'+test.id+'.n1',chars=Memory.allocUtf8String(path);retained.push(chars);
           emit('stage',{id:test.id,device:cpu.device,cpu:cpu.cpu,stage:'before-file'});
           const returned=native(0x1c28ef,'int',['pointer','pointer','pointer','int','int','int','int','pointer'])(kbase,programs,errors,1,0,65535,0,chars);
+          if(definition!==null){
+           messageHook.detach();messageHook=null;compileHook.detach();compileHook=null;
+           const observation=result.programObject.definition,count=definition.add(0x1ec).readS32();if(count<1||count>256)throw new Error('definition code bound');
+           observation.errorCount=definition.add(0x284).readS32();observation.warningCount=definition.add(0x2a0).readS32();
+           const buffer=Memory.alloc(count*4+16);retained.push(buffer);const end=native(0x1d68cf,'pointer',['pointer','pointer'])(definition,buffer);if(end.sub(buffer).toInt32()!==count*4)throw new Error('definition copy length');
+           for(let i=0;i<count;i++)observation.words.push(buffer.add(i*4).readU32());
+          }
           const count=errors.add(8).readS32();if(count<0||count>128)throw new Error('error list bound');
           const fileResult={returned,errorCount:count,path,byteLength:0,fileHex:''};
           if(returned===1){const file=new File(path,'rb');try{const bytes=file.readBytes(65537);if(bytes.byteLength>65536)throw new Error('file bound');fileResult.byteLength=bytes.byteLength;fileResult.fileHex=Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');}finally{file.close();}}
           result.programObject.file=fileResult;
-         }finally{arrayDtor(errors);ordinal(772,'void',['pointer'])(programs);}
+         }finally{if(messageHook!==null)messageHook.detach();if(compileHook!==null)compileHook.detach();arrayDtor(errors);ordinal(772,'void',['pointer'])(programs);if(definition!==null)native(0x1d5c77,'void',['pointer'])(definition);}
         }
        }finally{native(0x1d5c77,'void',['pointer'])(program);}
       }

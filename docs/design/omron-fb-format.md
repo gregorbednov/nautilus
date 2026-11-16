@@ -10,6 +10,18 @@ in the big-endian N1 file; event buffers instead contain x86 little-endian words
 
 ## Prefix records
 
+### Fixed header and controlled files with definitions
+
+`codec.EncodeN1Header` now generates42 fixed words from explicit options,
+memory and section lengths; all42 match both saved project captures. Twelve
+new fb-memory-file observations qualify changed-memory emission in complete
+N1 files with ProbeFB definition0/body0. Every689-word file is checked using
+independently generated header, FB record, configuration, directory and task.
+Program::Compile0 is preserved as the unreferenced-body warning; full writer
+returns1 with no errors. Submit the source body once: precompiling it can
+duplicate FBBN during writer recompilation. CXP image linking, source setting
+provenance, storage initialization and hardware acceptance remain open.
+
 ### Configured memory descriptor and emission guard
 
 `codec.EncodeN1FBMemory` independently computes17 words for header[15..31]

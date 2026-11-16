@@ -2,24 +2,31 @@
 
 The working pieces are independent of Windows, Wine, CX-One and vendor DLLs:
 
+`codec.EncodeN1Header` now generates all42 fixed header words from explicit
+options, configured memory and section lengths. It matches both saved project
+headers. Twelve new complete files with a simple FB definition qualify changed
+FB/stack memory emission; every689-word file matches independent Go output.
+The CLI resource command still returns separate components; whole-CXP image
+linking, source option provenance and storage/hardware acceptance remain open.
+
 `codec.EncodeN1FBMemory` now generates the configured17-word FB/stack descriptor
 from explicit settings. It matches controlled native getters and the saved FB
 header's default values. The native writer emits it only when definitions exist;
 12 complete files without definitions correctly retain zero memory header fields.
-CXP stack provenance, controlled changed-definition files and full image assembly
-remain open; no default stack address is silently substituted for saved D0.
+CXP stack provenance, wider FB layouts and full image assembly remain open;
+no default stack address is silently substituted for saved D0.
 
 `codec.EncodeN1TaskFlags` now generates five header option bits from explicit
 IR/DR, timer mode, Extended TIM Hold and copy/overwrite settings. All64 native
 CPU/mode/option combinations match in portable Go replay. This API covers ordinary
-unprotected tasks; CXP option provenance and the rest of the global header remain
+unprotected tasks; CXP option provenance and extended header modes remain
 open. Native defaults are not silently substituted for project settings.
 
 `compile-task-configuration -model MODEL -resource PATH -timer-mode bcd FILE`
 generates all288 header task-configuration words, matching both native fixtures.
 Task startup now supports OpStart0/1; protected tasks remain rejected. The
 resource-body command also reports this table separately, without changing its
-post-header words. Global fixed header/options/password handling remain pending.
+post-header words. Fixed-header integration and password handling remain pending.
 
 `compile-task-block` generates the288-word task directory and sorted records;
 all652 words match both native fixtures with their captured source recipes.

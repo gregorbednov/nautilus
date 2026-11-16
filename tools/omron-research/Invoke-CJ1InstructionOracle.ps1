@@ -37,6 +37,7 @@ foreach($case in $inputCases){
  if($ProgramObjectProbe -and ($case.id -cnotmatch '^[A-Za-z0-9_-]{1,48}$' -or $case.mnemonic -cne 'NOP' -or @($case.operands).Count -ne 0 -or $case.programInstructions -isnot [array] -or $case.programInstructions.Count -eq 0 -or $case.programInstructions.Count -gt 16)){throw 'Invalid program object input'}
  if($ProgramObjectProbe){
   if($case.programCII -isnot [bool] -or $case.programFile -isnot [bool]){throw 'Program object requires explicit boolean programCII/programFile'}
+  if($null -ne $case.programDefinition -and ($case.programDefinition -isnot [bool] -or $case.programDefinition -ne $true -or $case.programFile -ne $true -or $null -eq $case.memorySettings)){throw 'Definition probe requires true, explicit memory settings and an output file'}
   if($null -ne $case.memorySettings){
    if(@($case.memorySettings.PSObject.Properties).Count -ne 2 -or $case.programFile -ne $true -or $case.memorySettings.bases -isnot [array] -or $case.memorySettings.bases.Count -ne 5){throw 'Memory settings require five bases and an output file'}
    foreach($base in $case.memorySettings.bases){if(@($base.PSObject.Properties).Count -ne 2 -or $base.address -cnotmatch '^(T|C|H|DIFF)[0-9]{1,5}$' -or $base.size -lt 0 -or $base.size -gt 4096){throw 'Invalid base setting'}}

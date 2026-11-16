@@ -19,6 +19,7 @@ import (
 )
 
 type inputCase struct {
+	ProgramDefinition    *bool                      `json:"programDefinition,omitempty"`
 	MemorySettings       *codec.N1FBMemorySettings  `json:"memorySettings,omitempty"`
 	HeaderOptions        *codec.N1TaskOptions       `json:"headerOptions,omitempty"`
 	ProgramInstructions  []programInstruction       `json:"programInstructions,omitempty"`
@@ -271,7 +272,10 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 			if len(test.ProgramInstructions) < 1 || len(test.ProgramInstructions) > 16 || test.ProgramCII == nil || test.ProgramFile == nil {
 				t.Fatal("missing program inputs")
 			}
-		} else if len(test.ProgramInstructions) != 0 || test.ProgramCII != nil || test.ProgramFile != nil || test.HeaderOptions != nil || test.MemorySettings != nil {
+			if test.ProgramDefinition != nil && (!*test.ProgramDefinition || !*test.ProgramFile || test.MemorySettings == nil) {
+				t.Fatal("invalid definition request")
+			}
+		} else if len(test.ProgramInstructions) != 0 || test.ProgramCII != nil || test.ProgramFile != nil || test.HeaderOptions != nil || test.MemorySettings != nil || test.ProgramDefinition != nil {
 			t.Fatal("unexpected program inputs")
 		}
 		if !decodeProbe && (len(test.Code) != 0 || test.SourceSHA256 != "" || test.SourceOffsetWords != 0 || test.Mutation != nil) {
@@ -423,6 +427,14 @@ func loadLibraryProbeResults(t *testing.T, manifestName string, expected int, pr
 				}
 				if !reflect.DeepEqual(r.HeaderOptions, want.HeaderOptions) {
 					t.Fatal("header options request/readback mismatch")
+				}
+				if want.ProgramDefinition != nil {
+					d := r.Definition
+					if d == nil || !reflect.DeepEqual(d.CompileResults, []int{0}) || d.ErrorCount != 0 || d.WarningCount != 1 || !reflect.DeepEqual(d.Messages, []string{"0:Unreferenced Function Block Body - ProbeFB"}) {
+						t.Fatal("definition diagnostic mismatch")
+					}
+				} else if r.Definition != nil {
+					t.Fatal("unexpected definition")
 				}
 				if want.MemorySettings != nil {
 					checkMemoryReadback(t, *want.MemorySettings, r.Memory)

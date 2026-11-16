@@ -9,6 +9,7 @@ import (
 
 	"github.com/joyautomation/nautilus/omron/codec"
 	"github.com/joyautomation/nautilus/omron/il"
+	"github.com/joyautomation/nautilus/omron/internal/fbcode"
 	"github.com/joyautomation/nautilus/omron/um"
 )
 
@@ -18,13 +19,22 @@ type programInstruction struct {
 }
 
 type programObjectResult struct {
-	Memory        *memoryReadback      `json:"memory"`
-	HeaderOptions *codec.N1TaskOptions `json:"headerOptions"`
-	OwnerBound    bool                 `json:"ownerBound"`
-	CompileResult int                  `json:"compileResult"`
-	CIIEnabled    bool                 `json:"ciiEnabled"`
-	Words         []uint32             `json:"words"`
-	File          *programFileResult   `json:"file"`
+	Definition    *programDefinitionResult `json:"definition"`
+	Memory        *memoryReadback          `json:"memory"`
+	HeaderOptions *codec.N1TaskOptions     `json:"headerOptions"`
+	OwnerBound    bool                     `json:"ownerBound"`
+	CompileResult int                      `json:"compileResult"`
+	CIIEnabled    bool                     `json:"ciiEnabled"`
+	Words         []uint32                 `json:"words"`
+	File          *programFileResult       `json:"file"`
+}
+
+type programDefinitionResult struct {
+	CompileResults []int    `json:"compileResults"`
+	Messages       []string `json:"messages"`
+	ErrorCount     int      `json:"errorCount"`
+	WarningCount   int      `json:"warningCount"`
+	Words          []uint32 `json:"words"`
 }
 
 type programFileResult struct {
@@ -53,6 +63,28 @@ func checkOwnedProgramImage(t *testing.T, row nativeResult, mode codec.TimerCoun
 	if row.Device == "CJ1H-H" {
 		model = codec.CJ1HCPU65
 	}
+	profile := codec.Profile{Model: model, TimerCounterMode: mode}
+	var prefix []uint32
+	if result.Definition != nil {
+		body, err := codec.EncodeFBRelativeBody(profile, []codec.FBRelativeInstruction{{Mnemonic: "LD", Operands: []codec.FBRelativeOperand{{BaseRegister: 3, Offset: 0, Unit: "bit"}}}, {Mnemonic: "OUT", Operands: []codec.FBRelativeOperand{{BaseRegister: 3, Offset: 1, Unit: "bit"}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		entry, exit, err := fbcode.DefinitionEnvelope(8, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		code := append(append(entry, body...), exit...)
+		if !reflect.DeepEqual(code, result.Definition.Words) {
+			t.Fatal("definition compiled code differs", result.Definition.Words)
+		}
+		record, err := fbcode.AssembleDefinitionRecord(profile, 0, "ProbeFB", 1, 1, code)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prefix = append([]uint32{1, 0, 0, 0}, record...)
+	}
+	directory, taskStart := 330+len(prefix), 618+len(prefix)
 	source := "END"
 	if strings.HasPrefix(row.ID, "direct-") {
 		source = "LD W0.00\nOUT W0.01\nEND"
@@ -89,21 +121,31 @@ func checkOwnedProgramImage(t *testing.T, row nativeResult, mode codec.TimerCoun
 	if err != nil {
 		t.Fatal(err)
 	}
-	if image.Flags != flags || image.DirectoryOffsetWords != 330 || len(image.Tasks) != 1 {
+	if image.Flags != flags || image.DirectoryOffsetWords != uint32(directory) || len(image.Tasks) != 1 {
 		t.Fatal("default native layout differs", image.Summary())
 	}
 	task := image.Tasks[0]
-	if task.Number != 256 || task.NameASCII != "Probe" || task.Flags != 0 || task.IndependentIRDR || task.OffsetWords != 618 || task.LengthWords != uint32(len(expected)+37) || !reflect.DeepEqual(task.Code, expected) {
+	if task.Number != 256 || task.NameASCII != "Probe" || task.Flags != 0 || task.IndependentIRDR || task.OffsetWords != uint32(taskStart) || task.LengthWords != uint32(len(expected)+37) || !reflect.DeepEqual(task.Code, expected) {
 		t.Fatal("task wrapper/code differs", image.Summary())
 	}
 	// Account for every word, including unused configuration and
 	// directory slots, rather than comparing only the decoded body.
-	want := make([]uint32, 655+len(expected))
-	want[6] = flags
-	for i := 7; i < 15; i++ {
-		want[i] = 0x00202020
+	want := make([]uint32, 655+len(expected)+len(prefix))
+	options := codec.N1TaskOptions{ExtendedTIMHold: true}
+	if result.HeaderOptions != nil {
+		options = *result.HeaderOptions
 	}
-	want[32], want[33], want[34] = uint32(len(want)), 42, 330
+	var memory *codec.N1FBMemorySettings
+	if result.Memory != nil {
+		value := settingsFromReadback(result.Memory)
+		memory = &value
+	}
+	header, err := codec.EncodeN1Header(profile, options, codec.N1HeaderLayout{DefinitionWords: len(prefix), TaskBlockWords: 288 + 37 + len(expected)}, memory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy(want, header)
+	copy(want[330:], prefix)
 	for i := 0; i < 288; i++ {
 		flags := uint32(0x2000)
 		if i >= 256 {
@@ -112,14 +154,14 @@ func checkOwnedProgramImage(t *testing.T, row nativeResult, mode codec.TimerCoun
 		want[42+i] = uint32(i) | flags
 	}
 	want[42+256] = 0xd100
-	want[330+256] = 288
-	want[618] = 256
-	want[619] = 0x50726f
-	want[620] = 0x626500
-	want[618+26] = uint32(len(expected) + 37)
-	want[618+27] = 32
-	copy(want[618+32:], []uint32{0, 0xbbc00f43, 0x61440100, 0x65440000})
-	copy(want[618+36:], expected)
+	want[directory+256] = 288
+	want[taskStart] = 256
+	want[taskStart+1] = 0x50726f
+	want[taskStart+2] = 0x626500
+	want[taskStart+26] = uint32(len(expected) + 37)
+	want[taskStart+27] = 32
+	copy(want[taskStart+32:], []uint32{0, 0xbbc00f43, 0x61440100, 0x65440000})
+	copy(want[taskStart+36:], expected)
 	want[len(want)-1] = 0xbb800f48
 	if len(raw) != 4*len(want) {
 		t.Fatal("unexpected file extent")
