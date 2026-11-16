@@ -20,6 +20,36 @@ export interface MimicDoc {
 	equipment?: MimicEquipment[];
 	pipes?: MimicPipe[];
 	labels?: MimicLabel[];
+	/** Equipment, pipes and labels drawn once per value of `each` — four
+	 * filters, eight pumps — instead of written out each time. See
+	 * MimicUnit and expandUnits(). */
+	units?: MimicUnit[];
+}
+
+/** A part of the screen repeated once per value of `each`. In every string
+ * of its equipment, pipes and labels (ids, tag bindings, label text, the
+ * equipment a pipe ends on) `{n}` becomes the value (`as` names a
+ * placeholder other than `n`); a string that is exactly `"{n}"` becomes the
+ * value itself, a number when the value is one. The i-th copy moves by
+ * `step` × i (canvas units), so the first sits where it is written.
+ *
+ *   { "id": "filter", "each": [1, 2, 3, 4], "step": [420, 0],
+ *     "equipment": [{ "id": "F{n}", "component": "FilterCell", "x": 230,
+ *       "y": 370, "props": { "label": "F-{n}" }, "bind": { "level": "F{n}_Level" } }] }
+ *
+ * A copy's items come after the document's own, unit by unit, value by
+ * value; their ids must be unique like any other (use `{n}` in them). */
+export interface MimicUnit {
+	/** Names the unit (for messages and the editor). */
+	id?: string;
+	each: (number | string)[];
+	/** The placeholder, without braces. Default `n`. */
+	as?: string;
+	/** How far each copy moves from the one before: [dx, dy]. Default [0, 0]. */
+	step?: [number, number];
+	equipment?: MimicEquipment[];
+	pipes?: MimicPipe[];
+	labels?: MimicLabel[];
 }
 
 /** How a mimic's equipment is drawn — every component takes it as its
@@ -120,21 +150,27 @@ export const BUILTIN_PORTS: Record<string, MimicPort[]> = {
 	Sparkline: [],
 	// Operator controls: no pipe meets a button.
 	CommandButton: [],
-	WriteToggle: []
+	WriteToggle: [],
+	// A panel of setpoint fields: no pipe meets it.
+	SetpointGroup: [],
+	// A P&ID's off-page connector: a line ends on whichever side it meets.
+	OffPage: [
+		{ name: 'top', part: 'body', x: 0.5, y: 0 },
+		{ name: 'left', part: 'body', x: 0, y: 0.5 },
+		{ name: 'right', part: 'body', x: 1, y: 0.5 },
+		{ name: 'bottom', part: 'body', x: 0.5, y: 1 }
+	]
 };
 
 /** Resolve an equipment instance's connection points at the RUNTIME's
  * precedence tier: instance override (`eq.ports`) -> built-in default. No
- * manifest/sidecar tier — *.component.json sidecars are a project/editor-
- * time aggregation (mimicComponentIndex.ts) that never ships with a built
- * HMI, so the runtime can't see them; only what's embedded in the doc
- * itself (or the shared built-in table) is available here. The mimic
- * editor's own resolvePorts() (webview-ui/src/mimic/ports.ts) additionally
- * consults the sidecar manifest tier before falling back to this same
- * built-in table — so an anchor/dir that depends on a sidecar override
- * renders correctly in the editor but NOT identically at runtime; keep
- * anything that must render identically in both (like a demo's) on the
- * instance-`ports` or built-in tiers instead. */
+ * manifest/sidecar tier here: *.component.json sidecars are a project-time
+ * aggregation (mimicComponentIndex.ts) the runtime never reads. naut's own
+ * HMI build closes that gap by writing each sidecar's `ports` onto the
+ * equipment that has none of its own as it bundles a *.mimic.json
+ * (internal/hmibuild/sidecar.go), so a screen naut builds draws the pipes
+ * the editor drew. A doc handed to <Mimic> some other way (an app built
+ * with npm) still needs its custom equipment's ports on the instance. */
 export function resolveRuntimePorts(eq: Pick<MimicEquipment, 'component' | 'ports'>): MimicPort[] {
 	if (eq.ports !== undefined) return eq.ports;
 	return BUILTIN_PORTS[eq.component] ?? [];
@@ -177,6 +213,8 @@ export interface MimicEquipment {
 	 * sidecar entry for `component` (editor only) else the built-in default;
 	 * an explicit `[]` means "no ports" and is NOT the same as absent. */
 	ports?: MimicPort[];
+	/** Set by expandUnits({ mark: true }) on a unit's copies: "<unit id>#<value>". Never written to a file. */
+	fromUnit?: string;
 }
 
 /** A pipe end's attachment to a named equipment port. When set, that end's
@@ -201,7 +239,9 @@ export interface MimicPipeAnchor {
 export interface MimicPipe {
 	id: string;
 	/** Interior vertices only when an end is anchored (see `from`/`to`) —
-	 * otherwise (the common case) the full point list, same as always. */
+	 * otherwise (the common case) the full point list, same as always. A
+	 * document may leave it out when both ends are anchored and the run has
+	 * no bends (as a scene's pipe may): it reads as `[]`, never a crash. */
 	points: [number, number][];
 	color?: string;
 	/** How consecutive points are connected: a straight segment between each
@@ -219,6 +259,8 @@ export interface MimicPipe {
 	to?: MimicPipeAnchor;
 	props?: Record<string, unknown>;
 	bind?: Record<string, string>;
+	/** Set by expandUnits({ mark: true }) on a unit's copies: "<unit id>#<value>". Never written to a file. */
+	fromUnit?: string;
 }
 
 /** A free text label on the canvas. Give it a `bind` and it becomes a live
@@ -237,6 +279,8 @@ export interface MimicLabel {
 	unit?: string;
 	/** Fraction digits for the live value (default 1). */
 	decimals?: number;
+	/** Set by expandUnits({ mark: true }) on a unit's copies: "<unit id>#<value>". Never written to a file. */
+	fromUnit?: string;
 }
 
 /** Polyline points -> SVG path ("M x y L x y …"). */
@@ -393,7 +437,7 @@ export function resolvePipeEndpoints(
 	pipe: Pick<MimicPipe, 'points' | 'from' | 'to'>,
 	getPort: GetPort
 ): PipeEndpoints {
-	const interior = pipe.points.map((p) => [...p] as [number, number]);
+	const interior = (pipe.points ?? []).map((p) => [...p] as [number, number]);
 	let startFlagged = false;
 	let endFlagged = false;
 	let startDir: PortDir | undefined;
@@ -491,11 +535,216 @@ export function routedPoints(
 		startDir = resolved.startDir;
 		endDir = resolved.endDir;
 	} else {
-		pts = pipe.points;
+		pts = pipe.points ?? [];
 	}
 	pts = withDirStub(pts, startDir, true);
 	pts = withDirStub(pts, endDir, false);
 	return pipe.routing === 'orthogonal' ? orthogonalPoints(pts) : pts;
+}
+
+/** The document with its units drawn out: each unit's equipment, pipes and
+ * labels once per value, `{n}` filled in and moved by `step`, after the
+ * document's own; `units` itself is gone. A document with no units comes
+ * back as it is (the same object). Pure, and the same as naut's own
+ * expansion (internal/mimicdoc), which a shared fixture holds them to:
+ * testdata/mimic-units. `mark` tags each copied item with `fromUnit:
+ * "<id>#<value>"` for the editor, which shows them but can't move them. */
+export function expandUnits(doc: MimicDoc, opts: { mark?: boolean } = {}): MimicDoc {
+	const units = doc.units;
+	if (!Array.isArray(units) || units.length === 0) return doc;
+	const out: MimicDoc = { ...doc, equipment: [...(doc.equipment ?? [])], pipes: [...(doc.pipes ?? [])], labels: [...(doc.labels ?? [])] };
+	delete out.units;
+	for (const [u, unit] of units.entries()) {
+		if (!unit || !Array.isArray(unit.each)) continue;
+		const ph = `{${unit.as || 'n'}}`;
+		const [dx, dy] = Array.isArray(unit.step) ? unit.step : [0, 0];
+		unit.each.forEach((v, i) => {
+			const fill = (x: unknown): unknown => {
+				if (typeof x === 'string') return x === ph ? v : x.split(ph).join(String(v));
+				if (Array.isArray(x)) return x.map(fill);
+				if (x && typeof x === 'object') return Object.fromEntries(Object.entries(x).map(([k, y]) => [k, fill(y)]));
+				return x;
+			};
+			const tag = opts.mark ? { fromUnit: `${unit.id ?? `unit${u + 1}`}#${v}` } : {};
+			const ox = (dx || 0) * i, oy = (dy || 0) * i;
+			for (const e of unit.equipment ?? []) {
+				const c = fill(e) as MimicEquipment;
+				out.equipment!.push({ ...c, x: (c.x ?? 0) + ox, y: (c.y ?? 0) + oy, ...tag });
+			}
+			for (const p of unit.pipes ?? []) {
+				const c = fill(p) as MimicPipe;
+				out.pipes!.push({ ...c, points: (c.points ?? []).map(([x, y]) => [x + ox, y + oy] as [number, number]), ...tag });
+			}
+			for (const l of unit.labels ?? []) {
+				const c = fill(l) as MimicLabel;
+				out.labels!.push({ ...c, x: (c.x ?? 0) + ox, y: (c.y ?? 0) + oy, ...tag });
+			}
+		});
+	}
+	return out;
+}
+
+/** A pipe that draws nothing on the screen, and why: an anchored end whose
+ * equipment or port isn't there (`ends` names each, "F1_INF.b"), or ends
+ * and points that all land on one spot. */
+export interface BrokenPipe {
+	id: string;
+	ends: string[];
+}
+
+/** The pipes that draw nothing, in document order. <Mimic> puts these on
+ * its root as `data-broken-pipes` (JSON), which `naut check` reads when it
+ * renders a screen: a pipe the editor drew and the screen can't is an error
+ * there, not a gap an operator finds. */
+export function brokenPipes(
+	pipes: Pick<MimicPipe, 'id' | 'points' | 'routing' | 'from' | 'to'>[],
+	getPort: GetPort
+): BrokenPipe[] {
+	const out: BrokenPipe[] = [];
+	for (const p of pipes) {
+		const ends: string[] = [];
+		if (p.from || p.to) {
+			const r = resolvePipeEndpoints(p, getPort);
+			if (r.startFlagged && p.from) ends.push(`${p.from.equip}.${p.from.port}`);
+			if (r.endFlagged && p.to) ends.push(`${p.to.equip}.${p.to.port}`);
+		}
+		const pts = routedPoints(p, getPort);
+		const [x0, y0] = pts[0] ?? [0, 0];
+		const somewhere = pts.some(([x, y]) => Math.abs(x - x0) >= 0.5 || Math.abs(y - y0) >= 0.5);
+		if (ends.length > 0 || !somewhere) out.push({ id: p.id, ends });
+	}
+	return out;
+}
+
+/** Where two pipes cross without joining: `over` is the index (in the list
+ * given) of the pipe drawn across the other, which is broken there. */
+export interface PipeCrossing {
+	x: number;
+	y: number;
+	over: number;
+	under: number;
+}
+
+/** How near a crossing may come to a segment's end and still be a crossing:
+ * nearer, it is a tee (one pipe ends on the other) or a corner, and the
+ * pipes join there. A little more than a pipe's width. */
+export const CROSSING_CLEAR = 12;
+
+/**
+ * Every point where two pipes cross without joining, given each pipe's
+ * routed points. A joint is a pipe's end (or a corner) on or near the other
+ * pipe, which the layered drawing already shows as a tee, so only crossings
+ * clear of every segment end count. P&ID drafting breaks the vertical line
+ * where lines cross: the more horizontal of the two segments passes over
+ * (a header stays whole, the drops cross under it); at equal slant, the
+ * later pipe does. Collinear runs (one pipe drawn on another) aren't
+ * crossings.
+ */
+export function pipeCrossings(paths: [number, number][][]): PipeCrossing[] {
+	type Seg = { p: number; ax: number; ay: number; bx: number; by: number };
+	const segs: Seg[] = [];
+	paths.forEach((pts, p) => {
+		for (let i = 1; i < pts.length; i++) {
+			const [ax, ay] = pts[i - 1];
+			const [bx, by] = pts[i];
+			if (Math.hypot(bx - ax, by - ay) > 2 * CROSSING_CLEAR) segs.push({ p, ax, ay, bx, by });
+		}
+	});
+	const out: PipeCrossing[] = [];
+	for (let i = 0; i < segs.length; i++) {
+		const s = segs[i];
+		const sx = s.bx - s.ax, sy = s.by - s.ay;
+		for (let j = i + 1; j < segs.length; j++) {
+			const t = segs[j];
+			if (t.p === s.p) continue;
+			const tx = t.bx - t.ax, ty = t.by - t.ay;
+			const den = sx * ty - sy * tx;
+			if (Math.abs(den) < 1e-9) continue; // parallel or collinear
+			const qx = t.ax - s.ax, qy = t.ay - s.ay;
+			const u = (qx * ty - qy * tx) / den; // along s
+			const v = (qx * sy - qy * sx) / den; // along t
+			if (u <= 0 || u >= 1 || v <= 0 || v >= 1) continue;
+			const x = s.ax + u * sx, y = s.ay + u * sy;
+			const clear = (g: Seg) =>
+				Math.hypot(x - g.ax, y - g.ay) > CROSSING_CLEAR && Math.hypot(x - g.bx, y - g.by) > CROSSING_CLEAR;
+			if (!clear(s) || !clear(t)) continue;
+			// the flatter segment passes over; a tie goes to the later pipe
+			const flatS = Math.abs(sy) / Math.hypot(sx, sy), flatT = Math.abs(ty) / Math.hypot(tx, ty);
+			const sOver = Math.abs(flatS - flatT) > 1e-6 ? flatS < flatT : s.p > t.p;
+			const over = sOver ? s.p : t.p, under = sOver ? t.p : s.p;
+			if (out.some((c) => Math.abs(c.x - x) < 1 && Math.abs(c.y - y) < 1 && c.over === over)) continue;
+			out.push({ x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, over, under });
+		}
+	}
+	return out;
+}
+
+/** How many other pipes one may pass under before it is hard to trace:
+ * a drop crossing two headers to reach the third reads; past that, the eye
+ * loses which line it is on. */
+export const CROSSED_MANY = 3;
+
+/** A point where three or more pipe ends and runs meet: a branch off a
+ * run (a tee) or a cross. */
+export interface PipeTee {
+	x: number;
+	y: number;
+}
+
+/** How near a pipe's end must come to another pipe to join it there: a
+ * little more than half a pipe's 10 px width. */
+export const TEE_NEAR = 6;
+
+/**
+ * Every tee in a pipe network, given each pipe's routed points: a place
+ * where three or more runs meet, counting a pipe's end as one run and a pipe
+ * passing through (or turning a corner) as two. Drawn as a dot, as on a
+ * schematic, so a branch never reads as a crossing at a glance. A pipe's
+ * corner counts too: a drop that turns onto a header and runs along it
+ * joins it there. Two pipes meeting end to end (an elbow, a run drawn in
+ * two pieces) isn't a tee. The dot sits on the run the branch joins.
+ */
+export function pipeTees(paths: [number, number][][]): PipeTee[] {
+	const near = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by) <= TEE_NEAR;
+	// the nearest point of a polyline's inside (not its two ends) to [x, y]
+	const through = (pts: [number, number][], x: number, y: number): [number, number] | undefined => {
+		let best: [number, number] | undefined, bd = Infinity;
+		for (let i = 1; i < pts.length; i++) {
+			const [ax, ay] = pts[i - 1], [bx, by] = pts[i];
+			const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+			if (l2 === 0) continue;
+			const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2));
+			const px = ax + t * dx, py = ay + t * dy, d = Math.hypot(x - px, y - py);
+			if (d < bd) (bd = d), (best = [px, py]);
+		}
+		if (!best || bd > TEE_NEAR) return undefined;
+		const [sx, sy] = pts[0], [ex, ey] = pts[pts.length - 1];
+		if (near(best[0], best[1], sx, sy) || near(best[0], best[1], ex, ey)) return undefined;
+		return best;
+	};
+	const out: PipeTee[] = [];
+	paths.forEach((pts, p) => {
+		if (pts.length < 2) return;
+		pts.forEach(([x, y], k) => {
+			// this pipe: its end is one run, a corner two
+			let runs = k === 0 || k === pts.length - 1 ? 1 : 2;
+			let at: [number, number] = [x, y];
+			paths.forEach((q, j) => {
+				if (j === p || q.length < 2) return;
+				const ends = [q[0], q[q.length - 1]].filter(([ex, ey]) => near(x, y, ex, ey)).length;
+				if (ends > 0) {
+					runs += ends;
+					return;
+				}
+				const t = through(q, x, y);
+				if (t) (runs += 2), (at = t);
+			});
+			if (runs < 3) return;
+			const [tx, ty] = [Math.round(at[0] * 10) / 10, Math.round(at[1] * 10) / 10];
+			if (!out.some((d) => near(d.x, d.y, tx, ty))) out.push({ x: tx, y: ty });
+		});
+	});
+	return out;
 }
 
 /** Resolve a binding map (prop -> tag name) against the live tags. A tag
@@ -627,7 +876,7 @@ export function attachPipeEnds(doc: MimicDoc, opts: AttachOptions): { doc: Mimic
 		});
 
 	const pipes = (doc.pipes ?? []).map((pipe): MimicPipe => {
-		const pts = pipe.points.map((p) => [p[0], p[1]] as [number, number]);
+		const pts = (pipe.points ?? []).map((p) => [p[0], p[1]] as [number, number]);
 		// Decide both ends first, against the untouched points.
 		const decide = (end: 'from' | 'to'): PortHit | undefined => {
 			if (pipe[end]) return undefined; // already anchored

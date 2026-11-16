@@ -64,6 +64,8 @@ The same document renders in a SvelteKit HMI through the
 | `Sparkline` | `values` | |
 | `CommandButton` | `held`, `disabled`, `disabledReason`; the tag it writes is the `tag` prop | |
 | `WriteToggle` | `value`; the tag it writes is the `tag` prop | |
+| `SetpointGroup` | `title`, `items` (`[{"tag": "Kp", "label": "Gain", "unit": "", "decimals": 2}]`), `columns`: it reads and writes the items' tags itself; give it a width, never a height | |
+| `OffPage` | `label` (where the line goes on another screen: `TO FILTER GALLERY`), `dir` (the way it points: `right`, `left`, `up`, `down`) | `top`, `left`, `right`, `bottom` |
 
 ## Pipes and ports
 
@@ -86,6 +88,18 @@ into a right-angled L; without it the segments are straight.
   a tag that holds that fraction (a flow over its design flow, computed in
   the program), not to the flow in engineering units.
 - **`color`** is the pipe's flow colour; the wall stays the screen's grey.
+
+Pipes join where one ends on another: a branch whose end sits on a
+header's line is a tee, drawn as one run. Where two pipes cross without
+either ending there, the screen draws the crossing as a P&ID does: the
+flatter pipe (the header) passes over, unbroken, and the other is broken
+either side of it. Where a pipe ends on another, the screen draws a dot,
+as a schematic marks a connection. So a drop that should join the third
+header down ends on that header's line (and gets its dot there), and
+crosses the two above it.
+
+A label on a line breaks the line under its text, as a line label does on
+a P&ID, so a header's name can sit on the header.
 
 A port is a named point on an equipment's box, as fractions of it: `x: 0,
 y: 0.5` is the middle of the left edge. The built-ins have the ports in the
@@ -162,8 +176,16 @@ and the component throws when it mounts. `naut hmi build` stops on it.
 
 Import the kit's helpers and drawings from `@joyautomation/nautilus-hmi`.
 
-A `{Name}.component.json` beside the component gives it pipe ports and the
-sample props its preview renders with:
+An operator picks a light or a dark theme, so colour a component from the
+kit's tokens rather than hex: text in `var(--ink)`, `var(--ink-2)` or
+`var(--muted)`; grounds in `var(--bg)`, `var(--surface)` and
+`var(--surface-2)`; outlines in `var(--edge)`; state in `var(--good)`,
+`var(--warn)` and `var(--crit)`. Each holds AA contrast on each ground in
+both themes. A hex chosen for one theme is unreadable in the other, which
+`naut check` reports.
+
+A `{Name}.component.json` beside the component gives it pipe ports and
+its examples: the props for each state it draws, by name.
 
 ```json
 {
@@ -172,22 +194,73 @@ sample props its preview renders with:
     { "name": "effluent", "x": 0.25, "y": 1 },
     { "name": "air", "x": 0, "y": 0.85 }
   ],
-  "preview": { "label": "F-2", "level": 5.8, "filterState": 1 }
+  "examples": {
+    "in service": { "label": "F-2", "level": 5.8, "filterState": 1 },
+    "washing": { "label": "F-2", "level": 2.1, "filterState": 3 },
+    "out of service": { "label": "F-2", "level": 0, "filterState": 0 }
+  }
 }
 ```
+
+Every screen naut builds, an app of your own included (unless it has a
+page there already), has a `/components` page. It draws each of the
+project's components (each a mimic places, and each with a
+`{Name}.component.json`) in each of its examples, at the size the screen
+gives it, and `naut check` renders that page like any other: a state that
+throws, or reads badly in one theme, shows up there before the plant
+reaches it. A component on a screen with no examples is a warning.
 
 Each port's `x` and `y` are fractions of the box. With `"part": "<name>"`
 they are fractions of an element the component marks
 `data-part="<name>"` instead, so the port stays on that part at any size.
 Open the `.svelte` and press the preview button in the editor title to see
-it render with the preview props as you type; there, you can also drag the
+it render with its first example (or `"preview": {"props": {...}}`, which
+the props strip there writes) as you type; there, you can also drag the
 ports into place.
+
+## Units: what repeats, written once
+
+Four filters, each with six valves and their pipes, is the same drawing
+four times. Write it once in the mimic's `units`, and naut draws it once
+per value of `each`:
+
+```json
+"units": [
+  {
+    "id": "filter",
+    "each": [1, 2, 3, 4],
+    "step": [420, 0],
+    "equipment": [
+      { "id": "F{n}", "component": "FilterCell", "x": 230, "y": 370,
+        "props": { "label": "F-{n}" }, "bind": { "level": "F{n}_Level" } },
+      { "id": "F{n}_INF", "component": "IsaValve", "x": 335, "y": 300,
+        "bind": { "zso": "F{n}_INF_ZSO", "zsc": "F{n}_INF_ZSC" } }
+    ],
+    "pipes": [
+      { "id": "F{n}_inf", "points": [[355, 270]], "to": { "equip": "F{n}_INF", "port": "a" } }
+    ],
+    "labels": [{ "text": "F-{n}", "x": 240, "y": 680 }]
+  }
+]
+```
+
+- `{n}` in any string (an id, a tag in `bind`, a label, the equipment a
+  pipe ends on) becomes each value in turn. A string that is exactly
+  `"{n}"` becomes the value itself, so `"props": { "n": "{n}" }` passes the
+  number. `"as": "p"` names a different placeholder, `{p}`.
+- The first copy sits where it's written; each next one moves by `step`
+  (`[dx, dy]`, canvas units).
+- A copy is equipment, pipes and labels like any other: `naut check`
+  checks its tags and ports, ids must be unique (put `{n}` in them), and
+  a pipe outside the unit can end on a copy (`"equip": "F3_EFF"`).
+- The editor shows the copies outlined and locked; change them in the
+  unit, in the file.
 
 ## A P&ID, step by step
 
 1. **Lay out the process** with equipment: built-ins where they fit, your
-   own components where they don't (one per unit you repeat, like a filter
-   cell, placed once per unit with its tags in `bind`).
+   own components where they don't (a filter cell, say), and what repeats
+   per unit in `units`, written once.
 2. **Give each component its ports** in its `.component.json`, where the
    plant's pipes meet it.
 3. **Run the pipes** between ports, anchored at both ends, in the
@@ -211,7 +284,13 @@ serves them at `/`, with the engineering dashboard moved to `/_nautilus/`:
   for each: the first at `/`, the others by file name
   (`screens/pumps.mimic.json` is `/pumps`), under a bar with the project's
   name, the pages, the connection and a theme switch. The pages are live
-  and their controls write, as in the editor.
+  and their controls write, as in the editor. Each page shows its whole
+  drawing at once, fitted to the window's width and height and centred,
+  so draw the canvas for the window it's seen in: about 1880×1000 fills a
+  1920×1080 screen under the bar. A taller canvas is drawn smaller, not
+  cut off. In an app, `<Mimic {doc} fit="contain" />` does the same in a
+  container that has a height of its own; the default, `fit="width"`,
+  fills the width and lets a tall drawing run on below.
 - **For more than mimics**, write the screen as an app and point
   `server.hmi` at its folder: `src/routes/+page.svelte` is `/`,
   `src/routes/trends/+page.svelte` is `/trends`, a `+layout.svelte` wraps
@@ -236,3 +315,27 @@ a store, and the component throws when it mounts), an import `naut`
 doesn't carry, a component a mimic names that isn't in the project.
 `naut build` builds them into the controller it makes, so the controller
 serves them as they are.
+
+With Chrome, Chromium or Edge on the machine, `naut check` then opens each
+page of the built screen at desktop and phone size and reports what a
+person would see wrong:
+
+- a page that throws, or comes up blank (an error);
+- a pipe that draws nothing, naming the end that isn't there (an error);
+- a shape drawn far outside its own drawing, usually a coordinate passed
+  as text (`y="130"`, so `y + 8` is `"1308"`) (a warning);
+- a drawing that runs past the bottom of a 1920×1080 window, or one
+  fitted so small that 14 px text reads under 10.5 px, with the room it
+  had to fill (a warning);
+- text that is hard to read: under WCAG's 4.5:1 contrast against what is
+  drawn behind it (3:1 for large text), measured from a screenshot, in
+  the light theme and the dark one for a page on the kit's theme; or
+  drawn under 9 px (a warning);
+- a page that scrolls sideways on a 390 px phone (a warning).
+
+The screen is served from naut's own server over the project's runtime
+without scanning it: no driver starts, no write reaches anything, and
+every tag shows its initial value. `NAUT_BROWSER` names the browser to
+use (`NAUT_BROWSER=none`, or `naut check -render=false`, skips it).
+Without a browser, `naut check` says the screen wasn't rendered and
+carries on.

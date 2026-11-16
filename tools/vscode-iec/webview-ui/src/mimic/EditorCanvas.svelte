@@ -23,9 +23,12 @@
 	import { flushSync } from 'svelte';
 	import {
 		builtinParts,
+		expandUnits,
 		makeGetPort,
 		partRect,
 		Pipe,
+		pipeCrossings,
+		pipeTees,
 		pointsToPath,
 		resolveBindings,
 		resolvedPortDir,
@@ -47,6 +50,13 @@
 	import UserIsland from './UserIsland.svelte';
 
 	const doc = $derived(ed.doc);
+	/** A unit's copies (the doc's `units`, drawn out the way the screen draws
+	 * them): shown on the canvas, locked — they're edited in the file, in
+	 * the unit they come from — and their ports anchor pipes like any other. */
+	const unitCopies = $derived(
+		doc?.units?.length ? expandUnits({ canvas: doc.canvas, units: doc.units }, { mark: true }) : null
+	);
+	const allEquipment = $derived([...(doc?.equipment ?? []), ...(unitCopies?.equipment ?? [])]);
 
 	// ── scale: fit to the pane, or the user's zoom ──────────────────────────
 	// The canvas opens fitted to the pane's width and follows it as the pane
@@ -342,15 +352,15 @@
 	 * DOM-measured box), so a pipe anchor lands exactly on its port dot. */
 	const getPort: GetPort = makeGetPort(
 		(id) => {
-			const eq = (doc?.equipment ?? []).find((e) => e.id === id);
+			const eq = allEquipment.find((e) => e.id === id);
 			return eq ? eqBox(eq) : undefined;
 		},
 		(id) => {
-			const eq = (doc?.equipment ?? []).find((e) => e.id === id);
+			const eq = allEquipment.find((e) => e.id === id);
 			return eq ? resolvePorts(eq, ed.manifest) : undefined;
 		},
 		(id, part) => {
-			const eq = (doc?.equipment ?? []).find((e) => e.id === id);
+			const eq = allEquipment.find((e) => e.id === id);
 			return eq ? partOf(eq, part) : undefined;
 		}
 	);
@@ -386,6 +396,30 @@
 	 * overlays, matching the kit's Mimic (see the junction note in the kit's
 	 * Pipe.svelte). */
 	const PIPE_LAYERS = ['wall', 'bore', 'flow'] as const;
+	/** Clip-path ids for crossings, unique to this canvas. */
+	const uid = $props.id();
+	/** Half a crossing's square, as the kit's Mimic draws it. */
+	const XING = 11;
+	/** Every pipe drawn (the doc's and its units' copies), routed, and where
+	 * they cross: read by the crossings pass in the pipe layer. */
+	const xingRuns = $derived.by(() => {
+		void boxVersion; // re-route when an equipment's measured box changes
+		return [...(doc?.pipes ?? []), ...(unitCopies?.pipes ?? [])].map((p) => {
+			const pts = routedPoints(pipeRouteInput(p), getPort);
+			return { p, pts, d: pointsToPath(pts) };
+		});
+	});
+	const xings = $derived(pipeCrossings(xingRuns.map((r) => r.pts)));
+	/** The crossings each run passes under, by its index in xingRuns: its
+	 * mask, as the kit's Mimic masks it. */
+	const unders = $derived.by(() => {
+		const m = new Map<number, { x: number; y: number }[]>();
+		for (const c of xings) m.set(c.under, [...(m.get(c.under) ?? []), c]);
+		return m;
+	});
+	const underMask = (i: number) => (unders.has(i) ? `url(#${uid}-u${i})` : undefined);
+	/** Where a branch joins a run, dotted as the kit's Mimic dots it. */
+	const tees = $derived(pipeTees(xingRuns.map((r) => r.pts)));
 
 	/** `{points, from, to}` to feed routedPoints()/resolvePipeEndpoints() for
 	 * `p`, with an in-flight 'anchor' drag on THIS pipe live-substituted in.
@@ -806,6 +840,7 @@
 			...(eq.label !== undefined ? { label: eq.label } : {}),
 			...(eq.props ?? {}),
 			...resolveBindings(eq.bind, ed.tags ?? {}),
+			...(eq.component === 'SetpointGroup' ? { tags: ed.tags ?? {} } : {}),
 			// Operator controls (the kit's CommandButton / WriteToggle, a
 			// project component's own buttons) write through this; it answers
 			// with why not while live values are off or no controller runs.
@@ -1718,10 +1753,22 @@
 				     (under everything of its own pipe and every bore); the hit
 				     strokes come last so they win pointer events over all
 				     paint. -->
+				{#if unders.size > 0}
+					<defs>
+						{#each [...unders] as [i, cs] (i)}
+							<mask id="{uid}-u{i}" maskUnits="userSpaceOnUse" x={-1e5} y={-1e5} width={2e5} height={2e5}>
+								<rect x={-1e5} y={-1e5} width={2e5} height={2e5} fill="white" />
+								{#each cs as c, k (k)}
+									<rect x={c.x - XING} y={c.y - XING} width={XING * 2} height={XING * 2} fill="black" />
+								{/each}
+							</mask>
+						{/each}
+					</defs>
+				{/if}
 				{#each PIPE_LAYERS as layer (layer)}
-					{#each doc.pipes ?? [] as p (p.id)}
+					{#each doc.pipes ?? [] as p, pi (p.id)}
 						{@const d = pointsToPath(routedPoints(pipeRouteInput(p), getPort))}
-						<g class="piperun" class:sel={selected('pipe', p.id)} class:flagged={pipeFlagged(p)} data-id={p.id} data-kind="pipe">
+						<g class="piperun" class:sel={selected('pipe', p.id)} class:flagged={pipeFlagged(p)} data-id={p.id} data-kind="pipe" mask={underMask(pi)}>
 							{#if layer === 'wall' && selected('pipe', p.id)}
 								<path class="pipesel" {d} style="stroke-width: {10 / scale}" />
 							{/if}
@@ -1731,9 +1778,25 @@
 								{...(p.props ?? {})}
 								{...resolveBindings(p.bind, ed.tags ?? {})}
 								{layer}
+								look={doc?.look ?? 'isa101'}
 							/>
 						</g>
 					{/each}
+					{#each unitCopies?.pipes ?? [] as p, ui (p.id)}
+						<g class="piperun unitcopy" data-unit={p.fromUnit} mask={underMask((doc.pipes?.length ?? 0) + ui)}>
+							<Pipe
+								d={pointsToPath(routedPoints(pipeRouteInput(p), getPort))}
+								{...(p.color !== undefined ? { color: p.color } : {})}
+								{...(p.props ?? {})}
+								{...resolveBindings(p.bind, ed.tags ?? {})}
+								{layer}
+								look={doc?.look ?? 'isa101'}
+							/>
+						</g>
+					{/each}
+				{/each}
+				{#each tees as t, i (i)}
+					<circle class="tee" cx={t.x} cy={t.y} r={(doc?.look ?? 'isa101') === 'isa101' ? 5 : 7} fill="var(--pipe-wall, var(--edge, #7a7973))" pointer-events="none" />
 				{/each}
 				{#each doc.pipes ?? [] as p (p.id)}
 					{@const d = pointsToPath(routedPoints(pipeRouteInput(p), getPort))}
@@ -1827,6 +1890,21 @@
 							></div>
 						{/each}
 					{/if}
+				</div>
+			{/each}
+
+			{#each unitCopies?.equipment ?? [] as eq (eq.id)}
+				{@const C = registry[eq.component]}
+				{@const box = eq.component in registry ? '' : customBox(dispSize(eq))}
+				<div
+					class="eq unitcopy"
+					class:behind={eq.behind}
+					data-unit={eq.fromUnit}
+					title="{eq.id}, from unit {eq.fromUnit}: edit the unit in the file"
+					style="left: {eq.x}px; top: {eq.y}px{box}"
+					use:regEl={eq.id}
+				>
+					{#if C}<C {...eqProps(eq)} />{:else}<UserIsland name={eq.component} props={eqProps(eq)} />{/if}
 				</div>
 			{/each}
 
@@ -1987,6 +2065,13 @@
 					class:sel={selected('label', i)}
 					style="left: {pos.x}px; top: {pos.y}px"
 					onpointerdown={(e) => labelDown(e, i, l)}
+					>{#if live !== null}{#if l.text}{l.text}{/if}<b class="num">{live}</b
+						>{#if l.unit}<span>{l.unit}</span>{/if}{:else}{l.text}{/if}</span
+				>
+			{/each}
+			{#each unitCopies?.labels ?? [] as l, i (i)}
+				{@const live = labelLive(l)}
+				<span class="lbl unitcopy" class:readout={live !== null} style="left: {l.x}px; top: {l.y}px"
 					>{#if live !== null}{#if l.text}{l.text}{/if}<b class="num">{live}</b
 						>{#if l.unit}<span>{l.unit}</span>{/if}{:else}{l.text}{/if}</span
 				>
@@ -2466,5 +2551,13 @@
 	.empty {
 		color: var(--nx-muted);
 		padding: 24px;
+	}
+	/* A unit's copies: shown, not editable here (edit the unit in the file). */
+	.unitcopy {
+		pointer-events: none;
+	}
+	.eq.unitcopy {
+		outline: 1px dashed var(--vscode-editorInfo-foreground, #3794ff);
+		outline-offset: 2px;
 	}
 </style>

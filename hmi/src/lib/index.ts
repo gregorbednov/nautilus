@@ -64,6 +64,8 @@ export type { CanvasSpec, CanvasNode, CanvasRegistry } from './canvas.js';
 // satisfies it directly, and so does any other transport.
 export { default as WriteNumber } from './components/WriteNumber.svelte';
 export { default as WriteToggle } from './components/WriteToggle.svelte';
+export { default as OffPage } from './components/OffPage.svelte';
+export { default as SetpointGroup } from './components/SetpointGroup.svelte';
 export { default as CommandButton } from './components/CommandButton.svelte';
 
 // Faceplates: the popup a mimic click opens (chrome + tab bar; compose the
@@ -216,6 +218,13 @@ export {
 	resolvedPortDir,
 	resolveRuntimePorts,
 	resolvePipeEndpoints,
+	brokenPipes,
+	pipeCrossings,
+	pipeTees,
+	TEE_NEAR,
+	CROSSED_MANY,
+	CROSSING_CLEAR,
+	expandUnits,
 	portAbsolute,
 	partRect,
 	makeGetPort,
@@ -230,6 +239,7 @@ export type {
 	MimicEquipment,
 	MimicPipe,
 	MimicLabel,
+	MimicUnit,
 	MimicPort,
 	MimicLook,
 	PartRect,
@@ -237,6 +247,9 @@ export type {
 	PortDir,
 	EquipmentBox,
 	ResolvedPort,
+	BrokenPipe,
+	PipeCrossing,
+	PipeTee,
 	GetPort,
 	PipeEndpoints,
 	AttachOptions,

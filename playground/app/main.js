@@ -15,6 +15,12 @@ import '@codingame/monaco-vscode-theme-defaults-default-extension';
 import '@codingame/monaco-vscode-yaml-default-extension';
 import '@codingame/monaco-vscode-json-default-extension';
 import '@codingame/monaco-vscode-markdown-basics-default-extension';
+// What a project's HMI is written in: .svelte (./svelte.js), and the
+// TypeScript, JavaScript and CSS inside it and beside it.
+import '@codingame/monaco-vscode-typescript-basics-default-extension';
+import '@codingame/monaco-vscode-javascript-default-extension';
+import '@codingame/monaco-vscode-css-default-extension';
+import './svelte.js';
 import {
 	initialize,
 	getService,
@@ -369,6 +375,12 @@ async function main() {
 			'files.autoSave': 'afterDelay',
 			'files.autoSaveDelay': 400,
 			'editor.minimap.enabled': false,
+			// Colouring on the page's own thread. The worker path fails in
+			// this build (its lazy import of vscode-textmate comes back empty,
+			// so every .svelte, .ts, .js or .css file opened threw "Cannot
+			// destructure property 'applyStateStackDiff'"), and the files
+			// here are small.
+			'editor.experimental.asyncTokenization': false,
 			'security.workspace.trust.enabled': false,
 			'telemetry.telemetryLevel': 'off',
 			'terminal.integrated.defaultProfile.linux': 'nautilus',

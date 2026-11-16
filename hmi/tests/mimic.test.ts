@@ -6,6 +6,10 @@
 import { describe, expect, it } from './harness.js';
 import {
 	attachPipeEnds,
+	brokenPipes,
+	expandUnits,
+	pipeCrossings,
+	pipeTees,
 	connectPorts,
 	routedPoints,
 	makeGetPort,
@@ -14,6 +18,8 @@ import {
 	type MimicDoc,
 	type MimicEquipment
 } from '../src/lib/mimic.js';
+import unitsIn from '../../testdata/mimic-units/in.json';
+import unitsOut from '../../testdata/mimic-units/out.json';
 
 // A 100×100 pump at (100, 100) with a measured height, a discharge nozzle
 // on its top face at x 0.3 exiting 'up' and a suction on its left face.
@@ -95,6 +101,19 @@ describe('attachPipeEnds', () => {
 		expect(out.pipes![0].to).toEqual({ equip: 'T1', port: 'left' });
 		expect(out.pipes![0].points).toEqual([]);
 		expect(report.free).toEqual([]);
+	});
+
+	it('reads a pipe with both ends anchored and no points list as no bends (bw01 haiku-1)', () => {
+		// a document may leave points out, as a scene's pipe may; one such
+		// pipe used to throw and blank the whole screen
+		const doc = docOf([{ id: 'a', from: { equip: 'P1', port: 'suction' }, to: { equip: 'T1', port: 'left' }, routing: 'orthogonal' } as never]);
+		const withEmpty = docOf([{ id: 'a', points: [], from: { equip: 'P1', port: 'suction' }, to: { equip: 'T1', port: 'left' }, routing: 'orthogonal' }]);
+		expect(routedPoints(doc.pipes![0], getPortFor(doc))).toEqual(routedPoints(withEmpty.pipes![0], getPortFor(withEmpty)));
+		expect(routedPoints(doc.pipes![0], getPortFor(doc)).length > 1).toBe(true);
+		const { report } = attachPipeEnds(doc, { tolerance: 10 });
+		expect(report.attached).toBe(0);
+		// and a free pipe with no points draws nothing rather than throwing
+		expect(routedPoints({ id: 'b' } as never)).toEqual([]);
 	});
 
 	it('does not move a vertex that is still a FREE end (it may be a shared tee)', () => {
@@ -279,5 +298,94 @@ describe('connectPorts', () => {
 		expect(JSON.stringify(rails)).toBe(before);
 		expect(report.connected.map((c) => [c.port, c.target])).toEqual([['suction', 'L']]);
 		expect(doc.pipes!.length).toBe(3);
+	});
+});
+
+describe('brokenPipes', () => {
+	const getPort = makeGetPort(
+		(id) => (id === 'P1' ? { x: pump.x, y: pump.y, w: 100, h: 50 } : undefined),
+		(id) => (id === 'P1' ? resolveRuntimePorts(pump) : undefined)
+	);
+	it('names each end that is not there when the screen runs (bw01 fable-2)', () => {
+		const got = brokenPipes(
+			[
+				{ id: 'ok', from: { equip: 'P1', port: 'discharge' }, points: [[130, 20]] },
+				{ id: 'noport', from: { equip: 'P1', port: 'inf' }, points: [[10, 10]] },
+				{ id: 'noequip', from: { equip: 'P1', port: 'suction' }, to: { equip: 'F1', port: 'a' }, points: [] }
+			],
+			getPort
+		);
+		expect(got).toEqual([
+			{ id: 'noport', ends: ['P1.inf'] },
+			{ id: 'noequip', ends: ['F1.a'] }
+		]);
+	});
+	it('a free pipe whose points are all one spot draws nothing', () => {
+		expect(brokenPipes([{ id: 'dot', points: [[5, 5], [5, 5]] }, { id: 'run', points: [[0, 0], [9, 0]] }], getPort)).toEqual([
+			{ id: 'dot', ends: [] }
+		]);
+	});
+});
+
+describe('expandUnits', () => {
+	it('draws a unit once per value, as naut does (testdata/mimic-units, shared with Go)', () => {
+		expect(expandUnits(unitsIn as unknown as MimicDoc)).toEqual(unitsOut);
+	});
+	it('a document with no units comes back as it is', () => {
+		const d: MimicDoc = { canvas: { width: 1, height: 1 }, equipment: [] };
+		expect(expandUnits(d) === d).toBe(true);
+	});
+	it('marks each copy for the editor', () => {
+		const d = expandUnits(unitsIn as unknown as MimicDoc, { mark: true });
+		expect((d.equipment ?? []).map((e) => e.fromUnit ?? '')).toEqual(['', 'filter#1', 'filter#1', 'filter#2', 'filter#2', 'unit2#A', 'unit2#B']);
+	});
+});
+
+describe('pipeCrossings', () => {
+	// A header along y=100 and three drops: one crossing it to a header
+	// below, one ending on it (a tee), one turning a corner on it.
+	const header: [number, number][] = [[0, 100], [400, 100]];
+	const lower: [number, number][] = [[0, 200], [400, 200]];
+	const across: [number, number][] = [[100, 50], [100, 200]];
+	const tee: [number, number][] = [[200, 50], [200, 100]];
+	const corner: [number, number][] = [[300, 50], [300, 100], [380, 100]];
+	it('finds where a drop crosses a header it does not join, header over', () => {
+		expect(pipeCrossings([header, lower, across, tee, corner])).toEqual([{ x: 100, y: 100, over: 0, under: 2 }]);
+	});
+	it('leaves a tee, a corner and a run drawn on another alone', () => {
+		expect(pipeCrossings([header, tee, corner, [[50, 100], [150, 100]]])).toEqual([]);
+	});
+	it('gives a tie in slant to the later pipe', () => {
+		const a: [number, number][] = [[0, 0], [100, 100]];
+		const b: [number, number][] = [[0, 100], [100, 0]];
+		expect(pipeCrossings([a, b])).toEqual([{ x: 50, y: 50, over: 1, under: 0 }]);
+	});
+	it('knows a crossing of a header near (but clear of) an end', () => {
+		expect(pipeCrossings([header, [[13, 50], [13, 150]]]).length).toBe(1);
+		expect(pipeCrossings([header, [[11, 50], [11, 150]]]).length).toBe(0);
+	});
+});
+
+describe('pipeTees', () => {
+	const header: [number, number][] = [[0, 100], [400, 100]];
+	it('dots a drop ending on a header, on the header', () => {
+		expect(pipeTees([header, [[200, 50], [200, 103]]])).toEqual([{ x: 200, y: 100 }]);
+	});
+	it('dots a drop that turns onto a header and runs along it', () => {
+		expect(pipeTees([header, [[300, 50], [300, 100], [380, 100]]]).some((t) => t.x === 300 && t.y === 100)).toBe(true);
+	});
+	it('leaves a crossing, an elbow and a run in two pieces alone', () => {
+		expect(pipeTees([header, [[100, 50], [100, 200]]])).toEqual([]);
+		expect(pipeTees([[[0, 0], [100, 0]], [[100, 0], [100, 100]]])).toEqual([]);
+		expect(pipeTees([[[0, 0], [100, 0]], [[100, 0], [200, 0]]])).toEqual([]);
+	});
+	it('dots three pipes ending at one point', () => {
+		expect(pipeTees([[[0, 0], [100, 0]], [[100, 0], [200, 0]], [[100, 0], [100, 80]]])).toEqual([{ x: 100, y: 0 }]);
+	});
+	it('leaves a drop that stops short of a header alone', () => {
+		expect(pipeTees([header, [[200, 50], [200, 90]]])).toEqual([]);
+	});
+	it('does not dot a drop ending at a header\'s own end', () => {
+		expect(pipeTees([header, [[400, 50], [400, 100]]])).toEqual([]);
 	});
 });

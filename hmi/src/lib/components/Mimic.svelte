@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Renders a MimicDoc live: an SVG underlay of pipe runs, kit components
-	// absolutely placed above it, all scaled to the container width. Feed it
+	// absolutely placed above it, all scaled to the container width (or, with
+	// fit="contain", to the room it has, both ways). Feed it
 	// `frame.tags` and the bindings animate with the process. Pass extra
 	// components through `registry` to place your own equipment — the
 	// built-ins are an easy button, not a wall.
@@ -13,18 +14,21 @@
 	import Sparkline from './Sparkline.svelte';
 	import CommandButton from './CommandButton.svelte';
 	import WriteToggle from './WriteToggle.svelte';
+	import OffPage from './OffPage.svelte';
+	import SetpointGroup from './SetpointGroup.svelte';
 	import Pipe from './Pipe.svelte';
-	import { BUILTIN_PORTS, makeGetPort, partRect, pointsToPath, resolveBindings, resolveRuntimePorts, routedPoints } from '../mimic.js';
+	import { BUILTIN_PORTS, brokenPipes, expandUnits, makeGetPort, partRect, pipeCrossings, pipeTees, CROSSED_MANY, type PipeCrossing, pointsToPath, resolveBindings, resolveRuntimePorts, routedPoints } from '../mimic.js';
 	import type { EquipmentBox, MimicDoc, MimicEquipment, MimicLabel, MimicLook } from '../mimic.js';
 
 	let {
-		doc,
+		doc: source,
 		tags = {},
 		registry = {},
 		onequipmentclick,
 		write,
 		selected = null,
 		minScale = 0,
+		fit = 'width',
 		look
 	}: {
 		doc: MimicDoc;
@@ -57,10 +61,25 @@
 		 * container width.
 		 */
 		minScale?: number;
+		/**
+		 * How the drawing meets its container. `'width'` (the default): scaled
+		 * to the container's width, as tall as that makes it, so a tall
+		 * drawing runs on below and the page scrolls. `'contain'`: the whole
+		 * drawing at once, scaled to fit the container's width and the height
+		 * from the mimic's top to the container's bottom, and centred across.
+		 * For an overview that must show everything without scrolling (naut's
+		 * own screens use it). The container needs a height of its own (a
+		 * `flex: 1` main in a full-height shell); in one that grows with its
+		 * content this is the same as `'width'`.
+		 */
+		fit?: 'width' | 'contain';
 	} = $props();
+	/** The document with its units drawn out (expandUnits): everything below
+	 * works on this, so a repeated filter cell is one more piece of equipment. */
+	const doc = $derived(expandUnits(source));
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const builtin: Record<string, Component<any>> = { Tank, Heater, Pump, Valve, Gauge, Sparkline, CommandButton, WriteToggle };
+	const builtin: Record<string, Component<any>> = { Tank, Heater, Pump, Valve, Gauge, Sparkline, CommandButton, WriteToggle, OffPage, SetpointGroup };
 	const components = $derived({ ...builtin, ...registry });
 
 	// Scale the logical canvas to the container width (height follows),
@@ -68,18 +87,46 @@
 	// shrinking the canvas further.
 	let host = $state<HTMLDivElement | null>(null);
 	let frameWidth = $state(0);
+	/** fit="contain": the height from the mimic's top to the bottom of its
+	 * container's content box, measured with the mimic itself folded to no
+	 * height for the moment of the reading: a container with a height of its
+	 * own gives its room, one that grows with its content gives none (and
+	 * the width rules). 0 = not measured, or no room. */
+	let roomHeight = $state(0);
 	$effect(() => {
 		if (!host) return;
 		const el = host;
-		const update = () => (frameWidth = el.clientWidth);
+		const box = el.parentElement;
+		const contain = fit === 'contain';
+		const update = () => {
+			frameWidth = el.clientWidth;
+			if (!contain || !box) return;
+			const was = el.style.height;
+			const scrolled = box.scrollTop;
+			el.style.height = '0px';
+			const pr = box.getBoundingClientRect();
+			const pb = parseFloat(getComputedStyle(box).paddingBottom) || 0;
+			const bottom = pr.top + box.clientTop + box.clientHeight - pb;
+			const room = Math.floor(bottom - el.getBoundingClientRect().top);
+			el.style.height = was;
+			box.scrollTop = scrolled;
+			// less than a strip is no room at all: the container grows with us
+			roomHeight = room >= 48 ? room : 0;
+		};
 		update();
 		const ro = new ResizeObserver(update);
 		ro.observe(el);
+		if (contain && box) ro.observe(box);
 		return () => ro.disconnect();
 	});
-	const rawScale = $derived(frameWidth ? frameWidth / doc.canvas.width : 1);
+	const widthScale = $derived(frameWidth ? frameWidth / doc.canvas.width : 1);
+	const rawScale = $derived(
+		fit === 'contain' && roomHeight > 0 ? Math.min(widthScale, roomHeight / doc.canvas.height) : widthScale
+	);
 	const floored = $derived(minScale > 0 && frameWidth > 0 && rawScale < minScale);
 	const scale = $derived(floored ? minScale : rawScale);
+	/** Left offset that centres a drawing narrower than its frame (contain). */
+	const inset = $derived(floored || !frameWidth ? 0 : Math.max(0, (frameWidth - doc.canvas.width * rawScale) / 2));
 
 	// A bound label's live value (MimicLabel.bind), resolved through the same
 	// resolveBindings() path equipment bindings use — one mechanism, "!"
@@ -105,6 +152,8 @@
 		...(eq.label !== undefined ? { label: eq.label } : {}),
 		...(eq.props ?? {}),
 		...resolveBindings(eq.bind, tags),
+		// a SetpointGroup reads the tags its items name
+		...(eq.component === 'SetpointGroup' ? { tags } : {}),
 		write: write ?? readOnly
 	});
 	const readOnly = async (): Promise<string | null> => 'This screen is read-only';
@@ -183,14 +232,66 @@
 	 * the fresh box on every call). */
 	const pipePaths = $derived.by(() => {
 		void boxVersion;
-		return (doc.pipes ?? []).map((p) => ({ pipe: p, d: pointsToPath(routedPoints(p, getPort)) }));
+		return (doc.pipes ?? []).map((p) => {
+			const pts = routedPoints(p, getPort);
+			return { pipe: p, pts, d: pointsToPath(pts) };
+		});
+	});
+
+	/** Where pipes cross without joining. Drawn as on a P&ID: the pipe
+	 * passing over (the flatter one, a header) stays whole and the other is
+	 * broken either side of it, so a crossing never reads as the tee the
+	 * layered walls would otherwise make of it. The under pipe is masked out
+	 * of a small square on each of its crossings: the over pipe's walls,
+	 * which its bore would have cut, show whole, with a clear gap either
+	 * side. */
+	const crossings = $derived(pipeCrossings(pipePaths.map((p) => p.pts)));
+	/** Where a branch joins a run: a dot, as on a schematic (pipeTees). */
+	const tees = $derived(pipeTees(pipePaths.map((p) => p.pts)));
+	const uid = $props.id();
+	/** The crossings each pipe passes under, by its index: its mask. */
+	const unders = $derived.by(() => {
+		const m = new Map<number, PipeCrossing[]>();
+		for (const c of crossings) m.set(c.under, [...(m.get(c.under) ?? []), c]);
+		return m;
+	});
+	/** Pipes that pass under three or more others, most first, as JSON on
+	 * the root for `naut check`'s render: a drop crossing a stack of
+	 * headers to reach its own can't be traced by eye. Absent when none. */
+	const crossed = $derived.by(() => {
+		const many = [...unders]
+			.filter(([, cs]) => cs.length >= CROSSED_MANY)
+			.map(([i, cs]) => ({ id: pipePaths[i].pipe.id, n: cs.length }))
+			.sort((a, b) => b.n - a.n);
+		return many.length > 0 ? JSON.stringify(many) : undefined;
+	});
+	/** Half the side of a crossing's square: half the over pipe's 10 px
+	 * wall plus a 6 px gap the under pipe stops short by, so a crossing
+	 * reads as one at the size an operator sees it. */
+	const XING = 11;
+
+	/** Pipes that draw nothing (an end that isn't there, or no length), as
+	 * JSON on the root for `naut check`'s render; absent when there are none. */
+	const broken = $derived.by(() => {
+		void boxVersion;
+		const b = brokenPipes(doc.pipes ?? [], getPort);
+		return b.length > 0 ? JSON.stringify(b) : undefined;
 	});
 
 	/** Paint order for the pipe network — see the junction note in Pipe.svelte. */
 	const PIPE_LAYERS = ['wall', 'bore', 'flow'] as const;
 </script>
 
-<div class="mimic" class:scrolling={floored} bind:this={host} style="height: {doc.canvas.height * scale}px">
+<div
+	class="mimic"
+	class:scrolling={floored}
+	bind:this={host}
+	data-broken-pipes={broken}
+	data-crossed={crossed}
+	data-scale={scale.toFixed(3)}
+	data-canvas="{doc.canvas.width}x{doc.canvas.height}"
+	style="height: {doc.canvas.height * scale}px"
+>
 	<div
 		class="scroll-host"
 		style:width={floored ? `${doc.canvas.width * scale}px` : undefined}
@@ -198,7 +299,7 @@
 	>
 		<div
 			class="canvas"
-			style="width: {doc.canvas.width}px; height: {doc.canvas.height}px; transform: scale({scale})"
+			style="width: {doc.canvas.width}px; height: {doc.canvas.height}px; left: {inset}px; transform: scale({scale})"
 		>
 			<svg
 				class="pipes"
@@ -212,16 +313,34 @@
 				     bore merges into the main's instead of the later pipe's
 				     background-coloured bore punching a slot across the earlier
 				     pipe's wall. See the junction note in Pipe.svelte. -->
+				{#if unders.size > 0}
+					<defs>
+						{#each [...unders] as [p, cs] (p)}
+							<mask id="{uid}-u{p}" maskUnits="userSpaceOnUse" x="0" y="0" width={doc.canvas.width} height={doc.canvas.height}>
+								<rect x="0" y="0" width={doc.canvas.width} height={doc.canvas.height} fill="white" />
+								{#each cs as c, i (i)}
+									<rect x={c.x - XING} y={c.y - XING} width={XING * 2} height={XING * 2} fill="black" />
+								{/each}
+							</mask>
+						{/each}
+					</defs>
+				{/if}
 				{#each PIPE_LAYERS as layer (layer)}
-					{#each pipePaths as { pipe: p, d } (p.id)}
-						<Pipe
-							{d}
-							{...(p.color !== undefined ? { color: p.color } : {})}
-							{...(p.props ?? {})}
-							{...resolveBindings(p.bind, tags)}
-							{layer}
-						/>
+					{#each pipePaths as { pipe: p, d }, i (p.id)}
+						<g mask={unders.has(i) ? `url(#${uid}-u${i})` : undefined} data-pipe={layer === 'wall' ? p.id : undefined}>
+							<Pipe
+								{d}
+								{...(p.color !== undefined ? { color: p.color } : {})}
+								{...(p.props ?? {})}
+								{...resolveBindings(p.bind, tags)}
+								{layer}
+								look={drawLook}
+							/>
+						</g>
 					{/each}
+				{/each}
+				{#each tees as t, i (i)}
+					<circle class="tee" cx={t.x} cy={t.y} r={drawLook === 'isa101' ? 5 : 7} fill="var(--pipe-wall, var(--edge, #7a7973))" />
 				{/each}
 			</svg>
 
@@ -379,11 +498,18 @@
 		font-size: var(--font-2xs);
 		font-family: var(--mono, monospace);
 	}
+	/* A label set on a line breaks the line, as a line label does on a
+	   P&ID: a patch of the bore colour behind the text keeps a pipe from
+	   running through the letters, and is invisible anywhere else. */
 	.lbl {
 		position: absolute;
 		font-size: var(--font-2xs);
 		color: var(--muted, #8b949e);
 		white-space: nowrap;
+		background: var(--pipe-bore, var(--bg, transparent));
+		padding: 0 3px;
+		margin-left: -3px;
+		border-radius: 3px;
 	}
 	/* A bound label reads as a readout chip: the static text stays muted like
 	   any label, the live value steps up to ink on a --surface-2 pill. */

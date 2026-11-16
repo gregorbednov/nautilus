@@ -2,7 +2,130 @@
 
 ## Unreleased
 
+### Changed
+
+- **Pipes on an ISA-101 screen are single lines.** `<Mimic>` draws a pipe
+  as one 4 px line when its look is `isa101` (the default), as a P&ID
+  draws a process line, the flow dashes on it; the walled tube stays for
+  `look="realistic"` and for a `<Pipe>` drawn on its own. Five headers
+  under a row of filters read as five lines, not a band of tubes. Tee
+  dots are 10 px on a line.
+
+### Added
+
+- **A pipe through a label is reported.** `<Mimic>` marks each pipe's
+  line (`data-pipe`), and `naut check`'s render pass reports a tag or a
+  reading on the drawing with a pipe running through it, where the line
+  shows (a pipe under an instrument's bubble is hidden by it, and isn't
+  reported). `naut check` also reports a key a kit component doesn't
+  take: a binding to a prop it doesn't have (`running` on a `Valve`), a
+  prop put beside `props` instead of in it (`"openPct": 50`). Both
+  showed nothing, without a word (screen evals, arm J).
+
+- **`SetpointGroup`.** A built-in mimic component: a titled group of
+  setpoint fields that reads and writes the tags its `items` name and is
+  as tall as its fields, so no field spills out of its box. `naut check`
+  checks the items' tags; the editor's palette has it. (Screen evals, the
+  batch skid: every setpoint shown and writable in 11 of 12 runs that had
+  it, 4 of 6 without.)
+
 ### Fixed
+
+- **`Histogram`: the last tick no longer prints over the unit.** A tick
+  label that would reach the unit at the right end of the axis is left
+  out (`28` over `ms` in the lift station's scan time distribution, found
+  by `naut check`'s new text-over-text warning).
+
+### Added
+
+- **`OffPage`: a P&ID's off-page connector.** A built-in mimic component:
+  the arrow a line runs into where the drawing stops showing it, named
+  for where it goes (`label: "TO FILTER GALLERY"`, `dir`: the way it
+  points), for a line that goes on to another screen. Ports `top`,
+  `left`, `right`, `bottom`.
+
+- **What an operator scrolls to reach, reported.** `naut check`'s render
+  warns of controls and text that sit mostly below the bottom of a
+  1920×1080 window, or are hidden in a box that scrolls or clips (a
+  setpoint panel spilling out of its box on a mimic counts), naming
+  them. `/components` is exempt. The text-over-text check also counts
+  what's in a field, so a label drawn over a setpoint box is reported.
+
+- **Text drawn over text, reported.** `naut check`'s render warns of a
+  label drawn over another (a tag over the next valve's state, one
+  connector's name over the next), naming the pairs. An `OffPage` with no
+  `width` is as wide as its label.
+
+- **Pipes that can't be traced, reported.** `<Mimic>` lists a pipe that
+  passes under three or more others (`CROSSED_MANY`) on its root
+  (`data-crossed`), and `naut check`'s render warns of it with what to do:
+  headers on the side their lines leave from, nearest first in the order
+  the drops reach them, every drop still run to its header.
+
+- **Tees dotted, crossings gapped.** Where a pipe ends on another run (or
+  turns onto it), `<Mimic>` and the mimic editor draw a dot on the run, as
+  a schematic marks a connection; where two pipes cross without joining,
+  the under pipe now stops 6 px clear of the over pipe's walls (masked,
+  not redrawn, so the over pipe has no seams). At the size an operator
+  sees a screen, a tee and a crossing had looked alike: a line meeting a
+  line. `pipeTees(paths)` finds them; two pipes meeting end to end (an
+  elbow) get no dot.
+
+- **`/components`: every component in every state.** naut's screens get a
+  page that draws each of the project's own components in each of the
+  `examples` its `{Name}.component.json` gives (name → props), at the box
+  a screen gives it, and `naut check` renders it, so a state that throws or
+  reads badly shows before the plant reaches it. A screen component with
+  no examples is a `naut check` warning. The mimic editor's preview pane
+  now reads a `preview` written flat (the props themselves, as the guide
+  showed it) and falls back to the first example.
+
+- **`--muted` text reaches AA contrast.** `#898781` → `#8d8b85` (dark) and
+  `#74726a` → `#68665e` (light): 4.6:1 on `--surface-2`, the lowest ground,
+  where it was 4.4:1 and 3.9:1. The palette test now holds every text
+  token (`--ink`, `--ink-2`, `--muted`) to 4.5:1 on every ground, as
+  `naut check` holds a screen's text.
+
+- **Crossings drawn as crossings.** Where two pipes cross without either
+  ending there, `<Mimic>` (and the mimic editor) breaks the steeper one
+  either side of the flatter one, as P&ID drafting does, instead of
+  letting the layered walls merge them into what reads as a tee. Headers
+  with drops crossing under them no longer turn into a grid of boxes.
+  `pipeCrossings(paths)` finds them. A plain label now has a patch of the
+  bore colour behind its text, so a line under it breaks for it.
+
+- **`<Mimic fit="contain">`: the whole drawing at once.** Scaled to fit
+  its container's width and the height from its top to the container's
+  bottom, and centred across, so an overview never runs off the bottom of
+  the window. naut's own pages for `*.mimic.json` use it. The default,
+  `fit="width"`, is unchanged. The root carries `data-scale` and
+  `data-canvas`, which `naut check` reads to say when a drawing runs off
+  the bottom of a 1920×1080 window or is drawn too small to read.
+
+- **Units: what repeats, written once.** A mimic's `units` draws its
+  equipment, pipes and labels once per value of `each`, `{n}` filled in
+  and each copy moved by `step`. `<Mimic>` draws them out with
+  `expandUnits(doc)`, which naut's build and `naut check` match (a shared
+  fixture, `testdata/mimic-units`); the mimic editor shows the copies
+  outlined and locked.
+
+- **`brokenPipes(pipes, getPort)`** lists the pipes that draw nothing and
+  why: an anchored end whose equipment or port isn't there
+  (`"F1_INF.a"`), or ends and points that all land on one spot.
+  `<Mimic>` puts the list on its root as `data-broken-pipes` (JSON) when
+  there are any, which `naut check` reads when it renders a screen.
+
+### Fixed
+
+- **ScanDiagnostics before the first scan.** A frame from a runtime that
+  hasn't scanned yet (or a standby replica, which doesn't) used to carry
+  `recent: null`, and the panel threw. The runtime now sends `[]`, and the
+  panel reads a missing history as empty either way.
+
+- **A pipe with no points no longer blanks the screen.** A pipe anchored
+  at both ends (`from` and `to`) with no bends may leave `points` out, as a
+  scene's pipe may; `<Mimic>` reads it as `[]`. One such pipe used to throw
+  and leave the whole screen blank.
 
 - **A project component fills its box.** `<Mimic>` gives equipment placed
   from `registry` a box of the document's `width` and `height`, so a

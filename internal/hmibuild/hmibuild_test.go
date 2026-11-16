@@ -1,6 +1,7 @@
 package hmibuild
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -33,8 +34,8 @@ func TestBuildsTheLiftStationApp(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
-	if got := strings.Join(res.Pages, " "); got != "/ /3d /diagnostics" {
-		t.Errorf("pages = %q, want / /3d /diagnostics", got)
+	if got := strings.Join(res.Pages, " "); got != "/ /3d /diagnostics /components" {
+		t.Errorf("pages = %q, want / /3d /diagnostics /components (naut's components page)", got)
 	}
 	for _, f := range []string{"index.html", "app.js", "app.css", "models/submersible-pump.glb"} {
 		if len(res.Files[f]) == 0 {
@@ -60,8 +61,9 @@ func TestBuildsTheDefaultAppFromMimics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(res.Pages, " "); got != "/ /pumps" {
-		t.Errorf("pages = %q, want / /pumps", got)
+	// and the project's own FilterCell on the components page
+	if got := strings.Join(res.Pages, " "); got != "/ /pumps /components" {
+		t.Errorf("pages = %q, want / /pumps /components", got)
 	}
 	if !strings.Contains(string(res.Files["index.html"]), "<title>Filter gallery</title>") {
 		t.Errorf("index.html: %s", res.Files["index.html"])
@@ -94,6 +96,160 @@ func TestBuildErrorsSayWhereAndWhy(t *testing.T) {
 			}
 		})
 	}
+}
+
+// An app with no +layout.svelte: its page has an empty layout chain, [],
+// never null (the router maps over it; bw01 sonnet-1 and haiku-2 got a 500).
+func TestAnAppWithNoLayout(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "hmi/src/routes/+page.svelte", "<p>hi</p>\n")
+	res, err := Build(Options{Project: dir, App: filepath.Join(dir, "hmi")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all strings.Builder
+	for name, b := range res.Files {
+		if strings.HasSuffix(name, ".js") {
+			all.Write(b)
+		}
+	}
+	js := all.String()
+	if !strings.Contains(js, "layouts: []") || strings.Contains(js, "layouts: null") {
+		t.Errorf("the route's layout chain is not []: %q", excerpt(js, "layouts:"))
+	}
+}
+
+// A project's own component declares its pipe ports in a
+// {Name}.component.json; the screen naut builds carries them on the
+// equipment, or every pipe anchored to it draws nothing (bw01 fable-2).
+// An instance's own ports, even none, stay as they are.
+func TestASidecarsPortsReachTheScreen(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "screens/gallery.mimic.json", `{"name":"Gallery","canvas":{"width":400,"height":300},
+		"equipment":[{"id":"F1","component":"FilterCell","x":100,"y":10},
+			{"id":"F2","component":"FilterCell","x":200,"y":10,"ports":[]},
+			{"id":"T1","component":"Tank","x":10,"y":10}],
+		"pipes":[{"id":"p1","from":{"equip":"T1","port":"right"},"to":{"equip":"F1","port":"inlet_zz"}}]}`)
+	write(t, dir, "screens/FilterCell.svelte", "<div>cell</div>\n")
+	write(t, dir, "screens/FilterCell.component.json", `{"ports":[{"name":"inlet_zz","part":"cell","x":0.5,"y":0}]}`)
+	// a deeper one of the same name loses, as it does in the editor
+	write(t, dir, "screens/old/FilterCell.component.json", `{"ports":[{"name":"stale_zz","x":0,"y":0}]}`)
+	res, err := Build(Options{Project: dir, Title: "Gallery"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all strings.Builder
+	for name, b := range res.Files {
+		if strings.HasSuffix(name, ".js") {
+			all.Write(b)
+		}
+	}
+	js := all.String()
+	if n := strings.Count(js, "inlet_zz"); n != 2 {
+		t.Errorf("inlet_zz appears %d times, want 2 (F1's port and the pipe end): %q", n, excerpt(js, "inlet_zz"))
+	}
+	if strings.Contains(js, "stale_zz") {
+		t.Errorf("the deeper sidecar's ports were used")
+	}
+}
+
+// A component only a unit uses is registered, and each copy carries its
+// sidecar's ports: the screen draws the unit's pipes.
+func TestAUnitBuildsWithItsComponentAndPorts(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "screens/g.mimic.json", `{"canvas":{"width":900,"height":300},
+		"units":[{"each":[1,2],"step":[300,0],
+			"equipment":[{"id":"F{n}","component":"OnlyInUnit","x":10,"y":10}],
+			"pipes":[{"id":"p{n}","points":[[0,0]],"to":{"equip":"F{n}","port":"inlet_qq"}}]}]}`)
+	write(t, dir, "screens/OnlyInUnit.svelte", "<div>cell</div>\n")
+	write(t, dir, "screens/OnlyInUnit.component.json", `{"ports":[{"name":"inlet_qq","x":0.5,"y":0}]}`)
+	res, err := Build(Options{Project: dir, Title: "g"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all strings.Builder
+	for name, b := range res.Files {
+		if strings.HasSuffix(name, ".js") {
+			all.Write(b)
+		}
+	}
+	js := all.String()
+	// two copies' ports, two pipe ends
+	if n := strings.Count(js, "inlet_qq"); n != 4 {
+		t.Errorf("inlet_qq appears %d times, want 4: %q", n, excerpt(js, "inlet_qq"))
+	}
+	// the doc's own "units": [...] (WriteNumber's `units` prop is in the kit)
+	if strings.Contains(js, `"units":[`) || strings.Contains(js, "F{n}") {
+		t.Errorf("the unit wasn't drawn out: %q", excerpt(js, "units"))
+	}
+}
+
+// naut's own screens get a /components page: each of the project's
+// components in each example its sidecar gives, at the box a screen gives
+// it; a component with none is drawn once, with no props.
+func TestComponentsPageDrawsEachExample(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "screens/g.mimic.json", `{"canvas":{"width":900,"height":300},"equipment":[
+		{"id":"V1","component":"XValve","x":10,"y":10,"width":40,"height":60},
+		{"id":"V2","component":"XValve","x":90,"y":10},
+		{"id":"M1","component":"Motor","x":200,"y":10},
+		{"id":"T1","component":"Tank","x":300,"y":10}]}`)
+	write(t, dir, "screens/XValve.svelte", "<script>let { open = false } = $props();</script><div>{open ? 'open_qq' : 'shut_qq'}</div>\n")
+	write(t, dir, "screens/XValve.component.json", `{"examples":{"opened_qq":{"open":true},"closed_qq":{"open":false}}}`)
+	write(t, dir, "screens/Motor.svelte", "<div>motor</div>\n")
+	res, err := Build(Options{Project: dir, Title: "g"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(res.Pages, " "); got != "/ /components" {
+		t.Errorf("pages = %q, want / /components", got)
+	}
+	var all strings.Builder
+	for name, b := range res.Files {
+		if strings.HasSuffix(name, ".js") {
+			all.Write(b)
+		}
+	}
+	js := all.String()
+	for _, want := range []string{"opened_qq", "closed_qq", `"Motor"`, "width: 40, height: 60"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("the components page has no %s", want)
+		}
+	}
+	if strings.Contains(js, `name: "Tank"`) {
+		t.Error("a kit component is on the project's components page")
+	}
+}
+
+func TestWithSidecarPorts(t *testing.T) {
+	ports := map[string]json.RawMessage{"Cell": json.RawMessage(`[{"name":"a","x":0,"y":0}]`), "Tank": json.RawMessage(`[]`)}
+	doc := []byte(`{"equipment":[{"id":"c1","component":"Cell"},{"id":"c2","component":"Cell","ports":[]},{"id":"t","component":"Tank"}],"pipes":[]}`)
+	var got struct {
+		Equipment []struct {
+			ID    string          `json:"id"`
+			Ports json.RawMessage `json:"ports"`
+		} `json:"equipment"`
+	}
+	if err := json.Unmarshal(withSidecarPorts(doc, ports), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"c1": `[{"name":"a","x":0,"y":0}]`, "c2": `[]`, "t": ``}
+	for _, e := range got.Equipment {
+		if string(e.Ports) != want[e.ID] {
+			t.Errorf("%s ports = %s, want %s", e.ID, e.Ports, want[e.ID])
+		}
+	}
+	if string(withSidecarPorts([]byte("not json"), ports)) != "not json" {
+		t.Errorf("an unreadable doc changed")
+	}
+}
+
+func excerpt(s, at string) string {
+	i := strings.Index(s, at)
+	if i < 0 {
+		return "(not found)"
+	}
+	return s[i:min(len(s), i+60)]
 }
 
 func TestServerCodeIsRefused(t *testing.T) {

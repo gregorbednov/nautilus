@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { compileComponents, type ReadFile } from "./web/componentCompiler";
 import { RUNTIME_MODULES } from "./web/runtimeModules";
+import { isScenePart, sceneHostPath, sceneHostSource } from "./componentPreviewLogic";
 
 const FIXTURES = path.join(__dirname, "..", "src", "testdata", "user-components");
 const LIFT = path.join(__dirname, "..", "..", "..", "examples", "lift-station", "hmi", "src", "lib");
@@ -31,16 +32,21 @@ type Registered = Record<string, { mount: unknown }>;
 
 /** Runs a linked script the way the webview does, with Svelte's client
  * runtime (and an empty kit) as window.__NX_RT__. */
-async function run(code: string): Promise<{ registered: Registered | undefined; events: string[]; errors: unknown[] }> {
+async function run(
+  code: string,
+  override: Record<string, unknown> = {},
+  extra: Record<string, unknown> = {}
+): Promise<{ registered: Registered | undefined; events: string[]; errors: unknown[] }> {
   const rt: Record<string, unknown> = {};
   for (const spec of RUNTIME_MODULES) {
     rt[spec] = spec.startsWith("svelte") ? await import(spec === "svelte" ? "svelte/internal/client" : spec).catch(() => ({})) : {};
   }
   // `svelte` itself: mount/unmount, from the client build (Node would pick the server one).
   rt.svelte = await import(path.join(path.dirname(require.resolve("svelte/package.json")), "src", "index-client.js"));
+  Object.assign(rt, override);
   const events: string[] = [];
   const errors: unknown[] = [];
-  const window: Record<string, unknown> = { __NX_RT__: rt, dispatchEvent: (e: { type: string }) => events.push(e.type) };
+  const window: Record<string, unknown> = { ...extra, __NX_RT__: rt, dispatchEvent: (e: { type: string }) => events.push(e.type) };
   const console = { error: (...a: unknown[]) => errors.push(a) };
   new Function("window", "console", "document", "Event", code)(window, console, {}, class {
     constructor(public type: string) {}
@@ -139,4 +145,74 @@ test("nothing usable: the script still registers (nothing) and says it is ready"
   const { registered, events } = await run(result.code);
   assert.deepEqual(registered, {});
   assert.deepEqual(events, ["nx:user-components-ready"]);
+});
+
+test("a runtime export assigned after the script loads is read live", async () => {
+  // Svelte sets $.window on the first mount: a copy of the runtime module
+  // taken when the script loaded left <svelte:window> with undefined.
+  let late: string | undefined;
+  const store = Object.freeze({
+    get late() {
+      return late;
+    },
+  });
+  const files = {
+    "/p/probe.js": 'import * as store from "svelte/store"; window.probe.read = () => store.late;',
+    "/p/A.svelte": '<script>import "./probe.js";</script><p>a</p>',
+  };
+  const result = await compileComponents({ A: "/p/A.svelte" }, memory(files));
+  assert.deepEqual(result.diagnostics, []);
+  const probe: { read?: () => unknown } = {};
+  const { errors } = await run(result.code, { "svelte/store": store }, { probe });
+  assert.deepEqual(errors, []);
+  assert.equal(probe.read?.(), undefined);
+  late = "set";
+  assert.equal(probe.read?.(), "set");
+});
+
+test("a project barrel can export * from a runtime module", async () => {
+  const store = Object.freeze({ writable: () => "w", readable: () => "r" });
+  const files = {
+    "/p/barrel.js": 'export * from "svelte/store";',
+    "/p/probe.js": 'import * as b from "./barrel.js"; window.probe.keys = Object.keys(b).sort(); window.probe.w = b.writable();',
+    "/p/A.svelte": '<script>import "./probe.js";</script><p>a</p>',
+  };
+  const result = await compileComponents({ A: "/p/A.svelte" }, memory(files));
+  assert.deepEqual(result.diagnostics, []);
+  const probe: { keys?: string[]; w?: string } = {};
+  const { errors } = await run(result.code, { "svelte/store": store }, { probe });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(probe.keys, ["readable", "writable"]);
+  assert.equal(probe.w, "w");
+});
+
+test("a part of a 3D scene compiles inside its host, on the 3D runtime", async () => {
+  const rain = path.join(LIFT, "Rain.svelte");
+  assert.equal(isScenePart(fs.readFileSync(rain, "utf8")), true);
+  const host = sceneHostPath(rain);
+  const result = await compileComponents({ Rain: host }, disk, { sources: { [host]: sceneHostSource(rain) }, scene: true });
+  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(result.built, ["Rain"]);
+  assert.equal(result.scene, true);
+  for (const spec of ["three", "@threlte/core", "three/examples/jsm/controls/OrbitControls.js"]) {
+    assert.ok(result.code.includes(JSON.stringify("rt:" + spec)), spec);
+  }
+  assert.ok(result.code.includes(JSON.stringify(rain)), "the part itself is in the bundle");
+});
+
+test("the 3D runtime is for the preview: elsewhere an import of it leaves that component out", async () => {
+  const files = {
+    "/p/Good.svelte": "<p>ok</p>",
+    "/p/Spin.svelte": '<script>import { Canvas } from "@threlte/core"; import { Vector3 } from "three";</script><Canvas />',
+  };
+  const mimic = await compileComponents({ Good: "/p/Good.svelte", Spin: "/p/Spin.svelte" }, memory(files));
+  assert.deepEqual(mimic.built, ["Good"]);
+  assert.equal(mimic.scene, false);
+  assert.match(mimic.diagnostics[0].message, /"(three|@threlte\/core)", which the playground loads only in the component preview/);
+  assert.equal(typeof (await run(mimic.code)).registered?.Good?.mount, "function");
+  // In the preview a component with its own canvas builds, and asks for the runtime.
+  const preview = await compileComponents({ Spin: "/p/Spin.svelte" }, memory(files), { scene: true });
+  assert.deepEqual(preview.built, ["Spin"]);
+  assert.equal(preview.scene, true);
+  assert.equal((await compileComponents({ Good: "/p/Good.svelte" }, memory(files), { scene: true })).scene, false);
 });

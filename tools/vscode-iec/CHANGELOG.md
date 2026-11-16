@@ -13,6 +13,45 @@ of a ladder branch (its ✕) needs a naut newer than 0.21.0, whose
 
 ### Added
 
+- **Mimic editor: `SetpointGroup` in the palette.** The kit's setpoint
+  panel, with sample props; it reads live values.
+
+- **Mimic editor: `OffPage` in the palette.** The kit's off-page
+  connector, with its four ports.
+
+- **Mimic editor: pipes as the screen draws them.** One line on an
+  ISA-101 mimic, the walled tube on a realistic one, as the kit's
+  `<Mimic>` now draws them.
+
+- **Mimic editor: tees and crossings as the screen draws them.** A pipe
+  ending on another run gets a dot there, and a pipe crossing under a
+  header is broken either side of it, as the kit's `<Mimic>` draws them,
+  so the editor shows which drop joins which header.
+
+- **Component preview: SVG parts, and the props a component needs.** A
+  component whose root is a `<g>` or a `<path>` (a part drawn inside a
+  page's own `<svg>`) rendered as an empty 0 × 0 stage. It is now shown
+  in an svg fitted to what it draws, marked "svg part". And when the
+  component has props with no default and no sample value, the pane
+  names them, on the stage and in the Props strip, where a click on one
+  starts its sample value.
+
+- **Component preview: 3D parts.** A part of a 3D scene (a component
+  that imports Threlte and has no canvas of its own: rain, a light, a
+  mesh) is shown in a bare scene: a 1 m grid on the ground, light, and a
+  camera that starts on the whole part and orbits with a drag, zooms with
+  the wheel. Its props are sample values like any other component's. On a
+  desktop it is built with the project's own Threlte and three; in the
+  playground, on a 3D runtime (three, `@threlte/core`,
+  `@threlte/extras`) the pane loads when such a part is opened.
+
+- **Component preview: overlay panels.** A panel that is closed until a
+  prop opens it (`open`, `selected`) drew nothing and the pane had
+  nothing to suggest: it now names the props to try, each a click away.
+  Opened, a panel positioned over its page (absolute or fixed) collapsed
+  to a sliver on a 0 × 0 stage: it is shown over a frame the size of the
+  pane, marked "overlay".
+
 - **The component preview in the playground.** A `{Name}.svelte` (or its
   `.component.json`) opens its live preview in the browser too, compiled
   with the playground's Svelte as you type, with its sample props and
@@ -89,6 +128,42 @@ of a ladder branch (its ✕) needs a naut newer than 0.21.0, whose
 
 ### Fixed
 
+- **Ladder: live values inside a FUNCTION_BLOCK.** A block's rungs name
+  its pins and locals bare (`Sealed`), but on the controller they are
+  members of an instance (`tank.Sealed`), so the diagram showed nothing
+  for a block's internal variables — and showed a controller tag's value
+  for any pin that happened to share its name. The rungs now read from
+  the instance the body monitors, the same choice as the text editor's
+  CodeLens: auto-picked when the project declares one instance, and
+  switched from a chip on the block's heading when it declares more. A
+  VAR_EXTERNAL name is still the controller's tag. This is the PLC-Lab
+  example's shape, and an imported Logix AOI's.
+
+- **Ladder: Toggle Bit / Force inside a FUNCTION_BLOCK.** T, Ctrl+T and
+  the right-click live actions on a block's pin or local acted on a
+  controller tag of the same name. They now act only on a VAR_EXTERNAL.
+
+- **Waiting looks like waiting, not like a failure.** A custom component
+  still being built shows as a quiet "compiling…" placeholder, not the
+  red `Name?` chip that means it is missing. In the playground, which
+  compiles components in the browser, that takes a few seconds the first
+  time. While the playground's controller compiles and starts the
+  project, the live pills and the status bar say "starting…", not
+  "offline"; a project that fails to start says "offline" at once.
+
+- **Custom components that import a Svelte library.** On a desktop, a
+  project component importing a package that exports only under the
+  `svelte` condition (Threlte, most Svelte component libraries) failed
+  with "Could not resolve": the build now reads that condition.
+- **`<svelte:window>` in the playground's first component.** In the
+  playground, a project component using `<svelte:window>`,
+  `<svelte:document>` or `<svelte:body>` threw "Cannot read properties of
+  undefined (reading 'addEventListener')" when it was the first one
+  shown, in the preview or on a screen: it read Svelte's runtime as it
+  stood before the first mount.
+- **A mimic whose pipe has no points opens.** A pipe anchored at both ends
+  may leave `points` out; the mimic editor reads it as `[]` and writes the
+  empty list back on the next edit, instead of failing on it.
 - **One broken component no longer blanks a whole screen.** A project
   component that threw when it mounted stopped the rest of the mimic from
   drawing, with nothing said. It now shows why in its own box, and every

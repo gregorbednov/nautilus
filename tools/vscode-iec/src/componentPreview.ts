@@ -39,7 +39,7 @@ import {
   componentNameFromSveltePath,
   parseComponentEntry,
   validatePortList,
-  validatePreviewEntry,
+  previewProps,
 } from "./mimicComponentIndex";
 import {
   COMPONENT_GLOB,
@@ -51,7 +51,7 @@ import {
   writeComponentPortsEdit,
 } from "./mimicComponents";
 import type { UserComponentManager } from "./userComponents";
-import { previewSources, previewTargetForPath } from "./componentPreviewLogic";
+import { previewSources, previewTargetForPath, declaredProps, isScenePart, sceneHostPath, sceneHostSource } from "./componentPreviewLogic";
 import { BUILTIN_COMPONENT_NAMES, BUILTIN_COMPONENT_PORTS } from "./builtinComponents";
 
 const BUILD_DEBOUNCE_MS = 300;
@@ -90,7 +90,7 @@ function previewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, builder:
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:;">
+      content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' 'wasm-unsafe-eval'; img-src ${webview.cspSource} blob: data:; connect-src ${webview.cspSource} blob: data:; worker-src blob:;">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="${styleUri}">
 ${builder.headTags(webview, nonce)}
@@ -111,6 +111,9 @@ export class ComponentPreview implements vscode.Disposable {
   private disposables: vscode.Disposable[] = [];
   private building = false;
   private rebuildQueued = false;
+  /** Whether the last good bundle imports the 3D runtime (a scene part
+   * in its host, or a component with a canvas of its own). */
+  private sceneBundle = false;
   /** Cache-busting generation of the last GOOD bundle; 0 = none yet. */
   private version = 0;
   private diagnostics: ComponentDiagnostic[] = [];
@@ -136,6 +139,8 @@ export class ComponentPreview implements vscode.Disposable {
         if (!this.panel || !this.target) return;
         // Any Svelte buffer: the previewed one, or something it imports.
         if (e.document.uri.path.endsWith(".svelte")) this.scheduleBuild();
+        // The previewed source: its `$props()` may have gained or lost a default.
+        if (!this.target.builtin && e.document.uri.toString() === this.target.uri.toString()) this.scheduleDoc();
         else sidecarChanged(e.document.uri);
       }),
       vscode.window.onDidChangeActiveTextEditor((ed) => {
@@ -288,12 +293,19 @@ export class ComponentPreview implements vscode.Disposable {
     const sidecar = await sidecarLocation(this.index, target.uri, target.name);
     const text = await readText(sidecar);
     const entry = parseComponentEntry(text);
-    const props = validatePreviewEntry(entry.preview) ? (entry.preview.props ?? {}) : {};
+    const props = previewProps(entry);
     // A built-in without a ports override shows the kit's defaults; the
     // first edit writes the whole list, defaults included, to the sidecar.
     const own = validatePortList(entry.ports) ? entry.ports : null;
     const inherited = own === null && target.builtin;
     const ports = own ?? (inherited ? (BUILTIN_COMPONENT_PORTS[target.name] ?? []) : []);
+    // The props the source declares without a default: the pane names the
+    // ones still missing when the component draws nothing.
+    const source = target.builtin ? "" : await readText(target.uri);
+    const declared = declaredProps(source);
+    const needs = declared.filter((p) => p.needed).map((p) => p.name);
+    // The rest: what to try when it draws nothing with its defaults.
+    const optional = declared.filter((p) => !p.needed).map((p) => p.name);
     if (this.target !== target) return; // moved on while reading
     void this.panel.webview.postMessage({
       type: "previewDoc",
@@ -303,6 +315,9 @@ export class ComponentPreview implements vscode.Disposable {
       sidecar: path.basename(sidecar.path),
       hasSidecar: text.trim() !== "",
       props,
+      needs,
+      optional,
+      scenePart: isScenePart(source),
       ports,
       portsInherited: inherited,
       ...(ack === undefined ? {} : { ack }),
@@ -390,13 +405,22 @@ export class ComponentPreview implements vscode.Disposable {
       // Only a bundle that has the component in it replaces the last good
       // one (previewBuild.ts): a compile error leaves the last good render
       // on screen, under the error.
+      // A part of a 3D scene is compiled inside a bare scene of its own
+      // (a file that exists only here), since alone it has no canvas.
+      let entry = target.uri.fsPath;
+      const scene = isScenePart(sources[entry] ?? (await readText(target.uri)));
+      if (scene) {
+        entry = sceneHostPath(target.uri.fsPath);
+        sources[entry] = sceneHostSource(target.uri.fsPath);
+      }
       const t0 = Date.now();
-      const result = await this.builder.build(target.name, target.uri.fsPath, sources);
+      const result = await this.builder.build(target.name, entry, sources);
       logPreview(
         `built ${target.name} in ${Date.now() - t0} ms: built=[${result.built.join(", ")}] diagnostics=${JSON.stringify(result.diagnostics)} sources=${Object.keys(sources).length}`
       );
       if (this.target !== target) return; // retargeted mid-build; the queued rebuild covers it
       if (result.built.includes(target.name)) {
+        this.sceneBundle = !!result.needs3d;
         this.version++;
         this.postBundle();
       }
@@ -419,7 +443,15 @@ export class ComponentPreview implements vscode.Disposable {
     const raw = this.builder.bundleSrc(this.panel.webview);
     const src = raw + (raw.includes("?") ? "&" : "?") + "v=" + this.version;
     logPreview(`bundle v${this.version} -> ${src}`);
-    void this.panel.webview.postMessage({ type: "previewBundle", src, version: this.version });
+    // The playground's 3D runtime (three, Threlte), only for a bundle that
+    // needs it; a desktop bundle carries the project's own.
+    const needs = this.sceneBundle ? this.builder.sceneRuntimeSrc(this.panel.webview) : "";
+    void this.panel.webview.postMessage({
+      type: "previewBundle",
+      src,
+      version: this.version,
+      ...(needs ? { needs: [{ src: needs, provides: "@threlte/core" }] } : {}),
+    });
   }
 
   private postDiagnostics(): void {

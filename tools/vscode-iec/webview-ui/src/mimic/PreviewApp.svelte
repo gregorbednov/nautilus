@@ -60,6 +60,41 @@
 	/** A kit component, rendered from the registry rather than a bundle. */
 	let builtin = $state(false);
 	let props = $state<Record<string, unknown>>({});
+	/** The props the source declares with no default (host-read). */
+	let needs = $state<string[]>([]);
+	/** The props it declares with a default: what to try when it draws
+	 * nothing as it is (a panel closed until `open` or `selected` is set). */
+	let optional = $state<string[]>([]);
+	const untried = $derived(optional.filter((n) => !(n in props)));
+	/** A part of a 3D scene: shown in a bare scene of its own (the host
+	 * compiles it inside one; componentPreviewLogic.ts, sceneHostSource). */
+	let scenePart = $state(false);
+	/** Its roots are all out of flow: shown over a frame (UserIsland). */
+	let overlay = $state(false);
+	/** The frame an overlay lies over: the stage's own room, so the whole
+	 * of it shows at 100% and a panel sized in % has something to take a
+	 * share of. Never smaller than a small page. */
+	let stageEl = $state<HTMLDivElement | null>(null);
+	let frame = $state({ w: 480, h: 360 });
+	const FRAME_MARGIN = 56; // the stage's padding, and a little
+	$effect(() => {
+		if (!stageEl) return;
+		const el = stageEl;
+		const update = () => {
+			const w = Math.max(320, el.clientWidth - FRAME_MARGIN);
+			const h = Math.max(240, el.clientHeight - FRAME_MARGIN);
+			if (w !== frame.w || h !== frame.h) frame = { w, h };
+		};
+		update();
+		const ro = new ResizeObserver(update);
+		ro.observe(el);
+		return () => ro.disconnect();
+	});
+	/** Those of them with no sample value yet. */
+	const missing = $derived(needs.filter((n) => !(n in props)));
+	/** The component is an SVG part (root <g>, <path>…), shown in an svg
+	 * of the pane's own (UserIsland's svgHost). */
+	let svgPart = $state(false);
 	let ports = $state<Port[]>([]);
 	/** The ports shown are the kit's defaults (no sidecar `ports` yet). */
 	let portsInherited = $state(false);
@@ -98,6 +133,9 @@
 				hasSidecar?: boolean;
 				builtin?: boolean;
 				props?: Record<string, unknown>;
+				needs?: string[];
+				optional?: string[];
+				scenePart?: boolean;
 				ports?: Port[];
 				portsInherited?: boolean;
 				ack?: number;
@@ -113,6 +151,9 @@
 				hasSidecar = !!m.hasSidecar;
 				builtin = !!m.builtin;
 				props = m.props ?? {};
+				needs = m.needs ?? [];
+				optional = m.optional ?? [];
+				scenePart = !!m.scenePart;
 				// The host confirms each ports write with a previewDoc carrying
 				// its seq (`ack`). While an edit of ours is still unconfirmed, a
 				// previewDoc's ports are older than what is on screen — the
@@ -135,7 +176,7 @@
 				drag = null;
 				if (selected !== null && selected >= ports.length) selected = null;
 			} else if (m?.type === 'previewBundle' && m.src && m.version) {
-				loadBundle(m.src, m.version);
+				void loadBundle(m.src, m.version, (m as { needs?: unknown }).needs);
 			} else if (m?.type === 'previewDiagnostics') {
 				building = !!m.building;
 				diagnostics = m.diagnostics ?? [];
@@ -172,7 +213,53 @@
 		for (const el of document.head.querySelectorAll('style[id^="svelte-"]')) el.remove();
 	}
 
-	function loadBundle(src: string, v: number) {
+	/** Scripts a bundle runs on that the page does not carry from the
+	 * start (the playground's 3D runtime), each loaded once. */
+	const required = new Map<string, Promise<void>>();
+	function requireScript(src: string): Promise<void> {
+		let p = required.get(src);
+		if (!p) {
+			p = new Promise<void>((resolve, reject) => {
+				const s = document.createElement('script');
+				s.nonce = document.body.dataset.nonce ?? '';
+				s.src = src;
+				s.onload = () => resolve();
+				s.onerror = () => {
+					required.delete(src);
+					reject(new Error(src));
+				};
+				document.head.appendChild(s);
+			});
+			required.set(src, p);
+		}
+		return p;
+	}
+
+	let loading3d = $state(false);
+	let loadSeq = 0;
+	async function loadBundle(src: string, v: number, needs: unknown) {
+		const seq = ++loadSeq;
+		const before = (Array.isArray(needs) ? needs : []).filter(
+			(n): n is { src: string; provides: string } => typeof n?.src === 'string' && typeof n?.provides === 'string'
+		);
+		if (before.length) {
+			loading3d = true;
+			try {
+				await Promise.all(before.map((n) => requireScript(n.src)));
+				// A script that throws as it runs still "loads".
+				const rt = (window as { __NX_RT__?: Record<string, unknown> }).__NX_RT__ ?? {};
+				const absent = before.find((n) => !rt[n.provides]);
+				if (absent) throw new Error(`${absent.src} ran but did not provide ${absent.provides}`);
+			} catch (err) {
+				log(`bundle v${v}: the 3D runtime did not load: ${String(err)}`);
+				if (seq === loadSeq) loadError = 'the 3D runtime failed to load — see the "nautilus preview" output channel';
+				return;
+			} finally {
+				if (seq === loadSeq) loading3d = false;
+			}
+			// A newer bundle arrived while this one waited: it is the one to show.
+			if (seq !== loadSeq) return;
+		}
 		document.getElementById('nx-preview-bundle')?.remove();
 		const s = document.createElement('script');
 		s.id = 'nx-preview-bundle';
@@ -215,6 +302,8 @@
 		return () => ro.disconnect();
 	});
 	const ZOOMS = [0.5, 1, 2, 4];
+	/** A render under this many px each way is "little" (the stage hint). */
+	const SMALL = 24;
 
 	// ── the props strip ──────────────────────────────────────────────────────
 	// Every edit is the whole map, posted to the host, which patches the
@@ -237,6 +326,12 @@
 	}
 	let newName = $state('');
 	let newValue = $state('');
+	let newValueEl = $state<HTMLInputElement | null>(null);
+	/** A missing prop's chip: its name in the add row, the cursor on its value. */
+	function startProp(name: string) {
+		newName = name;
+		newValueEl?.focus();
+	}
 	const newNameOk = $derived(isPropName(newName) && !(newName in props));
 	function addProp() {
 		if (!newNameOk) return;
@@ -413,7 +508,7 @@
 		return { left: r.left + p.x * k + 10, top: r.top + p.y * k - 20 };
 	}
 	const statusText = $derived(
-		builtin ? 'built-in' : building ? 'compiling…' : error ? 'error' : available ? 'live' : component ? 'waiting for the first compile…' : ''
+		builtin ? 'built-in' : building || loading3d ? 'compiling…' : error ? 'error' : available ? 'live' : component ? 'waiting for the first compile…' : ''
 	);
 </script>
 
@@ -435,13 +530,38 @@
 			</button>
 		{/if}
 		{#if box}<span class="size">{box.w} × {box.h}</span>{/if}
+		{#if scenePart && !builtin}
+			<span
+				class="size"
+				data-kind="scene-part"
+				title="A part of a 3D scene (it imports Threlte and has no canvas of its own). Shown here in a bare scene: a 1 m grid on the ground, a light, and a camera you can drag to orbit and scroll to zoom."
+				>3D part</span
+			>
+		{:else if overlay && !builtin}
+			<span
+				class="size"
+				data-kind="overlay"
+				title="Everything at its root is positioned out of flow (absolute or fixed): a panel laid over a page. Shown here over a frame the size of this pane, standing in for the page."
+				>overlay</span
+			>
+		{/if}
+		{#if svgPart && !builtin}
+			<span
+				class="size"
+				data-kind="svg-part"
+				title="Its root is an SVG element (a <g>, a <path>…), a part for a page's own <svg>. Shown here in an svg fitted to what it draws.">svg part</span
+			>
+		{/if}
 		<span class="status" class:s-building={building} class:s-err={!!error && !building} class:s-ok={available && !error && !building}>
 			{statusText}
 		</span>
 		<span class="spacer"></span>
+		<!-- no ports on a 3D part: a scene places it, and ports mode would
+		     take the drag that orbits the camera -->
 		<button
 			class="mode"
 			class:on={portsMode}
+			class:off={scenePart}
 			data-kind="ports-toggle"
 			title="Ports mode: drag a dot to move it, double-click the render to add one, double-click a dot to remove it"
 			onclick={() => (portsMode = !portsMode)}
@@ -462,7 +582,7 @@
 
 	<div class="body">
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="stage" class:stale={!!error} ondragstart={(e) => e.preventDefault()}>
+		<div class="stage" class:stale={!!error} bind:this={stageEl} ondragstart={(e) => e.preventDefault()}>
 			{#if available}
 				{#key version}
 					<div class="scale" style="transform: scale({zoom})">
@@ -472,14 +592,21 @@
 									{@const C = registry[component]}
 									<C {...builtinProps} />
 								{:else}
-									<UserIsland name={component} {props} />
+									<UserIsland
+										name={component}
+										{props}
+										svgHost
+										onsvgpart={(part) => (svgPart = part)}
+										{frame}
+										onframed={(f) => (overlay = f)}
+									/>
 								{/if}
 							</div>
 							{#if box}
 								<!-- svelte-ignore a11y_no_static_element_interactions -->
 								<svg
 									class="ports"
-									class:on={portsMode}
+									class:on={portsMode && !scenePart}
 									width={box.w}
 									height={box.h}
 									viewBox="0 0 {box.w} {box.h}"
@@ -516,6 +643,27 @@
 						</div>
 					</div>
 				{/key}
+				{#if !error && !builtin && box && (box.w === 0 || box.h === 0 || (missing.length && box.w < SMALL && box.h < SMALL))}
+					<!-- An empty or near-empty stage says why: a component given
+					     none of the props it needs draws little or nothing. A
+					     render of any size is left alone (the Props strip still
+					     lists them): plenty of props without a default are
+					     callbacks, or optional by a type declared elsewhere. -->
+					<p class="empty hint" data-kind="stage-hint">
+						{#if missing.length}
+							{missing.join(', ')}
+							{missing.length === 1 ? 'has' : 'have'} no default and no sample value yet, so {file} draws little or nothing. Give
+							{missing.length === 1 ? 'it' : 'them'} a value under Props.
+						{:else if untried.length}
+							{file} draws nothing as it is. It may be waiting on a prop: try a value for
+							{#each untried as name (name)}
+								<button class="need" title="Add a sample value for {name}" onclick={() => startProp(name)}>{name}</button>
+							{/each}
+						{:else}
+							{file} draws nothing with these props ({box.w} × {box.h}).
+						{/if}
+					</p>
+				{/if}
 			{:else if component}
 				<p class="empty">{error ? 'nothing to show until it compiles' : 'compiling ' + file + '…'}</p>
 			{:else}
@@ -525,7 +673,23 @@
 
 		<aside>
 			<h4>Props <span class="dim">{propNames.length}</span></h4>
-			{#if propNames.length === 0}
+			{#if missing.length}
+				<p class="note needs" data-kind="props-missing">
+					No default, no sample value:
+					{#each missing as name (name)}
+						<button class="need" title="Add a sample value for {name}" onclick={() => startProp(name)}>{name}</button>
+					{/each}
+				</p>
+			{:else if scenePart && untried.length}
+				<!-- A scene part often draws nothing at its defaults (rain at
+				     intensity 0) and its box is the scene's, never 0 × 0. -->
+				<p class="note needs" data-kind="props-untried">
+					Try a value for:
+					{#each untried as name (name)}
+						<button class="need" title="Add a sample value for {name}" onclick={() => startProp(name)}>{name}</button>
+					{/each}
+				</p>
+			{:else if propNames.length === 0}
 				<p class="note">No sample props yet — the component renders with its defaults. Add one below.</p>
 			{/if}
 			{#each propNames as name (name)}
@@ -550,7 +714,7 @@
 				}}
 			>
 				<input class="nx-input" placeholder="prop" bind:value={newName} spellcheck="false" />
-				<input class="nx-input" placeholder="value" bind:value={newValue} spellcheck="false" />
+				<input class="nx-input" placeholder="value" bind:value={newValue} bind:this={newValueEl} spellcheck="false" />
 				<button type="submit" disabled={!newNameOk}>Add</button>
 			</form>
 			<p class="note">
@@ -562,7 +726,7 @@
 				{hasSidecar ? '' : '(created on the first add)'}
 			</p>
 
-			<div class="ports-panel">
+			<div class="ports-panel" class:off={scenePart}>
 				<PortsPanel
 					{ports}
 					{selected}
@@ -715,6 +879,9 @@
 		color: var(--nx-muted);
 		cursor: pointer;
 	}
+	.off {
+		display: none;
+	}
 	.mode.on {
 		background: var(--nx-sel-bg);
 		color: var(--nx-sel-ink);
@@ -779,6 +946,37 @@
 	.empty {
 		color: var(--nx-muted);
 		font-size: 12px;
+	}
+	/* the hint shares the stage's one cell with the render, at its top */
+	.stage > * {
+		grid-area: 1 / 1;
+	}
+	.hint {
+		align-self: start;
+		max-width: 34em;
+		margin: 0;
+		padding: 8px 12px;
+		border: 1px dashed var(--nx-border);
+		border-radius: 6px;
+		background: var(--nx-bg);
+		color: var(--nx-ink);
+		line-height: 1.45;
+	}
+	.needs {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 4px;
+	}
+	.need {
+		font: inherit;
+		font-family: var(--nx-mono);
+		padding: 0 6px;
+		border: 1px solid currentColor;
+		border-radius: 4px;
+		background: transparent;
+		color: inherit;
+		cursor: pointer;
 	}
 	aside {
 		flex: none;
