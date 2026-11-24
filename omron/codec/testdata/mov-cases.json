@@ -1,0 +1,1482 @@
+[
+  {
+    "id": "source-0",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#0",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-1",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-2",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#0001",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-3",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#FFFF",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-4",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#10000",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-5",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#-1",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-6",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#abcd",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-7",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "&0",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-8",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "&1",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-9",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "&255",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-10",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "&256",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-11",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "&32767",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-12",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "&32768",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-13",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "&65535",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-14",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "&65536",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-15",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "&-1",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-16",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "&+1",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-17",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "&00001",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-18",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "0",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-19",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "W0",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-20",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "H0",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-21",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "A0",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-22",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "D0",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-23",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "T0",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-24",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "C0",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-25",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "D32767",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-26",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "D32768",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-27",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "*D0",
+      "D0"
+    ]
+  },
+  {
+    "id": "source-28",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "@D0",
+      "D0"
+    ]
+  },
+  {
+    "id": "dest-29",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "0"
+    ]
+  },
+  {
+    "id": "dest-30",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "6143"
+    ]
+  },
+  {
+    "id": "dest-31",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "6144"
+    ]
+  },
+  {
+    "id": "dest-32",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "W0"
+    ]
+  },
+  {
+    "id": "dest-33",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "W511"
+    ]
+  },
+  {
+    "id": "dest-34",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "W512"
+    ]
+  },
+  {
+    "id": "dest-35",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "H0"
+    ]
+  },
+  {
+    "id": "dest-36",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "H511"
+    ]
+  },
+  {
+    "id": "dest-37",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "H512"
+    ]
+  },
+  {
+    "id": "dest-38",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "A0"
+    ]
+  },
+  {
+    "id": "dest-39",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "A447"
+    ]
+  },
+  {
+    "id": "dest-40",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "A448"
+    ]
+  },
+  {
+    "id": "dest-41",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "A959"
+    ]
+  },
+  {
+    "id": "dest-42",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "A960"
+    ]
+  },
+  {
+    "id": "dest-43",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "D0"
+    ]
+  },
+  {
+    "id": "dest-44",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "D255"
+    ]
+  },
+  {
+    "id": "dest-45",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "D256"
+    ]
+  },
+  {
+    "id": "dest-46",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "D32767"
+    ]
+  },
+  {
+    "id": "dest-47",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "D32768"
+    ]
+  },
+  {
+    "id": "dest-48",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "T0"
+    ]
+  },
+  {
+    "id": "dest-49",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "T4095"
+    ]
+  },
+  {
+    "id": "dest-50",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "T4096"
+    ]
+  },
+  {
+    "id": "dest-51",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "C0"
+    ]
+  },
+  {
+    "id": "dest-52",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "C4095"
+    ]
+  },
+  {
+    "id": "dest-53",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "C4096"
+    ]
+  },
+  {
+    "id": "dest-54",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "D0.00"
+    ]
+  },
+  {
+    "id": "dest-55",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "#1"
+    ]
+  },
+  {
+    "id": "dest-56",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "&1"
+    ]
+  },
+  {
+    "id": "dest-57",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "CIO0"
+    ]
+  },
+  {
+    "id": "dest-58",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "#1234",
+      "EM0"
+    ]
+  },
+  {
+    "id": "address-59",
+    "mnemonic": "MOV",
+    "operands": [
+      "0",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-60",
+    "mnemonic": "MOV",
+    "operands": [
+      "1",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-61",
+    "mnemonic": "MOV",
+    "operands": [
+      "255",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-62",
+    "mnemonic": "MOV",
+    "operands": [
+      "256",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-63",
+    "mnemonic": "MOV",
+    "operands": [
+      "6143",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-64",
+    "mnemonic": "MOV",
+    "operands": [
+      "6144",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-65",
+    "mnemonic": "MOV",
+    "operands": [
+      "W0",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-66",
+    "mnemonic": "MOV",
+    "operands": [
+      "W511",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-67",
+    "mnemonic": "MOV",
+    "operands": [
+      "W512",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-68",
+    "mnemonic": "MOV",
+    "operands": [
+      "H0",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-69",
+    "mnemonic": "MOV",
+    "operands": [
+      "H511",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-70",
+    "mnemonic": "MOV",
+    "operands": [
+      "H512",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-71",
+    "mnemonic": "MOV",
+    "operands": [
+      "A447",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-72",
+    "mnemonic": "MOV",
+    "operands": [
+      "A448",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-73",
+    "mnemonic": "MOV",
+    "operands": [
+      "A959",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-74",
+    "mnemonic": "MOV",
+    "operands": [
+      "A960",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-75",
+    "mnemonic": "MOV",
+    "operands": [
+      "D255",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-76",
+    "mnemonic": "MOV",
+    "operands": [
+      "D256",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-77",
+    "mnemonic": "MOV",
+    "operands": [
+      "D32767",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-78",
+    "mnemonic": "MOV",
+    "operands": [
+      "T4095",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-79",
+    "mnemonic": "MOV",
+    "operands": [
+      "C4095",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-80",
+    "mnemonic": "MOV",
+    "operands": [
+      "T4096",
+      "W123"
+    ]
+  },
+  {
+    "id": "address-81",
+    "mnemonic": "MOV",
+    "operands": [
+      "C4096",
+      "W123"
+    ]
+  },
+  {
+    "id": "form-82",
+    "mnemonic": "MOV",
+    "operands": [
+      "#1",
+      "D0"
+    ]
+  },
+  {
+    "id": "form-83",
+    "mnemonic": "MOV(21)",
+    "operands": [
+      "#1",
+      "D0"
+    ]
+  },
+  {
+    "id": "form-84",
+    "mnemonic": "MOV(999)",
+    "operands": [
+      "#1",
+      "D0"
+    ]
+  },
+  {
+    "id": "form-85",
+    "mnemonic": "@MOV(021)",
+    "operands": [
+      "#1",
+      "D0"
+    ]
+  },
+  {
+    "id": "form-86",
+    "mnemonic": "%MOV(021)",
+    "operands": [
+      "#1",
+      "D0"
+    ]
+  },
+  {
+    "id": "matrix-87",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "0",
+      "6143"
+    ]
+  },
+  {
+    "id": "matrix-88",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "0",
+      "W511"
+    ]
+  },
+  {
+    "id": "matrix-89",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "0",
+      "H511"
+    ]
+  },
+  {
+    "id": "matrix-90",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "0",
+      "A448"
+    ]
+  },
+  {
+    "id": "matrix-91",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "0",
+      "D32767"
+    ]
+  },
+  {
+    "id": "matrix-92",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "0",
+      "T4095"
+    ]
+  },
+  {
+    "id": "matrix-93",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "0",
+      "C4095"
+    ]
+  },
+  {
+    "id": "matrix-94",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "W0",
+      "6143"
+    ]
+  },
+  {
+    "id": "matrix-95",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "W0",
+      "W511"
+    ]
+  },
+  {
+    "id": "matrix-96",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "W0",
+      "H511"
+    ]
+  },
+  {
+    "id": "matrix-97",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "W0",
+      "A448"
+    ]
+  },
+  {
+    "id": "matrix-98",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "W0",
+      "D32767"
+    ]
+  },
+  {
+    "id": "matrix-99",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "W0",
+      "T4095"
+    ]
+  },
+  {
+    "id": "matrix-100",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "W0",
+      "C4095"
+    ]
+  },
+  {
+    "id": "matrix-101",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "H0",
+      "6143"
+    ]
+  },
+  {
+    "id": "matrix-102",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "H0",
+      "W511"
+    ]
+  },
+  {
+    "id": "matrix-103",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "H0",
+      "H511"
+    ]
+  },
+  {
+    "id": "matrix-104",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "H0",
+      "A448"
+    ]
+  },
+  {
+    "id": "matrix-105",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "H0",
+      "D32767"
+    ]
+  },
+  {
+    "id": "matrix-106",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "H0",
+      "T4095"
+    ]
+  },
+  {
+    "id": "matrix-107",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "H0",
+      "C4095"
+    ]
+  },
+  {
+    "id": "matrix-108",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "A0",
+      "6143"
+    ]
+  },
+  {
+    "id": "matrix-109",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "A0",
+      "W511"
+    ]
+  },
+  {
+    "id": "matrix-110",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "A0",
+      "H511"
+    ]
+  },
+  {
+    "id": "matrix-111",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "A0",
+      "A448"
+    ]
+  },
+  {
+    "id": "matrix-112",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "A0",
+      "D32767"
+    ]
+  },
+  {
+    "id": "matrix-113",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "A0",
+      "T4095"
+    ]
+  },
+  {
+    "id": "matrix-114",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "A0",
+      "C4095"
+    ]
+  },
+  {
+    "id": "matrix-115",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "D0",
+      "6143"
+    ]
+  },
+  {
+    "id": "matrix-116",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "D0",
+      "W511"
+    ]
+  },
+  {
+    "id": "matrix-117",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "D0",
+      "H511"
+    ]
+  },
+  {
+    "id": "matrix-118",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "D0",
+      "A448"
+    ]
+  },
+  {
+    "id": "matrix-119",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "D0",
+      "D32767"
+    ]
+  },
+  {
+    "id": "matrix-120",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "D0",
+      "T4095"
+    ]
+  },
+  {
+    "id": "matrix-121",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "D0",
+      "C4095"
+    ]
+  },
+  {
+    "id": "matrix-122",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "T0",
+      "6143"
+    ]
+  },
+  {
+    "id": "matrix-123",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "T0",
+      "W511"
+    ]
+  },
+  {
+    "id": "matrix-124",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "T0",
+      "H511"
+    ]
+  },
+  {
+    "id": "matrix-125",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "T0",
+      "A448"
+    ]
+  },
+  {
+    "id": "matrix-126",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "T0",
+      "D32767"
+    ]
+  },
+  {
+    "id": "matrix-127",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "T0",
+      "T4095"
+    ]
+  },
+  {
+    "id": "matrix-128",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "T0",
+      "C4095"
+    ]
+  },
+  {
+    "id": "matrix-129",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "C0",
+      "6143"
+    ]
+  },
+  {
+    "id": "matrix-130",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "C0",
+      "W511"
+    ]
+  },
+  {
+    "id": "matrix-131",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "C0",
+      "H511"
+    ]
+  },
+  {
+    "id": "matrix-132",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "C0",
+      "A448"
+    ]
+  },
+  {
+    "id": "matrix-133",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "C0",
+      "D32767"
+    ]
+  },
+  {
+    "id": "matrix-134",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "C0",
+      "T4095"
+    ]
+  },
+  {
+    "id": "matrix-135",
+    "mnemonic": "MOV(021)",
+    "operands": [
+      "C0",
+      "C4095"
+    ]
+  },
+  {
+    "id": "literal-136",
+    "mnemonic": "MOV",
+    "operands": [
+      "#0002",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-137",
+    "mnemonic": "MOV",
+    "operands": [
+      "&2",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-138",
+    "mnemonic": "MOV",
+    "operands": [
+      "#000F",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-139",
+    "mnemonic": "MOV",
+    "operands": [
+      "&15",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-140",
+    "mnemonic": "MOV",
+    "operands": [
+      "#0010",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-141",
+    "mnemonic": "MOV",
+    "operands": [
+      "&16",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-142",
+    "mnemonic": "MOV",
+    "operands": [
+      "#007F",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-143",
+    "mnemonic": "MOV",
+    "operands": [
+      "&127",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-144",
+    "mnemonic": "MOV",
+    "operands": [
+      "#0080",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-145",
+    "mnemonic": "MOV",
+    "operands": [
+      "&128",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-146",
+    "mnemonic": "MOV",
+    "operands": [
+      "#0101",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-147",
+    "mnemonic": "MOV",
+    "operands": [
+      "&257",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-148",
+    "mnemonic": "MOV",
+    "operands": [
+      "#03FF",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-149",
+    "mnemonic": "MOV",
+    "operands": [
+      "&1023",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-150",
+    "mnemonic": "MOV",
+    "operands": [
+      "#0400",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-151",
+    "mnemonic": "MOV",
+    "operands": [
+      "&1024",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-152",
+    "mnemonic": "MOV",
+    "operands": [
+      "#0FFF",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-153",
+    "mnemonic": "MOV",
+    "operands": [
+      "&4095",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-154",
+    "mnemonic": "MOV",
+    "operands": [
+      "#1000",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-155",
+    "mnemonic": "MOV",
+    "operands": [
+      "&4096",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-156",
+    "mnemonic": "MOV",
+    "operands": [
+      "#1234",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-157",
+    "mnemonic": "MOV",
+    "operands": [
+      "&4660",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-158",
+    "mnemonic": "MOV",
+    "operands": [
+      "#3FFF",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-159",
+    "mnemonic": "MOV",
+    "operands": [
+      "&16383",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-160",
+    "mnemonic": "MOV",
+    "operands": [
+      "#4000",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-161",
+    "mnemonic": "MOV",
+    "operands": [
+      "&16384",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-162",
+    "mnemonic": "MOV",
+    "operands": [
+      "#7FFE",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-163",
+    "mnemonic": "MOV",
+    "operands": [
+      "&32766",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-164",
+    "mnemonic": "MOV",
+    "operands": [
+      "#8001",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-165",
+    "mnemonic": "MOV",
+    "operands": [
+      "&32769",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-166",
+    "mnemonic": "MOV",
+    "operands": [
+      "#FFFE",
+      "D1234"
+    ]
+  },
+  {
+    "id": "literal-167",
+    "mnemonic": "MOV",
+    "operands": [
+      "&65534",
+      "D1234"
+    ]
+  },
+  {
+    "id": "syntax-168",
+    "mnemonic": "MOV",
+    "operands": [
+      "#",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-169",
+    "mnemonic": "MOV",
+    "operands": [
+      "#G",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-170",
+    "mnemonic": "MOV",
+    "operands": [
+      "#00000",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-171",
+    "mnemonic": "MOV",
+    "operands": [
+      "#00001",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-172",
+    "mnemonic": "MOV",
+    "operands": [
+      "&",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-173",
+    "mnemonic": "MOV",
+    "operands": [
+      "&1.0",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-174",
+    "mnemonic": "MOV",
+    "operands": [
+      "&0x10",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-175",
+    "mnemonic": "MOV",
+    "operands": [
+      "&000000",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-176",
+    "mnemonic": "MOV",
+    "operands": [
+      "D",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-177",
+    "mnemonic": "MOV",
+    "operands": [
+      "w001",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-178",
+    "mnemonic": "MOV",
+    "operands": [
+      "D00001",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-179",
+    "mnemonic": "MOV",
+    "operands": [
+      "0.00",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-180",
+    "mnemonic": "MOV",
+    "operands": [
+      "W0.00",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-181",
+    "mnemonic": "MOV",
+    "operands": [
+      "D-1",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-182",
+    "mnemonic": "MOV",
+    "operands": [
+      "A000",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-183",
+    "mnemonic": "MOV",
+    "operands": [
+      " T0",
+      "D0"
+    ]
+  },
+  {
+    "id": "syntax-184",
+    "mnemonic": "MOV",
+    "operands": [
+      "Symbol",
+      "D0"
+    ]
+  }
+]

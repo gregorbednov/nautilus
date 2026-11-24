@@ -20,10 +20,11 @@
 	import FitController from './FitController.svelte';
 	import Palette from './Palette.svelte';
 	import VarsPanel from './VarsPanel.svelte';
+	import OmronVariables from './OmronVariables.svelte';
 	import FloatEditor from './FloatEditor.svelte';
 	import InstancePanel from './InstancePanel.svelte';
 	import LadderView from './LadderView.svelte';
-	import { diffLd, normalizeLd, type LdElement, type LdModel, type RungStatus } from './ladder';
+	import { diffLd, normalizeLd, omronValue, type LdElement, type LdModel, type OmronWatchMessage, type RungStatus } from './ladder';
 	import SfcView from './SfcView.svelte';
 	import { diffSfc, normalizeSfc, type SfcModel } from './sfc';
 	import { layout, normalizeFbd, type FbdModel, type FbdNode as ModelNode, type VarDecl } from './layout';
@@ -49,6 +50,14 @@
 	let nodes = $state.raw<Node[]>([]);
 	let edges = $state.raw<Edge[]>([]);
 	let ldModel = $state<LdModel | null>(null);
+	let omronWatch = $state.raw<OmronWatchMessage>({ type: 'omronWatch', active: false });
+	const omron = $derived(ldModel?.omron);
+	const omronRows = $derived(new Map((omron?.rows ?? []).map(row => [row.scope + ':' + row.name, row])));
+	function diagramOmronValue(name: string, scope?: string): string {
+		const row = omronRows.get((scope ?? '') + ':' + name) ?? omronRows.get(':' + name);
+		const sample = omronWatch.sample;
+		return row?.key && sample?.quality[row.key] === 'good' ? omronValue(sample.values[row.key]) : '';
+	}
 	let ldStatus = $state<Record<string, RungStatus>>({});
 	let sfcModel = $state<SfcModel | null>(null);
 	// Which editor this panel is. Set by every model message and by an
@@ -58,6 +67,7 @@
 	let mode = $state<Mode>('fbd');
 	// An L5X export renders as ladder but is never editable.
 	let readOnly = $state(false);
+	let readOnlyLabel = $state<string | undefined>(undefined);
 	// A whitespace-only file: no POU yet. The first op seeds a PROGRAM
 	// skeleton named after the file (see vscodeApi.setSeedPou).
 	let blank = $state(false);
@@ -468,7 +478,7 @@
 	type Msg =
 		| { type: 'model'; model: FbdModel; title?: string; source?: string }
 		| { type: 'diff'; base: FbdModel; head: FbdModel; title?: string }
-		| { type: 'ldModel'; model: LdModel; title?: string; readOnly?: boolean }
+		| { type: 'ldModel'; model: LdModel; title?: string; readOnly?: boolean; readOnlyLabel?: string }
 		| { type: 'ldDiff'; base: LdModel; head: LdModel; title?: string }
 		| { type: 'sfcModel'; model: SfcModel; title?: string }
 		| { type: 'sfcDiff'; base: SfcModel; head: SfcModel; title?: string }
@@ -503,6 +513,7 @@
 		} else if (msg.type === 'ldModel') {
 			mode = 'ld';
 			readOnly = !!msg.readOnly;
+			readOnlyLabel = msg.readOnlyLabel;
 			noteBlank(msg.model.blank, msg.title);
 			// Ladder mode: canonical rung layout, no flow canvas. Array
 			// bounds still come from the header so indexed contacts resolve,
@@ -513,8 +524,8 @@
 			sfcModel = null;
 			varList = (msg.model.vars ?? []) as VarDecl[];
 			setVarBounds(varList);
-			usedNames = collectLdUsed(msg.model);
 			ldModel = normalizeLd(msg.model);
+			usedNames = collectLdUsed(ldModel);
 			projectTags = msg.model.tags ?? [];
 			{
 				const r = ldRefs(ldModel);
@@ -603,10 +614,15 @@
 			| Msg
 			| { type: 'diagnostics'; diags?: Diag[] }
 			| { type: 'liveValues'; enabled?: boolean; fresh?: boolean; starting?: boolean; values?: Record<string, unknown>; forced?: Record<string, unknown>; types?: FlatTypes; monitors?: Record<string, string>; fbCandidates?: Record<string, string[]> }
+			| OmronWatchMessage
 			| { type: 'syncState'; state?: string };
 		if (!msg?.type) return;
 		if (msg.type === 'syncState') {
 			syncState = msg.state ?? 'unknown';
+			return;
+		}
+		if (msg.type === 'omronWatch') {
+			omronWatch = msg;
 			return;
 		}
 		if (msg.type === 'liveValues') {
@@ -913,10 +929,7 @@
 				<span><i class="sw changed"></i>changed</span>
 			</span>
 		{:else if readOnly}
-			<span
-				class="ropill"
-				title="An L5X is a Rockwell export: it renders as ladder here, but edits belong in Logix Designer or in the nautilus source it was generated from."
-			>read-only · Logix export</span>
+			<span class="ropill">read-only · {readOnlyLabel ?? 'Logix export'}</span>
 		{:else if hint}
 			<!-- Generated from the same table as the "?" popover; the full
 			     text is the tooltip when a narrow pane cuts it off. -->
@@ -933,6 +946,13 @@
 			<button title="Leave the diff and return to the live editable view" onclick={() => vscode.postMessage({ type: 'exitDiff' })}>✕ exit diff</button>
 		{/if}
 		{#if !diffing}
+			{#if omron}
+				<button
+					data-testid="omron-watch-toggle"
+					disabled={!omron.rows.some(row => row.key) || !!omron.error || !!error}
+					onclick={() => { if (!omronWatch.active) varsOpen = true; vscode.postMessage({ type: 'toggleOmronWatch' }); }}
+				>{omronWatch.active ? 'Disconnect CJ1' : 'Watch CJ1'}</button>
+			{/if}
 			{#if syncState === 'differs' || syncState === 'edit'}
 				<button
 					class="syncpill"
@@ -964,7 +984,7 @@
 				<button title="Clear all pinned positions (back to full auto-layout)" onclick={() => postOp({ type: 'clearLayout' })}>auto layout</button>
 			{/if}
 			<ShortcutHelp groups={shortcutGroups} />
-			<button title="All header declarations, including ones the logic doesn't reference yet, and the project tags the logic uses without declaring them" onclick={(e) => { e.stopPropagation(); varsOpen = !varsOpen; paletteOpen = false; }}>vars</button>
+			<button title={omron ? 'Show Omron variable addresses and sampled values' : "All header declarations, including ones the logic doesn't reference yet, and the project tags the logic uses without declaring them"} onclick={(e) => { e.stopPropagation(); varsOpen = !varsOpen; paletteOpen = false; }}>{omron ? 'Variables' : 'vars'}</button>
 			{#if mode === 'fbd'}
 				<button title="Insert an instruction — it lands beside the selected element; double-click empty canvas to insert right there" onclick={(e) => { e.stopPropagation(); if (paletteOpen) paletteOpen = false; else openPalette(); }}>+ add</button>
 			{/if}
@@ -972,6 +992,9 @@
 	</div>
 	{#if error}
 		<div class="error">{error}</div>
+	{/if}
+	{#if omron}
+		<OmronVariables rows={omron.rows} watch={omronWatch} error={omron.error} open={varsOpen} />
 	{/if}
 	{#if blank && !diffing && !readOnly && !error}
 		<div class="blank">
@@ -986,12 +1009,13 @@
 				editable={!diffing && !readOnly}
 				diags={diffing ? [] : diags}
 				status={ldStatus}
-				showLive={!diffing}
+				showLive={!diffing && !omron}
+				sampleValue={omron ? diagramOmronValue : undefined}
 				zoom={ldZoom}
 				onOp={postLd}
 				onTrace={(msg) => vscode.postMessage({ type: 'ldTrace', msg })}
-				onSelectTag={(tag) => vscode.postMessage({ type: 'diagramSelection', tag })}
-				onToggleBit={(tag) => vscode.postMessage({ type: 'toggleBit', tag })}
+				onSelectTag={omron ? undefined : (tag) => vscode.postMessage({ type: 'diagramSelection', tag })}
+				onToggleBit={omron ? undefined : (tag) => vscode.postMessage({ type: 'toggleBit', tag })}
 				onFbTypes={(types) => vscode.postMessage({ type: 'ldFbTypes', types })}
 				onPickMonitor={(fbType) => vscode.postMessage({ type: 'pickFbMonitor', fbType })}
 				{requestInput}
@@ -1042,6 +1066,7 @@
 	</div>
 	{/if}
 	<Palette bind:open={paletteOpen} vars={varList} tags={projectTags} {fbTypes} funcs={userFuncs} insts={fbInsts} taken={takenNames} {ghostSpot} net={mode === 'fbd' ? activeNet : undefined} post={postPalette} />
+	{#if !omron}
 	<VarsPanel
 		bind:open={varsOpen}
 		vars={varList}
@@ -1063,13 +1088,14 @@
 				: undefined}
 		withInit={mode === 'sfc'}
 	/>
+	{/if}
 	{#if inspect}
 		<InstancePanel inst={inspect} onclose={() => (inspect = null)} />
 	{/if}
 	<FloatEditor bind:this={editor} {tagItems} />
 </div>
 
-<svelte:window onclick={() => { paletteOpen = false; varsOpen = false; inspect = null; }} {onkeydown} />
+<svelte:window onclick={() => { paletteOpen = false; if (!omron) varsOpen = false; inspect = null; }} {onkeydown} />
 
 <style>
 	.host {

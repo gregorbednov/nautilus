@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "origin": "retained-local-profile-state-worker",
+  "sourceEventLogSHA256": "b3a4139b313dfdc0a240c7d288bb80a4da8c6824f030d6499e7e25c069a65a98",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "observerSHA256": "35a38b6f45cd961344ded9742c971306f4615f3d619809cef9c71f66a7c58c63",
+  "events": [
+    {
+      "schemaVersion": 1,
+      "kind": "begin",
+      "sequence": 0,
+      "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+      "requestSHA256": "982d08258ecc11760829c8dec74b6a14199cd4eecd68277c78b00b3430358984",
+      "fridaVersion": "17.26.3",
+      "architecture": "ia32",
+      "programType": 0,
+      "unitVersion": null,
+      "timerCounterMode": "bcd",
+      "fullProgramCompiled": false,
+      "probe": "profile-state-v1"
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "profile",
+      "sequence": 1,
+      "device": "CJ1M",
+      "cpu": "CPU21",
+      "selector": 8,
+      "familyMaskLow": 1024,
+      "familyMaskHigh": 0,
+      "timerModeBcd": 1,
+      "timerModeBinary": 0,
+      "libraryDefaultVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "libraryCurrentVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "libraryExtendedProtect": 0,
+      "libraryStateSource": "local-KBase-after-SetPLC",
+      "hardwareUnitVersionKnown": false
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "case",
+      "sequence": 2,
+      "id": "profile-state-nop",
+      "device": "CJ1M",
+      "cpu": "CPU21",
+      "mnemonic": "NOP",
+      "operands": [],
+      "initialiseResult": 1,
+      "operandResults": [],
+      "normalized": [],
+      "encodeResult": 0,
+      "words": [
+        2684354560
+      ],
+      "accepted": true,
+      "definition": "NOP",
+      "arity": 0
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "profile",
+      "sequence": 3,
+      "device": "CJ1H-H",
+      "cpu": "CPU65",
+      "selector": 8,
+      "familyMaskLow": 524288,
+      "familyMaskHigh": 0,
+      "timerModeBcd": 1,
+      "timerModeBinary": 0,
+      "libraryDefaultVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "libraryCurrentVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "libraryExtendedProtect": 0,
+      "libraryStateSource": "local-KBase-after-SetPLC",
+      "hardwareUnitVersionKnown": false
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "case",
+      "sequence": 4,
+      "id": "profile-state-nop",
+      "device": "CJ1H-H",
+      "cpu": "CPU65",
+      "mnemonic": "NOP",
+      "operands": [],
+      "initialiseResult": 1,
+      "operandResults": [],
+      "normalized": [],
+      "encodeResult": 0,
+      "words": [
+        2684354560
+      ],
+      "accepted": true,
+      "definition": "NOP",
+      "arity": 0
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "done",
+      "sequence": 5,
+      "caseCount": 2
+    }
+  ],
+  "hardwareQualified": false,
+  "unitVersionKnown": false,
+  "writeQualified": false
+}

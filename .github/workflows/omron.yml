@@ -1,0 +1,123 @@
+name: Omron foundation
+
+on:
+  push:
+    branches: [main]
+    paths: ['omron/**', 'tools/vscode-iec/src/**', 'tools/vscode-iec/tsconfig.json', 'tools/vscode-iec/package*.json', 'cmd/naut/**', 'io/**', 'go.mod', 'go.sum', '.github/workflows/omron.yml']
+  pull_request:
+    paths: ['omron/**', 'tools/vscode-iec/src/**', 'tools/vscode-iec/tsconfig.json', 'tools/vscode-iec/package*.json', 'cmd/naut/**', 'io/**', 'go.mod', 'go.sum', '.github/workflows/omron.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  native-project:
+    name: CJ1 project on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      CGO_ENABLED: '0'
+      NAUTILUS_CLI: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go mod download
+      - if: runner.os == 'Windows'
+        name: Build, import and reproduce retained CJ1 images on Windows
+        working-directory: cmd/naut
+        shell: pwsh
+        env:
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+        run: |
+          $source = @(go list -f '{{range .GoFiles}}{{println .}}{{end}}' . | Where-Object { $_ })
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $tests = @(Get-ChildItem -File -Name -Filter 'omron*_test.go')
+          go test @source @tests -run Omron -count=1
+      - if: runner.os != 'Windows'
+        name: Build, import and reproduce retained CJ1 images
+        env:
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+        run: go test ./cmd/naut -run Omron -count=1
+      - name: Compare whole task code and native guard decisions
+        env:
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+        run: go test ./omron/compiler ./omron/cxp -count=1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - working-directory: tools/vscode-iec
+        run: npm ci
+      - if: runner.os == 'Linux'
+        name: Build an edited CJ1 workspace in the VS Code extension host
+        working-directory: tools/vscode-iec
+        run: xvfb-run -a npm run test:e2e:cj1
+      - if: runner.os == 'Windows'
+        name: Build an edited CJ1 workspace in the VS Code extension host
+        working-directory: tools/vscode-iec
+        run: npm run test:e2e:cj1
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Prepare module dependencies
+        run: go mod download
+      - name: Offline build, tests and portable evidence
+        env:
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          go test ./omron/... -timeout 120s
+          go test ./cmd/naut -run Omron -timeout 120s
+          go vet ./omron/...
+          mkdir -p bin evidence
+          go build -o bin/naut ./cmd/naut
+          bin/naut omron inspect-image -format n1 omron/um/testdata/cj1h-baseline.n1 > evidence/omron-n1.json
+      - name: Linux race checks
+        env:
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+          CGO_ENABLED: '1'
+        run: go test -race ./omron/... -timeout 120s
+      - name: Bounded native-format fuzz checks
+        env:
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          go test ./omron/um -fuzz FuzzParseN1 -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/um -fuzz FuzzN1FBPrefix -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/codec -fuzz FuzzDecodeInstruction -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/compiler -fuzz FuzzCompileRungs -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/cxp -fuzz FuzzSymbolTableRows -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/cxp -fuzz FuzzFBCallPlan -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/compiler -fuzz FuzzScopedBindings -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/compiler -fuzz FuzzCXPProgramBody -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/compiler -fuzz FuzzCXPFBCallBody -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/internal/fbcode -fuzz FuzzInvocationPostamble -fuzztime 5s -parallel 2 -timeout 60s
+          go test ./omron/internal/fbcode -fuzz FuzzScalarTransfer -fuzztime 5s -parallel 2 -timeout 60s
+      - name: Linux ARM64 cross-build (execution not qualified here)
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: '0'
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+        run: go build ./omron/...

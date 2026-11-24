@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "a8d62e8589888fd36f23367058c4267643b599be04669e356febbce8d4d94586",
+  "programType": 32,
+  "unitVersion": null,
+  "timerCounterMode": "bcd",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "probe": "fb-instruction-compile-v1",
+  "artifacts": {
+    "cases": {
+      "path": "br-compile-cases.json",
+      "sha256": "a8d62e8589888fd36f23367058c4267643b599be04669e356febbce8d4d94586",
+      "bytes": 15283
+    },
+    "events": {
+      "path": "br-compile-events.jsonl.gz",
+      "sha256": "3d6899a5720145e188fdba173b16aed42e1e5981dec93efd8fd20a3a8acddce1",
+      "bytes": 6607,
+      "encoding": "gzip",
+      "decodedSHA256": "92e82e252e1b8f1dee157f49fb60a63e3a817f999fd91e72c47ee768191a55a0"
+    },
+    "script": {
+      "path": "br-compile-run.js.gz",
+      "sha256": "788fec92e825abb726c4b3a3d66abcc0fcb71235e0b1bea29fa75ca62391c56d",
+      "bytes": 5353,
+      "encoding": "gzip",
+      "decodedSHA256": "d87051c7c2f4563cc9160b916182591ddd146d46105d92c723c3640ef031adda"
+    },
+    "template": {
+      "path": "br-compile-template.js",
+      "sha256": "6afa81f690fbbff388cc758c3e6d29134c70cd8eb4d7f339e334c93dfeb91f02",
+      "bytes": 13416
+    },
+    "worker": {
+      "path": "br-compile-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    }
+  }
+}

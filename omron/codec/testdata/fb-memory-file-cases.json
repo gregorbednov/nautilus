@@ -1,0 +1,296 @@
+[
+  {
+    "id": "default",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "operands": [],
+        "mnemonic": "END"
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "memorySettings": {
+      "bases": [
+        {
+          "size": 1024,
+          "address": "T3072"
+        },
+        {
+          "size": 1024,
+          "address": "C3072"
+        },
+        {
+          "size": 0,
+          "address": "DIFF8191"
+        },
+        {
+          "size": 896,
+          "address": "H512"
+        },
+        {
+          "size": 128,
+          "address": "H1408"
+        }
+      ],
+      "stack": {
+        "address": "AC0",
+        "firstSize": 64,
+        "totalSize": 1536
+      }
+    },
+    "headerOptions": {
+      "extendedTIMHold": false,
+      "copyProhibited": false,
+      "independentIRDR": false,
+      "overwriteProhibited": false
+    },
+    "programDefinition": true
+  },
+  {
+    "id": "source-d0",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "operands": [],
+        "mnemonic": "END"
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "memorySettings": {
+      "bases": [
+        {
+          "size": 1024,
+          "address": "T3072"
+        },
+        {
+          "size": 1024,
+          "address": "C3072"
+        },
+        {
+          "size": 0,
+          "address": "DIFF8191"
+        },
+        {
+          "size": 896,
+          "address": "H512"
+        },
+        {
+          "size": 128,
+          "address": "H1408"
+        }
+      ],
+      "stack": {
+        "address": "D0",
+        "firstSize": 64,
+        "totalSize": 1536
+      }
+    },
+    "headerOptions": {
+      "extendedTIMHold": false,
+      "copyProhibited": false,
+      "independentIRDR": false,
+      "overwriteProhibited": false
+    },
+    "programDefinition": true
+  },
+  {
+    "id": "shifted",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "operands": [],
+        "mnemonic": "END"
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "memorySettings": {
+      "bases": [
+        {
+          "size": 64,
+          "address": "T3200"
+        },
+        {
+          "size": 32,
+          "address": "C3300"
+        },
+        {
+          "size": 0,
+          "address": "DIFF8000"
+        },
+        {
+          "size": 128,
+          "address": "H600"
+        },
+        {
+          "size": 32,
+          "address": "H1500"
+        }
+      ],
+      "stack": {
+        "address": "D100",
+        "firstSize": 16,
+        "totalSize": 80
+      }
+    },
+    "headerOptions": {
+      "extendedTIMHold": false,
+      "copyProhibited": false,
+      "independentIRDR": false,
+      "overwriteProhibited": false
+    },
+    "programDefinition": true
+  },
+  {
+    "id": "zero-first",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "operands": [],
+        "mnemonic": "END"
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "memorySettings": {
+      "bases": [
+        {
+          "size": 1024,
+          "address": "T3072"
+        },
+        {
+          "size": 1024,
+          "address": "C3072"
+        },
+        {
+          "size": 0,
+          "address": "DIFF8191"
+        },
+        {
+          "size": 896,
+          "address": "H512"
+        },
+        {
+          "size": 128,
+          "address": "H1408"
+        }
+      ],
+      "stack": {
+        "address": "AC100",
+        "firstSize": 0,
+        "totalSize": 16
+      }
+    },
+    "headerOptions": {
+      "extendedTIMHold": false,
+      "copyProhibited": false,
+      "independentIRDR": false,
+      "overwriteProhibited": false
+    },
+    "programDefinition": true
+  },
+  {
+    "id": "equal",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "operands": [],
+        "mnemonic": "END"
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "memorySettings": {
+      "bases": [
+        {
+          "size": 1024,
+          "address": "T3072"
+        },
+        {
+          "size": 1024,
+          "address": "C3072"
+        },
+        {
+          "size": 0,
+          "address": "DIFF8191"
+        },
+        {
+          "size": 896,
+          "address": "H512"
+        },
+        {
+          "size": 128,
+          "address": "H1408"
+        }
+      ],
+      "stack": {
+        "address": "D32760",
+        "firstSize": 8,
+        "totalSize": 8
+      }
+    },
+    "headerOptions": {
+      "extendedTIMHold": false,
+      "copyProhibited": false,
+      "independentIRDR": false,
+      "overwriteProhibited": false
+    },
+    "programDefinition": true
+  },
+  {
+    "id": "invalid-split",
+    "mnemonic": "NOP",
+    "operands": [],
+    "programInstructions": [
+      {
+        "operands": [],
+        "mnemonic": "END"
+      }
+    ],
+    "programCII": true,
+    "programFile": true,
+    "memorySettings": {
+      "bases": [
+        {
+          "size": 1024,
+          "address": "T3072"
+        },
+        {
+          "size": 1024,
+          "address": "C3072"
+        },
+        {
+          "size": 0,
+          "address": "DIFF8191"
+        },
+        {
+          "size": 896,
+          "address": "H512"
+        },
+        {
+          "size": 128,
+          "address": "H1408"
+        }
+      ],
+      "stack": {
+        "address": "AC0",
+        "firstSize": 81,
+        "totalSize": 80
+      }
+    },
+    "headerOptions": {
+      "extendedTIMHold": false,
+      "copyProhibited": false,
+      "independentIRDR": false,
+      "overwriteProhibited": false
+    },
+    "programDefinition": true
+  }
+]

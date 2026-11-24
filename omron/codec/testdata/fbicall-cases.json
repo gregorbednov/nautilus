@@ -1,0 +1,490 @@
+[
+  {
+    "id": "fbicall-final-0",
+    "operands": [
+      "&0",
+      "&0"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-1",
+    "operands": [
+      "&0",
+      "&1"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-2",
+    "operands": [
+      "&0",
+      "&3"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-3",
+    "operands": [
+      "&0",
+      "&1023"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-4",
+    "operands": [
+      "&0",
+      "&1024"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-5",
+    "operands": [
+      "&0",
+      "&2046"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-6",
+    "operands": [
+      "&0",
+      "&2047"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-7",
+    "operands": [
+      "&1",
+      "&0"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-8",
+    "operands": [
+      "&1",
+      "&1"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-9",
+    "operands": [
+      "&1",
+      "&3"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-10",
+    "operands": [
+      "&1",
+      "&1023"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-11",
+    "operands": [
+      "&1",
+      "&1024"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-12",
+    "operands": [
+      "&1",
+      "&2046"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-13",
+    "operands": [
+      "&1",
+      "&2047"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-14",
+    "operands": [
+      "&3",
+      "&0"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-15",
+    "operands": [
+      "&3",
+      "&1"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-16",
+    "operands": [
+      "&3",
+      "&3"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-17",
+    "operands": [
+      "&3",
+      "&1023"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-18",
+    "operands": [
+      "&3",
+      "&1024"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-19",
+    "operands": [
+      "&3",
+      "&2046"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-20",
+    "operands": [
+      "&3",
+      "&2047"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-21",
+    "operands": [
+      "&1023",
+      "&0"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-22",
+    "operands": [
+      "&1023",
+      "&1"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-23",
+    "operands": [
+      "&1023",
+      "&3"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-24",
+    "operands": [
+      "&1023",
+      "&1023"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-25",
+    "operands": [
+      "&1023",
+      "&1024"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-26",
+    "operands": [
+      "&1023",
+      "&2046"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-27",
+    "operands": [
+      "&1023",
+      "&2047"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-28",
+    "operands": [
+      "&1024",
+      "&0"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-29",
+    "operands": [
+      "&1024",
+      "&1"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-30",
+    "operands": [
+      "&1024",
+      "&3"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-31",
+    "operands": [
+      "&1024",
+      "&1023"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-32",
+    "operands": [
+      "&1024",
+      "&1024"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-33",
+    "operands": [
+      "&1024",
+      "&2046"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-34",
+    "operands": [
+      "&1024",
+      "&2047"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-35",
+    "operands": [
+      "&2046",
+      "&0"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-36",
+    "operands": [
+      "&2046",
+      "&1"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-37",
+    "operands": [
+      "&2046",
+      "&3"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-38",
+    "operands": [
+      "&2046",
+      "&1023"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-39",
+    "operands": [
+      "&2046",
+      "&1024"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-40",
+    "operands": [
+      "&2046",
+      "&2046"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-41",
+    "operands": [
+      "&2046",
+      "&2047"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-42",
+    "operands": [
+      "&2047",
+      "&0"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-43",
+    "operands": [
+      "&2047",
+      "&1"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-44",
+    "operands": [
+      "&2047",
+      "&3"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-45",
+    "operands": [
+      "&2047",
+      "&1023"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-46",
+    "operands": [
+      "&2047",
+      "&1024"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-47",
+    "operands": [
+      "&2047",
+      "&2046"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-48",
+    "operands": [
+      "&2047",
+      "&2047"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-49",
+    "operands": [
+      "&-1",
+      "&1024"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-50",
+    "operands": [
+      "&0",
+      "&-1"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-51",
+    "operands": [
+      "&2048",
+      "&1024"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-52",
+    "operands": [
+      "&0",
+      "&2048"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-53",
+    "operands": [
+      "&65535",
+      "&1024"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-54",
+    "operands": [
+      "&0",
+      "&65535"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-55",
+    "operands": [
+      "&65536",
+      "&1024"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-56",
+    "operands": [
+      "&0",
+      "&65536"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-57",
+    "operands": [
+      "#0003",
+      "&1024"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-58",
+    "operands": [
+      "&0",
+      "#0400"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-59",
+    "operands": [
+      "3",
+      "&1024"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbicall-final-60",
+    "operands": [
+      "&0",
+      "1024"
+    ],
+    "mnemonic": "FBICALL"
+  }
+]

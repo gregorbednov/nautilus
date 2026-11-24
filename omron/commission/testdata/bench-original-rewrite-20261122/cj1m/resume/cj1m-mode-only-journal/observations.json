@@ -1,0 +1,58 @@
+{
+  "binding": {
+    "transport": "tcp",
+    "peer": "10.0.174.36:9600",
+    "route": {
+      "Source": {
+        "Network": 0,
+        "Node": 239,
+        "Unit": 0
+      },
+      "Destination": {
+        "Network": 0,
+        "Node": 36,
+        "Unit": 0
+      }
+    }
+  },
+  "before": {
+    "cpu": {
+      "model": "CJ1M_CPU21",
+      "version": "03.00\u0000\u0000\u0000\u0000\u000003.06",
+      "raw": "Q0oxTV9DUFUyMSAgICAgICAgICAwMy4wMAAAAAAAMDMuMDYAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAABgACAMIAwgDCAAAAAAAAAAAADAAYACheAAAgAAAAAAAAgIMVU00MgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAE="
+    },
+    "status": {
+      "status": 4,
+      "mode": 0,
+      "fatal": 0,
+      "nonFatal": 0,
+      "raw": "BAAAAAAAAAAAACAgICAgICAgICAgICAgICA="
+    }
+  },
+  "after": {
+    "cpu": {
+      "model": "CJ1M_CPU21",
+      "version": "03.00\u0000\u0000\u0000\u0000\u000003.06",
+      "raw": "Q0oxTV9DUFUyMSAgICAgICAgICAwMy4wMAAAAAAAMDMuMDYAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAABgACAMIAwgDCAAAAAAAAAAAADAAYACheAAAgAAAAAAAAgIMVU00MgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAE="
+    },
+    "status": {
+      "status": 4,
+      "mode": 0,
+      "fatal": 0,
+      "nonFatal": 0,
+      "raw": "BAAAAAAAAAAAACAgICAgICAgICAgICAgICA="
+    }
+  },
+  "build": {
+    "method": "local-recompile-exact-bytes-v1",
+    "model": "CJ1M CPU21",
+    "unitVersion": "",
+    "timerCounterMode": "bcd",
+    "resource": "Resource[0]",
+    "sourceEncoding": "auto",
+    "sourceSHA256": "205d05f75fa615f120dc3f63b04c3c47415ac728eded1bb6ce7646dbee4830a2",
+    "canonicalSettingsSHA256": "eab396c7c63df54e2993fd16d3a2e4fcb391e1557fa04a35f45dc8aeb2470206",
+    "imageSHA256": "598e01ac119b890c94f5495e267269fa9546aff32e130f481d68e1ed35601b84",
+    "imageBytes": 2624
+  }
+}

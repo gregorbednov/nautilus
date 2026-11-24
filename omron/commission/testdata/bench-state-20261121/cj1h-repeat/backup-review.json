@@ -1,0 +1,111 @@
+{
+  "format": "cj1-retained-program-backup-review",
+  "declaredModel": "CJ1H-H CPU65",
+  "cpuBefore": {
+    "model": "CJ1H_CPU65H",
+    "internalSystemVersion": "03.00\u0000\u0000\u0000\u0000\u000003.09",
+    "payloadBytes": 158,
+    "payloadSHA256": "7252317fd185c00f1b28338d9b90ec8ddee9747613dfeaadb86b3dc1d4f9e2da",
+    "dipSwitchBits": 0,
+    "largestEMBank": 3,
+    "programAreaKWords": 120,
+    "reportedProgramAreaBytes": 245760,
+    "iomKBytes": 23,
+    "dmWords": 32768,
+    "timerCounterUnits1024": 8,
+    "emNonFileBanks": 3,
+    "memoryCardType": 0,
+    "memoryCardKBytes": 0,
+    "uninterpretedTailBytes": 66
+  },
+  "cpuAfter": {
+    "model": "CJ1H_CPU65H",
+    "internalSystemVersion": "03.00\u0000\u0000\u0000\u0000\u000003.09",
+    "payloadBytes": 158,
+    "payloadSHA256": "7252317fd185c00f1b28338d9b90ec8ddee9747613dfeaadb86b3dc1d4f9e2da",
+    "dipSwitchBits": 0,
+    "largestEMBank": 3,
+    "programAreaKWords": 120,
+    "reportedProgramAreaBytes": 245760,
+    "iomKBytes": 23,
+    "dmWords": 32768,
+    "timerCounterUnits1024": 8,
+    "emNonFileBanks": 3,
+    "memoryCardType": 0,
+    "memoryCardKBytes": 0,
+    "uninterpretedTailBytes": 66
+  },
+  "statusBefore": {
+    "status": 5,
+    "mode": 4,
+    "fatal": 0,
+    "nonFatal": 0,
+    "raw": "BQQAAAAAAAAAACAgICAgICAgICAgICAgICA="
+  },
+  "statusAfter": {
+    "status": 5,
+    "mode": 4,
+    "fatal": 0,
+    "nonFatal": 0,
+    "raw": "BQQAAAAAAAAAACAgICAgICAgICAgICAgICA="
+  },
+  "programs": [
+    {
+      "sha256": "d54d9fcb0e4c5f6fb95bc16c31b07fd55a880982835d31b6676af744a1c34a46",
+      "byteLength": 2716,
+      "parseableN1": true
+    },
+    {
+      "sha256": "d54d9fcb0e4c5f6fb95bc16c31b07fd55a880982835d31b6676af744a1c34a46",
+      "byteLength": 2716,
+      "parseableN1": true
+    }
+  ],
+  "checks": [
+    {
+      "id": "snapshot-summaries",
+      "state": "passed",
+      "detail": "both editable summaries must agree with raw data"
+    },
+    {
+      "id": "declared-target-model",
+      "state": "passed",
+      "detail": "exact observed CPU aliases only; no model inference from N1"
+    },
+    {
+      "id": "identity-raw-stable",
+      "state": "passed",
+      "detail": "whole identity responses must match; this does not prove observation time or source"
+    },
+    {
+      "id": "status-raw-stable",
+      "state": "passed",
+      "detail": "whole status responses must match; RUN/MONITOR/PROGRAM are accepted for backup review without changing mode"
+    },
+    {
+      "id": "cpu-errors",
+      "state": "passed",
+      "detail": "nonzero fatal/nonfatal fields require review; nothing is cleared"
+    },
+    {
+      "id": "program-pair",
+      "state": "passed",
+      "detail": "both files must parse as supported N1 and match every byte; equality alone proves neither independent reads nor complete controller backup"
+    },
+    {
+      "id": "reported-capacity",
+      "state": "passed",
+      "detail": "arithmetic reported-area upper bound only; no deployment qualification"
+    }
+  ],
+  "readPairConsistent": true,
+  "retainedEvidenceOnly": true,
+  "independentReadsVerified": false,
+  "observationFreshnessVerified": false,
+  "fullControllerBackup": false,
+  "hardwareQualified": false,
+  "restoreQualified": false,
+  "readyForWrite": false,
+  "writeQualified": false,
+  "networkAccess": false
+}

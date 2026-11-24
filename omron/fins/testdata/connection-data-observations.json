@@ -1,0 +1,58 @@
+[
+  {
+    "target": "cj1h",
+    "endpoint": "10.0.174.37:9600",
+    "captureUTC": "2026-11-19T05:32:09.6076612Z",
+    "dataHex": "8400434a31485f43505536354820202020202020202011434a31572d45544e32312020202020202020202012434a31572d44524d32312020202020202020202023434a31572d4d4144343220202020202020202020",
+    "units": [
+      {
+        "address": 0,
+        "model": "CJ1H_CPU65H",
+        "rawModel": "Q0oxSF9DUFU2NUggICAgICAgICA="
+      },
+      {
+        "address": 17,
+        "model": "CJ1W-ETN21",
+        "rawModel": "Q0oxVy1FVE4yMSAgICAgICAgICA="
+      },
+      {
+        "address": 18,
+        "model": "CJ1W-DRM21",
+        "rawModel": "Q0oxVy1EUk0yMSAgICAgICAgICA="
+      },
+      {
+        "address": 35,
+        "model": "CJ1W-MAD42",
+        "rawModel": "Q0oxVy1NQUQ0MiAgICAgICAgICA="
+      }
+    ]
+  },
+  {
+    "target": "cj1m",
+    "endpoint": "10.0.174.36:9600",
+    "captureUTC": "2026-11-19T05:32:10.3599587Z",
+    "dataHex": "8400434a314d5f43505532312020202020202020202011434a31572d45544e32312020202020202020202012434a31572d53435534312d56312020202020202029434a31572d4d4144343220202020202020202020",
+    "units": [
+      {
+        "address": 0,
+        "model": "CJ1M_CPU21",
+        "rawModel": "Q0oxTV9DUFUyMSAgICAgICAgICA="
+      },
+      {
+        "address": 17,
+        "model": "CJ1W-ETN21",
+        "rawModel": "Q0oxVy1FVE4yMSAgICAgICAgICA="
+      },
+      {
+        "address": 18,
+        "model": "CJ1W-SCU41-V1",
+        "rawModel": "Q0oxVy1TQ1U0MS1WMSAgICAgICA="
+      },
+      {
+        "address": 41,
+        "model": "CJ1W-MAD42",
+        "rawModel": "Q0oxVy1NQUQ0MiAgICAgICAgICA="
+      }
+    ]
+  }
+]

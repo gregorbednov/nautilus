@@ -1,0 +1,12 @@
+{"utc":"2026-11-21T20:29:51.8954229Z","pass":1,"read":{"address":"CIO3","count":1,"hex":"0000"}}
+{"utc":"2026-11-21T20:29:52.6789974Z","pass":1,"read":{"address":"W1","count":1,"hex":"0000"}}
+{"utc":"2026-11-21T20:29:53.4394819Z","pass":1,"read":{"address":"W100","count":1,"hex":"0000"}}
+{"utc":"2026-11-21T20:29:54.2695405Z","pass":1,"read":{"address":"W5","count":1,"hex":"0000"}}
+{"utc":"2026-11-21T20:29:54.9041032Z","pass":1,"read":{"address":"W6","count":1,"hex":"0000"}}
+{"utc":"2026-11-21T20:29:55.7711518Z","pass":1,"read":{"address":"W7","count":1,"hex":"0000"}}
+{"utc":"2026-11-21T20:29:56.5761442Z","pass":2,"read":{"address":"CIO3","count":1,"hex":"0000"}}
+{"utc":"2026-11-21T20:29:57.3378855Z","pass":2,"read":{"address":"W1","count":1,"hex":"0000"}}
+{"utc":"2026-11-21T20:29:58.3045098Z","pass":2,"read":{"address":"W100","count":1,"hex":"0000"}}
+{"utc":"2026-11-21T20:29:59.8786059Z","pass":2,"read":{"address":"W5","count":1,"hex":"0000"}}
+{"utc":"2026-11-21T20:30:01.1176131Z","pass":2,"read":{"address":"W6","count":1,"hex":"0000"}}
+{"utc":"2026-11-21T20:30:02.0342050Z","pass":2,"read":{"address":"W7","count":1,"hex":"0000"}}

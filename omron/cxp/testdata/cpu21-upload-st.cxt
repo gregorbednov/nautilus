@@ -1,0 +1,98 @@
+CXProgVer:="1.8";
+Resource[0]:=
+BEGIN
+ FunctionBlocks:=
+ BEGIN
+  FunctionBlockCount:=2;
+  FunctionBlockWrapper[0]:=
+  BEGIN
+   FBType:="FBST";
+   FunctionBlock:=
+   BEGIN
+    IEC1131Type:=4;
+    CompileInline:=0;
+    Name:="Humidity";
+    FileType:=4;
+    Created:="9 11 2026 18 14 59";
+    Modified:="20 11 2026 15 26 48";
+    Protection:=
+    BEGIN
+     Enabled:=0;
+    END;
+    FBDefVer:="1.8";
+    OnlineReserveMemory:=
+    BEGIN
+     BR[0]:="0,0";
+     BR[1]:="0,0";
+     BR[2]:="0,0";
+     BR[3]:="0,0";
+     BR[4]:="0,0";
+     NumRegisters:=5;
+    END;
+    POUHeader:=
+    BEGIN
+     PouVarList:=
+     BEGIN_LIST_$#[4]
+      0,IHumid,10,,0,0.0,0,;
+      0,Real_Value_Humidity,10,,0,0.0,0,;
+      1,Current_Value_Humidity,1,,0,0,0,;
+      2,Humidity,10,,0,0.0,0,;
+     END_LIST_$#[4];
+     InstanceID:="09.11.2026 18:15:41";
+     PouVarCount:=4;
+    END;
+    STBodyText:=
+$?St$Bk?_#[5]
+Real_Value_Humidity:= INT_TO_REAL(Current_Value_Humidity);
+IHumid:= (Real_Value_Humidity/250.0)+4.0;
+Humidity:= (IHumid-4.0)/16.0*95.0;$?St$Bk?_#[5]
+    TaskID:=1025;
+   END;
+  END;
+  FunctionBlockWrapper[1]:=
+  BEGIN
+   FBType:="FBST";
+   FunctionBlock:=
+   BEGIN
+    IEC1131Type:=4;
+    CompileInline:=0;
+    Name:="Temperature";
+    FileType:=4;
+    Created:="3 10 2020 17 26 3";
+    Modified:="20 11 2026 15 26 48";
+    Protection:=
+    BEGIN
+     Enabled:=0;
+    END;
+    FBDefVer:="1.8";
+    OnlineReserveMemory:=
+    BEGIN
+     BR[0]:="0,0";
+     BR[1]:="0,0";
+     BR[2]:="0,0";
+     BR[3]:="0,0";
+     BR[4]:="0,0";
+     NumRegisters:=5;
+    END;
+    POUHeader:=
+    BEGIN
+     PouVarList:=
+     BEGIN_LIST_$#[6]
+      0,Itemp,10,,0,0.0,0,;
+      0,Real_Current_Value,10,,0,0.0,0,;
+      1,Current_Value,1,,0,0,0,;
+      2,Temp,10,,0,0.0,0,;
+     END_LIST_$#[6];
+     InstanceID:="09.11.2026 18:18:47";
+     PouVarCount:=4;
+    END;
+    STBodyText:=
+$?St$Bk?_#[7]
+Real_Current_Value:= INT_TO_REAL(Current_Value);
+Itemp:= 4.0 + (Real_Current_Value / 4000.0) * 16.0;
+Temp:= ((Itemp-4.0)/16.0)*90.0-20.0;$?St$Bk?_#[7]
+    TaskID:=1024;
+   END;
+  END;
+ END;
+END;

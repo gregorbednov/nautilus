@@ -1,0 +1,60 @@
+[
+  {
+    "phase": "before",
+    "utc": "2026-11-21T20:51:21.0819849Z",
+    "endpoint": "10.0.174.37:9600",
+    "data": {
+      "cpu": {
+        "model": "CJ1H_CPU65H",
+        "version": "03.00\u0000\u0000\u0000\u0000\u000003.09",
+        "raw": "Q0oxSF9DUFU2NUggICAgICAgICAwMy4wMAAAAAAAMDMuMDkAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAABAACAAYABgAGAAAAAAAAAAAADAAkAeBeAAAgDAAAAAAAgIMVUxE4gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAE="
+      },
+      "status": {
+        "status": 5,
+        "mode": 4,
+        "fatal": 0,
+        "nonFatal": 0,
+        "raw": "BQQAAAAAAAAAACAgICAgICAgICAgICAgICA="
+      }
+    }
+  },
+  {
+    "phase": "read1",
+    "utc": "2026-11-21T20:51:21.8003035Z",
+    "endpoint": "10.0.174.37:9600",
+    "data": {
+      "address": "A500",
+      "count": 1,
+      "hex": "0000"
+    }
+  },
+  {
+    "phase": "read2",
+    "utc": "2026-11-21T20:51:22.5961160Z",
+    "endpoint": "10.0.174.37:9600",
+    "data": {
+      "address": "A500",
+      "count": 1,
+      "hex": "0000"
+    }
+  },
+  {
+    "phase": "after",
+    "utc": "2026-11-21T20:51:23.7467883Z",
+    "endpoint": "10.0.174.37:9600",
+    "data": {
+      "cpu": {
+        "model": "CJ1H_CPU65H",
+        "version": "03.00\u0000\u0000\u0000\u0000\u000003.09",
+        "raw": "Q0oxSF9DUFU2NUggICAgICAgICAwMy4wMAAAAAAAMDMuMDkAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAABAACAAYABgAGAAAAAAAAAAAADAAkAeBeAAAgDAAAAAAAgIMVUxE4gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAE="
+      },
+      "status": {
+        "status": 5,
+        "mode": 4,
+        "fatal": 0,
+        "nonFatal": 0,
+        "raw": "BQQAAAAAAAAAACAgICAgICAgICAgICAgICA="
+      }
+    }
+  }
+]

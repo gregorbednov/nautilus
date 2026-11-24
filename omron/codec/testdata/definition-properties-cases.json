@@ -1,0 +1,106 @@
+[
+  {
+    "definitionProperties": {
+      "number": 0,
+      "name": "BLINK",
+      "inputCount": 4,
+      "outputCount": 2
+    },
+    "mnemonic": "FBBN",
+    "id": "properties-0",
+    "operands": [
+      "1024"
+    ]
+  },
+  {
+    "definitionProperties": {
+      "number": 1,
+      "name": "SECOND",
+      "inputCount": 1,
+      "outputCount": 1
+    },
+    "mnemonic": "FBBN",
+    "id": "properties-1",
+    "operands": [
+      "1024"
+    ]
+  },
+  {
+    "definitionProperties": {
+      "number": 1023,
+      "name": "Z",
+      "inputCount": 65,
+      "outputCount": 65
+    },
+    "mnemonic": "FBBN",
+    "id": "properties-2",
+    "operands": [
+      "1024"
+    ]
+  },
+  {
+    "definitionProperties": {
+      "number": 1024,
+      "name": "OVER",
+      "inputCount": 66,
+      "outputCount": 66
+    },
+    "mnemonic": "FBBN",
+    "id": "properties-3",
+    "operands": [
+      "1024"
+    ]
+  },
+  {
+    "definitionProperties": {
+      "number": -1,
+      "name": "NEGATIVE",
+      "inputCount": -1,
+      "outputCount": -1
+    },
+    "mnemonic": "FBBN",
+    "id": "properties-4",
+    "operands": [
+      "1024"
+    ]
+  },
+  {
+    "definitionProperties": {
+      "number": 12,
+      "name": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+      "inputCount": 2,
+      "outputCount": 3
+    },
+    "mnemonic": "FBBN",
+    "id": "properties-5",
+    "operands": [
+      "1024"
+    ]
+  },
+  {
+    "definitionProperties": {
+      "number": 13,
+      "name": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+      "inputCount": 3,
+      "outputCount": 2
+    },
+    "mnemonic": "FBBN",
+    "id": "properties-6",
+    "operands": [
+      "1024"
+    ]
+  },
+  {
+    "definitionProperties": {
+      "number": 2,
+      "name": "Mixed_Name9",
+      "inputCount": 0,
+      "outputCount": 0
+    },
+    "mnemonic": "FBBN",
+    "id": "properties-7",
+    "operands": [
+      "1024"
+    ]
+  }
+]

@@ -1,0 +1,223 @@
+{
+  "schemaVersion": 1,
+  "engine": "ghidra",
+  "engineVersion": "12.1.4",
+  "sourceSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "language": "x86:LE:32:default",
+  "imageBase": "12000000",
+  "status": "research-only; CPU encoding unverified",
+  "analysisMode": "selected-functions; no whole-program auto-analysis",
+  "limitations": "Types and calling conventions may be incomplete; compare assembly before assigning semantics.",
+  "functions": [
+    {
+      "requestedAddress": "121cb520",
+      "entry": "121cb520",
+      "name": "?GetSLForSectionSeperator@PLC_KBase@@QAEHAAVCString@@AAVCStringArray@@PAW4IsotopeType@@@Z",
+      "signature": "undefined ?GetSLForSectionSeperator@PLC_KBase@@QAEHAAVCString@@AAVCStringArray@@PAW4IsotopeType@@@Z(void)",
+      "instructions": [
+        {
+          "address": "121cb520",
+          "text": "PUSH EBP"
+        },
+        {
+          "address": "121cb521",
+          "text": "MOV EBP,ESP"
+        },
+        {
+          "address": "121cb523",
+          "text": "SUB ESP,0x14"
+        },
+        {
+          "address": "121cb526",
+          "text": "MOV dword ptr [EBP + -0x10],ECX"
+        },
+        {
+          "address": "121cb529",
+          "text": "MOV EAX,dword ptr [EBP + 0x10]"
+        },
+        {
+          "address": "121cb52c",
+          "text": "MOV dword ptr [EAX],0x7"
+        },
+        {
+          "address": "121cb532",
+          "text": "MOV ECX,dword ptr [EBP + -0x4]"
+        },
+        {
+          "address": "121cb535",
+          "text": "MOV dword ptr [EBP + -0x14],ECX"
+        },
+        {
+          "address": "121cb538",
+          "text": "MOV EDX,dword ptr [EBP + -0x10]"
+        },
+        {
+          "address": "121cb53b",
+          "text": "MOV EAX,dword ptr [EDX + 0x2d50]"
+        },
+        {
+          "address": "121cb541",
+          "text": "MOV ECX,dword ptr [EAX + 0x44]"
+        },
+        {
+          "address": "121cb544",
+          "text": "MOV dword ptr [EBP + -0x14],ECX"
+        },
+        {
+          "address": "121cb547",
+          "text": "MOV EDX,dword ptr [EBP + -0x14]"
+        },
+        {
+          "address": "121cb54a",
+          "text": "SUB EDX,0x1"
+        },
+        {
+          "address": "121cb54d",
+          "text": "MOV dword ptr [EBP + -0x14],EDX"
+        },
+        {
+          "address": "121cb550",
+          "text": "CMP dword ptr [EBP + -0x14],0x1f"
+        },
+        {
+          "address": "121cb554",
+          "text": "JA 0x121cb58f"
+        },
+        {
+          "address": "121cb556",
+          "text": "MOV ECX,dword ptr [EBP + -0x14]"
+        },
+        {
+          "address": "121cb559",
+          "text": "XOR EAX,EAX"
+        },
+        {
+          "address": "121cb55b",
+          "text": "MOV AL,byte ptr [ECX + 0x121cb5ea]"
+        },
+        {
+          "address": "121cb561",
+          "text": "JMP dword ptr [EAX*0x4 + 0x121cb5de]"
+        },
+        {
+          "address": "121cb58f",
+          "text": "XOR EAX,EAX"
+        },
+        {
+          "address": "121cb591",
+          "text": "JMP 0x121cb5d8"
+        },
+        {
+          "address": "121cb5d8",
+          "text": "MOV ESP,EBP"
+        },
+        {
+          "address": "121cb5da",
+          "text": "POP EBP"
+        },
+        {
+          "address": "121cb5db",
+          "text": "RET 0xc"
+        }
+      ],
+      "calls": [],
+      "decompileCompleted": true,
+      "pseudocode": "\r\nundefined4 __thiscall\r\n_GetSLForSectionSeperator_PLC_KBase__QAEHAAVCString__AAVCStringArray__PAW4IsotopeType___Z\r\n          (int param_1,undefined4 param_2,int param_3,undefined4 *param_4)\r\n\r\n{\r\n                    /* 0x1cb520  316\r\n                       ?GetSLForSectionSeperator@PLC_KBase@@QAEHAAVCString@@AAVCStringArray@@PAW4IsotopeType@@@Z\r\n                        */\r\n  *param_4 \u003d 7;\r\n  switch(*(undefined4 *)(*(int *)(param_1 + 0x2d50) + 0x44)) {\r\n  case 1:\r\n  case 4:\r\n  case 8:\r\n  case 0x10:\r\n  case 0x20:\r\n    func_0x1224e2ba(0x122a8d48);\r\n    break;\r\n  case 2:\r\n    func_0x1224e2ba(0x122a8d4c);\r\n    *param_4 \u003d 2;\r\n    break;\r\n  default:\r\n    return 0;\r\n  }\r\n  func_0x1224e5ba(0,0xffffffff);\r\n  func_0x1224e66e(*(undefined4 *)(param_3 + 8),0x122a8d58);\r\n  func_0x1224e66e(*(undefined4 *)(param_3 + 8),0x122a8d60);\r\n  return 1;\r\n}\r\n\r\n"
+    },
+    {
+      "requestedAddress": "121cb4e1",
+      "entry": "121cb4e1",
+      "name": "?HasDownloadableProgramName@PLC_KBase@@QAEHXZ",
+      "signature": "undefined ?HasDownloadableProgramName@PLC_KBase@@QAEHXZ(void)",
+      "instructions": [
+        {
+          "address": "121cb4e1",
+          "text": "PUSH EBP"
+        },
+        {
+          "address": "121cb4e2",
+          "text": "MOV EBP,ESP"
+        },
+        {
+          "address": "121cb4e4",
+          "text": "SUB ESP,0x8"
+        },
+        {
+          "address": "121cb4e7",
+          "text": "MOV dword ptr [EBP + -0x8],ECX"
+        },
+        {
+          "address": "121cb4ea",
+          "text": "MOV EAX,dword ptr [EBP + -0x8]"
+        },
+        {
+          "address": "121cb4ed",
+          "text": "MOV ECX,dword ptr [EAX + 0x2d50]"
+        },
+        {
+          "address": "121cb4f3",
+          "text": "MOV EDX,dword ptr [ECX + 0x44]"
+        },
+        {
+          "address": "121cb4f6",
+          "text": "AND EDX,0x3c"
+        },
+        {
+          "address": "121cb4f9",
+          "text": "TEST EDX,EDX"
+        },
+        {
+          "address": "121cb4fb",
+          "text": "JZ 0x121cb506"
+        },
+        {
+          "address": "121cb4fd",
+          "text": "MOV dword ptr [EBP + -0x4],0x1"
+        },
+        {
+          "address": "121cb504",
+          "text": "JMP 0x121cb50d"
+        },
+        {
+          "address": "121cb506",
+          "text": "MOV dword ptr [EBP + -0x4],0x0"
+        },
+        {
+          "address": "121cb50d",
+          "text": "CMP dword ptr [EBP + -0x4],0x0"
+        },
+        {
+          "address": "121cb511",
+          "text": "JZ 0x121cb51a"
+        },
+        {
+          "address": "121cb513",
+          "text": "MOV EAX,0x1"
+        },
+        {
+          "address": "121cb518",
+          "text": "JMP 0x121cb51c"
+        },
+        {
+          "address": "121cb51a",
+          "text": "XOR EAX,EAX"
+        },
+        {
+          "address": "121cb51c",
+          "text": "MOV ESP,EBP"
+        },
+        {
+          "address": "121cb51e",
+          "text": "POP EBP"
+        },
+        {
+          "address": "121cb51f",
+          "text": "RET"
+        }
+      ],
+      "calls": [],
+      "decompileCompleted": true,
+      "pseudocode": "\r\nbool __fastcall _HasDownloadableProgramName_PLC_KBase__QAEHXZ(int param_1)\r\n\r\n{\r\n                    /* 0x1cb4e1  353  ?HasDownloadableProgramName@PLC_KBase@@QAEHXZ */\r\n  return (*(uint *)(*(int *)(param_1 + 0x2d50) + 0x44) \u0026 0x3c) !\u003d 0;\r\n}\r\n\r\n"
+    }
+  ]
+}

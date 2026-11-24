@@ -103,7 +103,7 @@ type Element struct {
 	Args string `json:"args,omitempty"`
 	Inst string `json:"inst,omitempty"`
 	Type string `json:"type,omitempty"`
-	// Text is an assignment element's body: `y := a + b; z := 0`.
+	// Text is the assignment body or a native instruction's display label.
 	Text string `json:"text,omitempty"`
 	// The boolean pins a rung's power enters/leaves an FB on.
 	PowerIn  string      `json:"powerIn,omitempty"`

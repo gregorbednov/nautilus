@@ -1,0 +1,131 @@
+{
+  "endpoint": "10.0.174.37:9600",
+  "final": {
+    "cpu": {
+      "model": "CJ1H_CPU65H",
+      "version": "03.00\u0000\u0000\u0000\u0000\u000003.09",
+      "raw": "Q0oxSF9DUFU2NUggICAgICAgICAwMy4wMAAAAAAAMDMuMDkAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAABAACAAYABgAGAAAAAAAAAAAADAAkAeBeAAAgDAAAAAAAgIMVUxE4gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAE="
+    },
+    "status": {
+      "status": 5,
+      "mode": 4,
+      "fatal": 0,
+      "nonFatal": 0,
+      "raw": "BQQAAAAAAAAAACAgICAgICAgICAgICAgICA="
+    }
+  },
+  "finishedUTC": "2026-11-21T19:08:55.1109351Z",
+  "fullControllerBackup": false,
+  "hardwareQualified": false,
+  "initial": {
+    "cpu": {
+      "model": "CJ1H_CPU65H",
+      "version": "03.00\u0000\u0000\u0000\u0000\u000003.09",
+      "raw": "Q0oxSF9DUFU2NUggICAgICAgICAwMy4wMAAAAAAAMDMuMDkAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAABAACAAYABgAGAAAAAAAAAAAADAAkAeBeAAAgDAAAAAAAgIMVUxE4gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAE="
+    },
+    "status": {
+      "status": 5,
+      "mode": 4,
+      "fatal": 0,
+      "nonFatal": 0,
+      "raw": "BQQAAAAAAAAAACAgICAgICAgICAgICAgICA="
+    }
+  },
+  "modeOnlyCycleVerified": true,
+  "phase": "complete",
+  "programComparison": {
+    "sha256": "d54d9fcb0e4c5f6fb95bc16c31b07fd55a880982835d31b6676af744a1c34a46",
+    "byteLength": 2716,
+    "sameLength": true,
+    "exact": true,
+    "bodyMatches": true,
+    "serviceHeaderComparable": true,
+    "changedServiceWords": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "onlyServiceWords014Differ": false,
+    "firstDifferenceByte": -1
+  },
+  "programWriteInvoked": false,
+  "restoreQualified": false,
+  "session": {
+    "controlled": true,
+    "accessState": "released",
+    "programEntered": true,
+    "finished": true,
+    "executionRequested": true,
+    "state": "prepared",
+    "binding": {
+      "transport": "tcp",
+      "peer": "10.0.174.37:9600",
+      "route": {
+        "Source": {
+          "Network": 0,
+          "Node": 239,
+          "Unit": 0
+        },
+        "Destination": {
+          "Network": 0,
+          "Node": 37,
+          "Unit": 0
+        }
+      }
+    },
+    "candidate": {
+      "format": "cj1-offline-program-write-audit",
+      "state": "ready",
+      "imageSHA256": "598e01ac119b890c94f5495e267269fa9546aff32e130f481d68e1ed35601b84",
+      "imageBytes": 2624,
+      "plannedBlocks": 3,
+      "attemptedBlocks": 0,
+      "acknowledgedBlocks": 0,
+      "acknowledgedBytes": 0,
+      "nextOffsetBytes": 0,
+      "allBlocksAcknowledged": false,
+      "uncertainWrite": false,
+      "reconciliationRequired": false,
+      "networkAccess": false,
+      "routeSIDVerified": false,
+      "hardwareQualified": false,
+      "writeQualified": false,
+      "rollbackPerformed": false
+    },
+    "originalReturn": {
+      "format": "cj1-offline-program-write-audit",
+      "state": "ready",
+      "imageSHA256": "d54d9fcb0e4c5f6fb95bc16c31b07fd55a880982835d31b6676af744a1c34a46",
+      "imageBytes": 2716,
+      "plannedBlocks": 3,
+      "attemptedBlocks": 0,
+      "acknowledgedBlocks": 0,
+      "acknowledgedBytes": 0,
+      "nextOffsetBytes": 0,
+      "allBlocksAcknowledged": false,
+      "uncertainWrite": false,
+      "reconciliationRequired": false,
+      "networkAccess": false,
+      "routeSIDVerified": false,
+      "hardwareQualified": false,
+      "writeQualified": false,
+      "rollbackPerformed": false
+    },
+    "original": {
+      "sha256": "d54d9fcb0e4c5f6fb95bc16c31b07fd55a880982835d31b6676af744a1c34a46",
+      "byteLength": 2716,
+      "parseableN1": true
+    },
+    "returnAttempted": false,
+    "programBytesReconciled": false,
+    "hardwareQualified": false,
+    "writeQualified": false,
+    "restoreQualified": false,
+    "fullControllerBackup": false
+  },
+  "startedUTC": "2026-11-21T19:08:14.0603008Z",
+  "writeQualified": false
+}

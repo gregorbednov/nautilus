@@ -1,0 +1,8 @@
+{
+  "model": "CJ1H-H CPU65",
+  "endpoint": "10.0.174.37:9600",
+  "programSHA256": "d54d9fcb0e4c5f6fb95bc16c31b07fd55a880982835d31b6676af744a1c34a46",
+  "unchangedInAllFourSamples": 36,
+  "changedBetweenStablePairs": {},
+  "variedWithinEitherPair": {}
+}

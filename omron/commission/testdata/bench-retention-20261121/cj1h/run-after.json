@@ -1,0 +1,78 @@
+{
+  "end": {
+    "status": 5,
+    "mode": 4,
+    "fatal": 0,
+    "nonFatal": 0,
+    "raw": "BQQAAAAAAAAAACAgICAgICAgICAgICAgICA="
+  },
+  "reads": [
+    {
+      "address": "C120",
+      "count": 2,
+      "hex": "00000003",
+      "utc": "2026-11-21T19:08:51.8140832Z"
+    },
+    {
+      "address": "C120.Q",
+      "count": 2,
+      "hex": "0100",
+      "utc": "2026-11-21T19:08:52.369699Z"
+    },
+    {
+      "address": "W0",
+      "count": 1,
+      "hex": "0004",
+      "utc": "2026-11-21T19:08:52.5717644Z"
+    },
+    {
+      "address": "CIO0",
+      "count": 1,
+      "hex": "0000",
+      "utc": "2026-11-21T19:08:52.8246435Z"
+    },
+    {
+      "address": "CIO4",
+      "count": 1,
+      "hex": "5400",
+      "utc": "2026-11-21T19:08:53.1175782Z"
+    },
+    {
+      "address": "H512",
+      "count": 7,
+      "hex": "000b010001000000000000000000",
+      "utc": "2026-11-21T19:08:53.3216768Z"
+    },
+    {
+      "address": "T0",
+      "count": 7,
+      "hex": "0000000000000000000000000000",
+      "utc": "2026-11-21T19:08:54.1472529Z"
+    },
+    {
+      "address": "T0.Q",
+      "count": 7,
+      "hex": "00000000000000",
+      "utc": "2026-11-21T19:08:54.4105098Z"
+    },
+    {
+      "address": "T3072",
+      "count": 4,
+      "hex": "0000000000000000",
+      "utc": "2026-11-21T19:08:54.6690798Z"
+    },
+    {
+      "address": "T3072.Q",
+      "count": 4,
+      "hex": "00000000",
+      "utc": "2026-11-21T19:08:54.8865418Z"
+    }
+  ],
+  "start": {
+    "status": 5,
+    "mode": 4,
+    "fatal": 0,
+    "nonFatal": 0,
+    "raw": "BQQAAAAAAAAAACAgICAgICAgICAgICAgICA="
+  }
+}

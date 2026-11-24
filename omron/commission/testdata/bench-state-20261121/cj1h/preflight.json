@@ -1,0 +1,152 @@
+{
+  "buildVerification": {
+    "method": "local-recompile-exact-bytes-v1",
+    "model": "CJ1H-H CPU65",
+    "unitVersion": "",
+    "timerCounterMode": "bcd",
+    "resource": "Resource[0]",
+    "sourceEncoding": "auto",
+    "sourceSHA256": "4da5146713565a40f9e7295e600ea8e4a26eec6eacd417f54bfcf9551c762517",
+    "canonicalSettingsSHA256": "5341790a1650dd03d7a118dd44f7139b79e81e9b959320518ee5dd173a65e3ad",
+    "imageSHA256": "1f29fa66b64fc843cbd27b89ad3e73de9bd9d44e65c851dbc94c225f691622d0",
+    "imageBytes": 4984
+  },
+  "format": "cj1-offline-program-preflight",
+  "declaredModel": "CJ1H-H CPU65",
+  "observedCompilerModel": "CJ1H-H CPU65",
+  "cpu": {
+    "model": "CJ1H_CPU65H",
+    "internalSystemVersion": "03.00\u0000\u0000\u0000\u0000\u000003.09",
+    "payloadBytes": 158,
+    "payloadSHA256": "7252317fd185c00f1b28338d9b90ec8ddee9747613dfeaadb86b3dc1d4f9e2da",
+    "dipSwitchBits": 0,
+    "largestEMBank": 3,
+    "programAreaKWords": 120,
+    "reportedProgramAreaBytes": 245760,
+    "iomKBytes": 23,
+    "dmWords": 32768,
+    "timerCounterUnits1024": 8,
+    "emNonFileBanks": 3,
+    "memoryCardType": 0,
+    "memoryCardKBytes": 0,
+    "uninterpretedTailBytes": 66
+  },
+  "status": {
+    "status": 5,
+    "mode": 4,
+    "fatal": 0,
+    "nonFatal": 0,
+    "raw": "BQQAAAAAAAAAACAgICAgICAgICAgICAgICA="
+  },
+  "candidate": {
+    "sha256": "1f29fa66b64fc843cbd27b89ad3e73de9bd9d44e65c851dbc94c225f691622d0",
+    "byteLength": 4984,
+    "parseableN1": true
+  },
+  "programBackups": [
+    {
+      "sha256": "d54d9fcb0e4c5f6fb95bc16c31b07fd55a880982835d31b6676af744a1c34a46",
+      "byteLength": 2716,
+      "parseableN1": true
+    },
+    {
+      "sha256": "d54d9fcb0e4c5f6fb95bc16c31b07fd55a880982835d31b6676af744a1c34a46",
+      "byteLength": 2716,
+      "parseableN1": true
+    }
+  ],
+  "backupPairEqual": true,
+  "candidateEqualsBackup": false,
+  "checks": [
+    {
+      "id": "snapshot-summary",
+      "state": "passed",
+      "detail": "summary fields must agree with decoded raw bytes; raw bytes are authoritative"
+    },
+    {
+      "id": "declared-target-model",
+      "state": "passed",
+      "detail": "only the two observed exact CPU identifiers are mapped; this does not prove candidate build provenance"
+    },
+    {
+      "id": "program-mode",
+      "state": "blocked",
+      "detail": "retained snapshot must show PROGRAM; no mode change is performed or live state inferred"
+    },
+    {
+      "id": "cpu-errors",
+      "state": "passed",
+      "detail": "nonzero fatal/nonfatal fields require review; no error is cleared"
+    },
+    {
+      "id": "program-capacity-upper-bound",
+      "state": "passed",
+      "detail": "arithmetic comparison with reported Kwords*1024*2; passing is not target-layout qualification"
+    },
+    {
+      "id": "program-backup-pair",
+      "state": "passed",
+      "detail": "both retained program files must parse as N1 and match exactly; this proves neither fresh reads nor full-controller backup"
+    },
+    {
+      "id": "backup-capacity-upper-bound",
+      "state": "passed",
+      "detail": "retained backup lengths must not exceed the reported program-area byte ceiling"
+    },
+    {
+      "id": "candidate-build-provenance",
+      "state": "passed",
+      "detail": "exact local recipe reproduction; does not authenticate historical origin or uniquely identify a CPU model"
+    },
+    {
+      "id": "observation-authentication-and-freshness",
+      "state": "unverified",
+      "detail": "retained files do not authenticate a current device, route, SID or observation time"
+    },
+    {
+      "id": "unit-version-profile",
+      "state": "unverified",
+      "detail": "0501 internal system version is not a qualified unit-version mapping; current compiler profiles have unknown unit version"
+    },
+    {
+      "id": "source-settings-agreement",
+      "state": "unverified",
+      "detail": "explicit recipe settings have not been proven to agree with opaque original project/device settings"
+    },
+    {
+      "id": "target-layout-and-finalization",
+      "state": "unverified",
+      "detail": "reported size does not qualify the complete N1 mapping, protection branch or CPU finalization"
+    },
+    {
+      "id": "full-backup-and-recovery",
+      "state": "unverified",
+      "detail": "program-only copies omit settings, I/O tables, retained data and a qualified restoration procedure"
+    },
+    {
+      "id": "initial-data-and-address-audit",
+      "state": "unverified",
+      "detail": "source allocation, initial values and affected target memory have not been audited here"
+    },
+    {
+      "id": "write-authorization",
+      "state": "unverified",
+      "detail": "this offline assessment does not establish stand isolation or operator authorization"
+    }
+  ],
+  "blockers": [
+    "program-mode",
+    "observation-authentication-and-freshness",
+    "unit-version-profile",
+    "source-settings-agreement",
+    "target-layout-and-finalization",
+    "full-backup-and-recovery",
+    "initial-data-and-address-audit",
+    "write-authorization"
+  ],
+  "retainedEvidenceOnly": true,
+  "networkAccess": false,
+  "readyForWrite": false,
+  "hardwareQualified": false,
+  "writeQualified": false
+}

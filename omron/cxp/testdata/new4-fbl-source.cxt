@@ -1,0 +1,213 @@
+CXProgVer:="1.8";
+ResourceCount:=1;
+Resource[0]:=
+BEGIN
+ Name:="FB source program";
+ FBMemory:=
+ BEGIN
+  BR[0]:="T3072,1024";
+  BR[1]:="C3072,1024";
+  BR[3]:="H512,896";
+  BR[4]:="H1408,128";
+  NumRegisters:=5;
+  StackSettings:=
+  BEGIN
+   StartAddress:="D0";
+   WordSize:=1472;
+   BitSize:=64;
+  END;
+  ShareSFCMemoryWithFBNonRetain:=true;
+ END;
+ GlobalVariables:=
+ BEGIN
+  VariableList:=
+  BEGIN_LIST_$#[3]
+   TEST,W10.00,BOOL,,,;
+   BLINK_L1," [Auto]",FUNCTION BLOCK,BLINK,A,;
+   BLINK_L2," [Auto]",FUNCTION BLOCK,BLINK,A,Сигнализация не готовности лифта;
+  END_LIST_$#[3];
+  VariableCount:=3;
+  POUInstances:=
+  BEGIN
+   Instance[0]:=
+   BEGIN
+    InstanceType:="FB";
+    Name:="BLINK_L1";
+    POUType:="BLINK";
+    InstanceNum:=0;
+    OnlineEditDiffExpand:=0;
+    BR0:="T3072,2";
+    BR1:="C3072,0";
+    BR2:="#00009FFF,0";
+    BR3:="H512,3";
+    BR4:="H1408,0";
+    MemoryAllocated:=true;
+   END;
+   Instance[1]:=
+   BEGIN
+    InstanceType:="FB";
+    Name:="BLINK_L2";
+    POUType:="BLINK";
+    InstanceNum:=3;
+    OnlineEditDiffExpand:=0;
+    BR0:="T3074,2";
+    BR1:="C3072,0";
+    BR2:="#00009FFF,0";
+    BR3:="H515,3";
+    BR4:="H1408,0";
+    MemoryAllocated:=true;
+   END;
+   NumInstances:=2;
+  END;
+ END;
+ FunctionBlocks:=
+ BEGIN
+  FunctionBlockCount:=1;
+  FunctionBlockWrapper[0]:=
+  BEGIN
+   FBType:="FBLadder";
+   FunctionBlock:=
+   BEGIN
+    IEC1131Type:=3;
+    CompileInline:=0;
+    Name:="BLINK";
+    FileType:=3;
+    Created:="22 2 2020 15 6 3";
+    Modified:="16 11 2026 15 12 36";
+    Protection:=
+    BEGIN
+     Enabled:=0;
+    END;
+    FBDefVer:="1.8";
+    OnlineReserveMemory:=
+    BEGIN
+     BR[0]:="0,0";
+     BR[1]:="0,0";
+     BR[2]:="0,0";
+     BR[3]:="0,0";
+     BR[4]:="0,0";
+     NumRegisters:=5;
+    END;
+    POUHeader:=
+    BEGIN
+     PouVarList:=
+     BEGIN_LIST_$#[7]
+      0,TIMER_1,13,,0,,0,;
+      0,TIMER_2,13,,0,,0,;
+      0,ON,0,,0,FALSE,0,;
+      1,PV,1,,0,0,0,;
+      1,PN,1,,0,0,0,;
+      1,IN,0,,0,FALSE,0,;
+      2,OUT,0,,0,FALSE,0,;
+     END_LIST_$#[7];
+     InstanceID:="22.02.2020 15:11:13";
+     PouVarCount:=7;
+    END;
+    POUBody:=
+    BEGIN
+     FBProgramData:=
+     BEGIN
+      FBRC:=6;
+      FBR[0]:=
+      BEGIN
+       Com:="";
+       Flags:="1,0";
+       TotEl:=7;
+       [0]:="0,0,1,1,1,1,IN, 8";
+       [1]:="6,0,1,0,3,5,TIMH(015), 0,TIMER_1, 0,PV, 0";
+       [2]:="2,0,1,1,1,1,EN, 0";
+       [3]:="1,0,1,1,1,1,ON, 8";
+       [4]:="3,0,1,1,0,3";
+       [5]:="4,0,1,1,0,3";
+       [6]:="5,0,1,1,0,3";
+      END;
+      FBR[1]:=
+      BEGIN
+       Com:="";
+       Flags:="1,0";
+       TotEl:=7;
+       [0]:="0,0,1,1,1,1,TIMER_1, 0";
+       [1]:="6,0,1,0,3,5,TIMH(015), 0,TIMER_2, 0,PN, 0";
+       [2]:="1,0,1,1,0,3";
+       [3]:="2,0,1,1,0,3";
+       [4]:="3,0,1,1,0,3";
+       [5]:="4,0,1,1,0,3";
+       [6]:="5,0,1,1,0,3";
+      END;
+      FBR[2]:=
+      BEGIN
+       Com:="";
+       Flags:="1,0";
+       TotEl:=7;
+       [0]:="0,0,1,1,1,1,TIMER_1, 0";
+       [1]:="6,0,1,1,1,2,OUT, 0";
+       [2]:="1,0,1,1,0,3";
+       [3]:="2,0,1,1,0,3";
+       [4]:="3,0,1,1,0,3";
+       [5]:="4,0,1,1,0,3";
+       [6]:="5,0,1,1,0,3";
+      END;
+      FBR[3]:=
+      BEGIN
+       Com:="";
+       Flags:="1,0";
+       TotEl:=7;
+       [0]:="0,0,1,1,1,1,TIMER_2, 0";
+       [1]:="6,0,1,1,1,2,ON, 0";
+       [2]:="1,0,1,1,0,3";
+       [3]:="2,0,1,1,0,3";
+       [4]:="3,0,1,1,0,3";
+       [5]:="4,0,1,1,0,3";
+       [6]:="5,0,1,1,0,3";
+      END;
+      FBR[4]:=
+      BEGIN
+       Com:="";
+       Flags:="1,0";
+       TotEl:=7;
+       [0]:="0,0,1,1,1,1,EN, 0";
+       [1]:="6,0,1,0,2,5,SET, 0,OUT, 0";
+       [2]:="1,0,1,1,1,1,IN, 0";
+       [3]:="2,0,1,1,0,3";
+       [4]:="3,0,1,1,0,3";
+       [5]:="4,0,1,1,0,3";
+       [6]:="5,0,1,1,0,3";
+      END;
+      FBR[5]:=
+      BEGIN
+       Com:="";
+       Flags:="1,0";
+       TotEl:=7;
+       [0]:="0,0,1,1,1,1,EN, 8";
+       [1]:="6,0,1,0,2,5,RSET, 0,OUT, 0";
+       [2]:="1,0,1,1,0,3";
+       [3]:="2,0,1,1,0,3";
+       [4]:="3,0,1,1,0,3";
+       [5]:="4,0,1,1,0,3";
+       [6]:="5,0,1,1,0,3";
+      END;
+     END;
+    END;
+    TaskID:=1024;
+   END;
+  END;
+ END;
+ Programs:=
+ BEGIN
+  ProgramCount:=1;
+  Program[0]:=
+  BEGIN
+   LocalVariables:=
+   BEGIN
+    VariableList:=
+    BEGIN_LIST_$#[99]
+    END_LIST_$#[99];
+    VariableCount:=0;
+    POUInstances:=
+    BEGIN
+     NumInstances:=0;
+    END;
+   END;
+  END;
+ END;
+END;

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "method": "isolated copied arithmetic function in owned x86 process; no vendor DLL loaded or network",
+  "sourceSHA256": "be53c4711cd58094919fffa058de90b6f223357572a54b410a28f61abc7c589a",
+  "function": "10009580",
+  "functionBytes": 100,
+  "codeSHA256": "0d993a5edc6d751a13abdc80dc6440992ee1811365d5af873d1b7fb11e3e3f99",
+  "plainModuleSHA256": "397a44d32ffd57cb926c854eac445c471665d2e73e4ad1abfa55c7657f0f1d84",
+  "plainFunction": "10009750",
+  "plainCodeSHA256": "0d993a5edc6d751a13abdc80dc6440992ee1811365d5af873d1b7fb11e3e3f99",
+  "nativeCases": 80,
+  "syntheticCases": 76,
+  "liveSumCases": 4,
+  "hardwareQualified": false,
+  "targetFinalizationQualified": false,
+  "artifacts": {
+    "native-um-sum-cases.json.gz": {
+      "sha256": "e9347bea63d9552442889d993f7743fc691a0608ed66eb4b8db61385f3b6835b",
+      "decodedSHA256": "2b7030aa6bb50b571fc068f3c7e802a8392851747c23251ec99e1db7eb23c6fb",
+      "bytes": 29804
+    },
+    "native-um-sum-results.json.gz": {
+      "sha256": "1925f93bf3fc506c05e02acda2a177036bbb3edeb58e74adab2ee2a52ffd3638",
+      "decodedSHA256": "64f1e31dfdc89f7002204d5b2bea0a6b5ecee5c118bb340a171bffb780fb6a94",
+      "bytes": 1400
+    },
+    "native-um-service-observations.json.gz": {
+      "sha256": "6b5360409dde6de0fb1ef304821966468b7c59556b1f662d8d1259d7a9c12b6d",
+      "decodedSHA256": "a4a96cb316a85e55c380868b7bd056018a253bcb52db7cf1a25ae5f9c24cc33a",
+      "bytes": 418
+    },
+    "native-um-sum-ghidra.json.gz": {
+      "sha256": "c505c4347e9c2eebf25ac8a97e4a20dd3359c3f18213fab1d8e2c34bb4dea214",
+      "decodedSHA256": "a6d8242edbfacb78deac6291c44d7bfdc3fb0ead961db771c34a00b877f19a55",
+      "bytes": 15662
+    }
+  }
+}

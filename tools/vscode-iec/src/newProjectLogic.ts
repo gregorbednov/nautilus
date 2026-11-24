@@ -17,9 +17,7 @@ export interface TemplateItem {
   description: string;
 }
 
-/** Same four templates and descriptions `naut new`'s own interactive form
- * offers (cmd/naut/new.go's templateSelect) — Demo first, since it's the
- * default and the fastest way to see everything working. */
+/** The CJ1 target uses the dedicated omron new-project command. */
 export const NEW_PROJECT_TEMPLATES: TemplateItem[] = [
   {
     template: "demo",
@@ -41,7 +39,20 @@ export const NEW_PROJECT_TEMPLATES: TemplateItem[] = [
     label: "SDK demo",
     description: "Go project with plant physics in Go",
   },
+  { template: "cj1", label: "Omron CJ1", description: "CJ1M CPU21 or CJ1H-H CPU65 ladder project" },
 ];
+
+export interface CJ1Options {
+  model: string;
+  timerMode: string;
+  imported?: {source: string; settings: string};
+}
+
+export function cj1ProjectArgs(name: string, options: CJ1Options): string[] {
+  const args = ["omron", "new-project", "-model", options.model, "-timer-mode", options.timerMode];
+  if (options.imported) args.push("-source", options.imported.source, "-settings", options.imported.settings);
+  return [...args, "--", name];
+}
 
 export interface LanguageItem {
   language: string;

@@ -1,0 +1,27 @@
+{
+  "format": "cj1-program-session-backup-v1",
+  "programOnly": true,
+  "fullControllerBackup": false,
+  "files": [
+    {
+      "name": "candidate.n1",
+      "bytes": 2624,
+      "sha256": "598e01ac119b890c94f5495e267269fa9546aff32e130f481d68e1ed35601b84"
+    },
+    {
+      "name": "original-1.um",
+      "bytes": 4672,
+      "sha256": "a4c0b45ba391fcd0cefb49bce52058168971e4aca1e6b29fe05937f80961c8cf"
+    },
+    {
+      "name": "original-2.um",
+      "bytes": 4672,
+      "sha256": "a4c0b45ba391fcd0cefb49bce52058168971e4aca1e6b29fe05937f80961c8cf"
+    },
+    {
+      "name": "observations.json",
+      "bytes": 1794,
+      "sha256": "4e2001b913bb94a7a768e237a3cc03327ad48ad0d862bf02726a41f74bf41d82"
+    }
+  ]
+}

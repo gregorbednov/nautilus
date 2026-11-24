@@ -1,0 +1,1058 @@
+[
+  {
+    "parameter": {
+      "source": "#0000",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-0",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "#0001",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-1",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "#0100",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-2",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "#FFFF",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-3",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "&0",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-4",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "&1",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-5",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "&100",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-6",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "&65535",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-7",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "0",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-8",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "0",
+      "usage": 2,
+      "type": "WORD"
+    },
+    "id": "scalar-9",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "6143",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-10",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "6143",
+      "usage": 2,
+      "type": "WORD"
+    },
+    "id": "scalar-11",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W0",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-12",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W0",
+      "usage": 2,
+      "type": "WORD"
+    },
+    "id": "scalar-13",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W511",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-14",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W511",
+      "usage": 2,
+      "type": "WORD"
+    },
+    "id": "scalar-15",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H0",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-16",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H0",
+      "usage": 2,
+      "type": "WORD"
+    },
+    "id": "scalar-17",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H511",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-18",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H511",
+      "usage": 2,
+      "type": "WORD"
+    },
+    "id": "scalar-19",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "D0",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-20",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "D0",
+      "usage": 2,
+      "type": "WORD"
+    },
+    "id": "scalar-21",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "D32767",
+      "usage": 1,
+      "type": "WORD"
+    },
+    "id": "scalar-22",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "D32767",
+      "usage": 2,
+      "type": "WORD"
+    },
+    "id": "scalar-23",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "#0000",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-24",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "#0001",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-25",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "#0100",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-26",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "#FFFF",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-27",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "&0",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-28",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "&1",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-29",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "&100",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-30",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "&65535",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-31",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "0",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-32",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "0",
+      "usage": 2,
+      "type": "UINT"
+    },
+    "id": "scalar-33",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "6143",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-34",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "6143",
+      "usage": 2,
+      "type": "UINT"
+    },
+    "id": "scalar-35",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W0",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-36",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W0",
+      "usage": 2,
+      "type": "UINT"
+    },
+    "id": "scalar-37",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W511",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-38",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W511",
+      "usage": 2,
+      "type": "UINT"
+    },
+    "id": "scalar-39",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H0",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-40",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H0",
+      "usage": 2,
+      "type": "UINT"
+    },
+    "id": "scalar-41",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H511",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-42",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H511",
+      "usage": 2,
+      "type": "UINT"
+    },
+    "id": "scalar-43",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "D0",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-44",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "D0",
+      "usage": 2,
+      "type": "UINT"
+    },
+    "id": "scalar-45",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "D32767",
+      "usage": 1,
+      "type": "UINT"
+    },
+    "id": "scalar-46",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "D32767",
+      "usage": 2,
+      "type": "UINT"
+    },
+    "id": "scalar-47",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "#0000",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-48",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "#0001",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-49",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "#0100",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-50",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "#FFFF",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-51",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "&0",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-52",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "&1",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-53",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "&100",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-54",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "&65535",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-55",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "0",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-56",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "0",
+      "usage": 2,
+      "type": "INT"
+    },
+    "id": "scalar-57",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "6143",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-58",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "6143",
+      "usage": 2,
+      "type": "INT"
+    },
+    "id": "scalar-59",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W0",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-60",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W0",
+      "usage": 2,
+      "type": "INT"
+    },
+    "id": "scalar-61",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W511",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-62",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W511",
+      "usage": 2,
+      "type": "INT"
+    },
+    "id": "scalar-63",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H0",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-64",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H0",
+      "usage": 2,
+      "type": "INT"
+    },
+    "id": "scalar-65",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H511",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-66",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H511",
+      "usage": 2,
+      "type": "INT"
+    },
+    "id": "scalar-67",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "D0",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-68",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "D0",
+      "usage": 2,
+      "type": "INT"
+    },
+    "id": "scalar-69",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "D32767",
+      "usage": 1,
+      "type": "INT"
+    },
+    "id": "scalar-70",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "D32767",
+      "usage": 2,
+      "type": "INT"
+    },
+    "id": "scalar-71",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "0.00",
+      "usage": 1,
+      "type": "BOOL"
+    },
+    "id": "scalar-72",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "0.00",
+      "usage": 2,
+      "type": "BOOL"
+    },
+    "id": "scalar-73",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "4.14",
+      "usage": 1,
+      "type": "BOOL"
+    },
+    "id": "scalar-74",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "4.14",
+      "usage": 2,
+      "type": "BOOL"
+    },
+    "id": "scalar-75",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "6143.15",
+      "usage": 1,
+      "type": "BOOL"
+    },
+    "id": "scalar-76",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "6143.15",
+      "usage": 2,
+      "type": "BOOL"
+    },
+    "id": "scalar-77",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W0.00",
+      "usage": 1,
+      "type": "BOOL"
+    },
+    "id": "scalar-78",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W0.00",
+      "usage": 2,
+      "type": "BOOL"
+    },
+    "id": "scalar-79",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W1.01",
+      "usage": 1,
+      "type": "BOOL"
+    },
+    "id": "scalar-80",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W1.01",
+      "usage": 2,
+      "type": "BOOL"
+    },
+    "id": "scalar-81",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W511.15",
+      "usage": 1,
+      "type": "BOOL"
+    },
+    "id": "scalar-82",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "W511.15",
+      "usage": 2,
+      "type": "BOOL"
+    },
+    "id": "scalar-83",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H0.00",
+      "usage": 1,
+      "type": "BOOL"
+    },
+    "id": "scalar-84",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H0.00",
+      "usage": 2,
+      "type": "BOOL"
+    },
+    "id": "scalar-85",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H511.15",
+      "usage": 1,
+      "type": "BOOL"
+    },
+    "id": "scalar-86",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "parameter": {
+      "source": "H511.15",
+      "usage": 2,
+      "type": "BOOL"
+    },
+    "id": "scalar-87",
+    "operands": [
+      "&0"
+    ],
+    "mnemonic": "FBCALL"
+  }
+]

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "method": "com-pou-header-offline-allocation",
+  "pheadSHA256": "463eb4402bb6fa00453a5d7a745d77ced6be454d77aa2a683eb67de7e38ba71c",
+  "requestSHA256": "f29d2a9c315f3dd1937f576a46ed95cbc127063ddf967aab701ed5060597f8ae",
+  "eventIID": "d9e8bf87-d3ce-4964-aa4a-71aeb47a2d18",
+  "onlineBoolReserve": 0,
+  "onlineOtherReserve": 0,
+  "cpuSpecific": false,
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "artifacts": {
+    "cases": {
+      "path": "allocation-cases.json.gz",
+      "sha256": "5e13016422f117ff65f049872be6527783aa2feeb7e554ed1a576d0dfa76ed02",
+      "bytes": 1801,
+      "encoding": "gzip",
+      "decodedSHA256": "f29d2a9c315f3dd1937f576a46ed95cbc127063ddf967aab701ed5060597f8ae"
+    },
+    "events": {
+      "path": "allocation-events.jsonl.gz",
+      "sha256": "ebe601bde8a78c1ea4edd11b677eb12330fbfd897cc6b341e3d1ed08701b3514",
+      "bytes": 3544,
+      "encoding": "gzip",
+      "decodedSHA256": "f4db9b48fbf5b53ff7a7ebb83d12c6dc99d3b197749e12e3bdc4c07ff1947fb3"
+    },
+    "worker": {
+      "path": "allocation-worker.ps1",
+      "sha256": "55117bf38feff9054decb389afa5224ae50e857cc8855f7c652765c024e0e79b",
+      "bytes": 5641
+    }
+  }
+}

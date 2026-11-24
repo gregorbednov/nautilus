@@ -1,0 +1,65 @@
+CXProgVer:="1.8";
+Resource[0]:=
+BEGIN
+ FunctionBlocks:=
+ BEGIN
+  FunctionBlockCount:=1;
+  FunctionBlockWrapper[0]:=
+  BEGIN
+   FBType:="FBLadder";
+   FunctionBlock:=
+   BEGIN
+    IEC1131Type:=3;
+    CompileInline:=0;
+    Name:="LD_Probe";
+    FileType:=3;
+    Created:="20 11 2026 2 51 9";
+    Modified:="20 11 2026 2 55 49";
+    Protection:=
+    BEGIN
+     Enabled:=0;
+    END;
+    FBDefVer:="2.0";
+    OnlineReserveMemory:=
+    BEGIN
+     BR[0]:="0,0";
+     BR[1]:="0,0";
+     BR[2]:="0,0";
+     BR[3]:="0,0";
+     BR[4]:="0,0";
+     NumRegisters:=5;
+    END;
+    POUHeader:=
+    BEGIN
+     PouVarList:=
+     BEGIN_LIST_$#[11]
+      4,SharedBit,0,,0,,0,,0,,0;
+     END_LIST_$#[11];
+     InstanceID:="11/20/26 02:52:10";
+     PouVarCount:=1;
+    END;
+    POUBody:=
+    BEGIN
+     FBProgramData:=
+     BEGIN
+      FBRC:=1;
+      FBR[0]:=
+      BEGIN
+       Com:="";
+       Flags:="1,0";
+       TotEl:=7;
+       [0]:="0,0,1,1,0,1,1,SharedBit, 8";
+       [1]:="6,0,1,1,0,1,2,SharedBit, 0";
+       [2]:="1,0,1,1,0,0,3";
+       [3]:="2,0,1,1,0,0,3";
+       [4]:="3,0,1,1,0,0,3";
+       [5]:="4,0,1,1,0,0,3";
+       [6]:="5,0,1,1,0,0,3";
+      END;
+     END;
+    END;
+    TaskID:=1025;
+   END;
+  END;
+ END;
+END;

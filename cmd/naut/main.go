@@ -60,6 +60,8 @@ Usage:
                           per site choosing which tag-files it composes and
                           which controller it points at. Every one of them is
                           committed, so what deploys is always readable.
+  naut omron <cmd>    CJ1M/CJ1H source inspection, CXP/CXT editing, read-only
+                          commissioning and program backups (experimental).
   naut eip <cmd>      EtherNet/IP tools: import (browse a Logix controller
                           and generate types + tag manifest) and browse.
   naut logix <cmd>    Allen-Bradley Logix tools: import an L5X export's
@@ -191,6 +193,8 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "omron":
+		os.Exit(runOmron(os.Args[2:]))
 	case "lsp":
 		if err := lsp.Serve(os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "naut lsp:", err)

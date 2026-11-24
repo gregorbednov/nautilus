@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "a91758c0de5a640fdfc29fbe635dc583fe69def2669b0427e78afa9f8e426103",
+  "programType": 32,
+  "unitVersion": null,
+  "timerCounterMode": "bcd",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "probe": "fb-body-operands-v1",
+  "artifacts": {
+    "template": {
+      "path": "fb-body-template.js",
+      "sha256": "0ee8171817636f491be3a1bad57c93a7c85f6335baf6aa2f71962f1eebfb020c",
+      "bytes": 10591
+    },
+    "worker": {
+      "path": "fb-body-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    },
+    "cases": {
+      "path": "br-rendered-cases.json",
+      "sha256": "a91758c0de5a640fdfc29fbe635dc583fe69def2669b0427e78afa9f8e426103",
+      "bytes": 3635
+    },
+    "events": {
+      "path": "br-rendered-events.jsonl.gz",
+      "sha256": "b2d5e7940a8ad78d51b555acb5ae942338dfea35fd9c1dbff1080971173ca0ee",
+      "bytes": 1574,
+      "encoding": "gzip",
+      "decodedSHA256": "cc3435089035078d3b01db3297972b7aebd765b75fda87d9febbeb5771bb705e"
+    },
+    "script": {
+      "path": "br-rendered-run.js.gz",
+      "sha256": "4325e5493e2fd5538bae69fd4531064b9fa15fe93ccc83becf439fcf7f938cc4",
+      "bytes": 3964,
+      "encoding": "gzip",
+      "decodedSHA256": "009f46eb4ae24f773d04091df2ae64434f615fd779eed0fe2973b7604391bcb1"
+    }
+  }
+}

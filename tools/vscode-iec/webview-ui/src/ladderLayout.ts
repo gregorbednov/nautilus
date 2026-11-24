@@ -10,7 +10,7 @@
 // Every node carries its model PATH (and coils their index), so gestures
 // address `naut ld edit` ops directly from the geometry.
 
-import type { Ann } from './ladder';
+import { functionLabel, type Ann } from './ladder.ts';
 
 export const L = {
 	RAIL_X: 10, // the vertical power rails
@@ -213,7 +213,7 @@ export function assignSize(a: Ann): { w: number; h: number } {
 }
 
 export function fnWidth(a: Ann): number {
-	return Math.max(L.FN_MIN_W, Math.ceil(textW(`${a.el.fn}(${a.el.args ?? ''})`, 10)) + 2 * L.FN_PAD);
+	return Math.max(L.FN_MIN_W, Math.ceil(textW(functionLabel(a.el), 10)) + 2 * L.FN_PAD);
 }
 export function fbWidth(a: Ann): number {
 	return Math.max(
@@ -284,6 +284,14 @@ export function layoutSeries(anns: Ann[], x: number, cy: number, path: number[] 
 				const y = cy - halfC;
 				nodes.push({ kind: 'edge', x: cursor, y, w, h: L.CONTACT_H, ann: a, path: elPath });
 				descent = reserveWasLabel(a, cy, y, L.CONTACT_H, descent);
+				cursor += w;
+				break;
+			}
+			case 'coil': {
+				const w = operandBoxWidth(a.el.ref, L.COIL_W);
+				const y = cy - L.COIL_H / 2;
+				nodes.push({ kind: 'coil', x: cursor, y, w, h: L.COIL_H, ann: a, path: elPath });
+				descent = reserveWasLabel(a, cy, y, L.COIL_H, descent);
 				cursor += w;
 				break;
 			}

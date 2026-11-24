@@ -8,7 +8,7 @@
 export type LdElement = {
 	kind: 'contact' | 'edge' | 'branch' | 'fn' | 'fb' | 'coil' | 'assign';
 	ref?: string;
-	/** assign: the element's body, `y := a + b; z := 0`. */
+	/** Assignment body or the verbatim label of a native instruction. */
 	text?: string;
 	neg?: boolean;
 	mode?: string; // coil: "" | "S" | "R" | "P" | "N"; edge: "P" | "N"
@@ -65,6 +65,19 @@ export type LdFbType = {
 };
 /** A tag nautilus.yaml declares (sent with the model inside a project). */
 export type LdTag = { name: string; type?: string; role?: string; unit?: string; desc?: string };
+export type OmronVariable = { name: string; scope: string; address: string; type: string; key?: string };
+export type OmronSample = {
+	cpu: { connected: boolean; mode: number; lastError?: string };
+	values: Record<string, boolean | number>;
+	quality: Record<string, string>;
+};
+export type OmronWatchMessage = {
+	type: 'omronWatch';
+	active: boolean;
+	endpoint?: string;
+	sample?: OmronSample;
+	error?: string;
+};
 export type LdModel = {
 	name: string;
 	vars?: LdVar[];
@@ -78,6 +91,7 @@ export type LdModel = {
 	/** Names the project's libraries put in scope that need no declaration:
 	 * VAR_GLOBAL CONSTANT constants and enumeration members. */
 	known?: string[];
+	omron?: { rows: OmronVariable[]; error?: string };
 	/** A whitespace-only source: no POU yet; the first op seeds one. */
 	blank?: boolean;
 };
@@ -99,6 +113,14 @@ export type Ann = {
 	val?: boolean; // the element's own state (contact closed, coil energized)
 	legs?: Ann[][];
 };
+
+export function functionLabel(el: LdElement): string {
+	return el.text ?? `${el.fn}(${el.args ?? ''})`;
+}
+
+export function omronValue(value: number | boolean | undefined): string {
+	return typeof value === 'boolean' ? (value ? 'TRUE' : 'FALSE') : value === undefined ? '' : String(value);
+}
 
 type Resolve = (label: string) => unknown;
 

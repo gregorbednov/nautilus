@@ -35,6 +35,7 @@ import { registerComponentPreview } from "./componentPreview";
 import { registerPagePreview } from "./pagePreview";
 import { registerCopyKitComponentCommand } from "./copyKitComponent";
 import { registerNewProjectCommand } from "./newProject";
+import { registerCJ1Build } from "./omronBuild";
 import { AcceptanceTests } from "./acceptanceTests";
 import {
   addCliToPathCommand,
@@ -164,6 +165,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(ldEditor.register());
   // Rockwell L5X exports render through the same ladder editor.
   context.subscriptions.push(ldEditor.register(LdEditorProvider.l5xViewType));
+  context.subscriptions.push(ldEditor.register(LdEditorProvider.omronViewType));
   context.subscriptions.push(new SfcEditorProvider(context, live).register());
   // Title-bar hops between the text and the diagram editor.
   context.subscriptions.push(registerDiagramCommands());
@@ -381,6 +383,7 @@ function registerHmiAndProjectTools(context: vscode.ExtensionContext): void {
   // in VS Code's Simple Browser beside the text (pagePreview.ts).
   context.subscriptions.push(registerPagePreview());
   context.subscriptions.push(registerNewProjectCommand());
+  context.subscriptions.push(registerCJ1Build());
 }
 
 async function startLanguageClient(context: vscode.ExtensionContext): Promise<void> {

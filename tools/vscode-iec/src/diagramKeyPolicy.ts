@@ -36,6 +36,8 @@ export function diagramViewTypeFor(languageId: string): string | undefined {
       return "nautilus.sfcDiagram";
     case "logix-l5x":
       return "nautilus.l5xDiagram";
+    case "omron-cxt":
+      return "nautilus.omronLadder";
     default:
       return undefined;
   }

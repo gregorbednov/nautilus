@@ -1,0 +1,211 @@
+[
+  {
+    "id": "condition-0",
+    "mnemonic": "UP",
+    "operands": []
+  },
+  {
+    "id": "condition-1",
+    "mnemonic": "UP",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "condition-2",
+    "mnemonic": "UP",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "condition-3",
+    "mnemonic": "UP(521)",
+    "operands": []
+  },
+  {
+    "id": "condition-4",
+    "mnemonic": "UP(521)",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "condition-5",
+    "mnemonic": "UP(521)",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "condition-6",
+    "mnemonic": "DOWN",
+    "operands": []
+  },
+  {
+    "id": "condition-7",
+    "mnemonic": "DOWN",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "condition-8",
+    "mnemonic": "DOWN",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "condition-9",
+    "mnemonic": "DOWN(522)",
+    "operands": []
+  },
+  {
+    "id": "condition-10",
+    "mnemonic": "DOWN(522)",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "condition-11",
+    "mnemonic": "DOWN(522)",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "condition-12",
+    "mnemonic": "UP(999)",
+    "operands": []
+  },
+  {
+    "id": "condition-13",
+    "mnemonic": "UP(999)",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "condition-14",
+    "mnemonic": "UP(999)",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "condition-15",
+    "mnemonic": "DOWN(999)",
+    "operands": []
+  },
+  {
+    "id": "condition-16",
+    "mnemonic": "DOWN(999)",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "condition-17",
+    "mnemonic": "DOWN(999)",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "condition-18",
+    "mnemonic": "@UP(521)",
+    "operands": []
+  },
+  {
+    "id": "condition-19",
+    "mnemonic": "@UP(521)",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "condition-20",
+    "mnemonic": "@UP(521)",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "condition-21",
+    "mnemonic": "%UP(521)",
+    "operands": []
+  },
+  {
+    "id": "condition-22",
+    "mnemonic": "%UP(521)",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "condition-23",
+    "mnemonic": "%UP(521)",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "condition-24",
+    "mnemonic": "@DOWN(522)",
+    "operands": []
+  },
+  {
+    "id": "condition-25",
+    "mnemonic": "@DOWN(522)",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "condition-26",
+    "mnemonic": "@DOWN(522)",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "condition-27",
+    "mnemonic": "%DOWN(522)",
+    "operands": []
+  },
+  {
+    "id": "condition-28",
+    "mnemonic": "%DOWN(522)",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "condition-29",
+    "mnemonic": "%DOWN(522)",
+    "operands": [
+      "TR0"
+    ]
+  },
+  {
+    "id": "condition-30",
+    "mnemonic": "NOT(520)",
+    "operands": []
+  },
+  {
+    "id": "condition-31",
+    "mnemonic": "NOT(520)",
+    "operands": [
+      "W0.00"
+    ]
+  },
+  {
+    "id": "condition-32",
+    "mnemonic": "NOT(520)",
+    "operands": [
+      "TR0"
+    ]
+  }
+]

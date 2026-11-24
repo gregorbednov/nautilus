@@ -1,0 +1,177 @@
+[
+  {
+    "id": "ld",
+    "operands": [
+      "W0.00"
+    ],
+    "mnemonic": "LD"
+  },
+  {
+    "id": "ldnot",
+    "operands": [
+      "0.09"
+    ],
+    "mnemonic": "LDNOT"
+  },
+  {
+    "id": "and",
+    "operands": [
+      "T0"
+    ],
+    "mnemonic": "AND"
+  },
+  {
+    "id": "or",
+    "operands": [
+      "A448.00"
+    ],
+    "mnemonic": "OR"
+  },
+  {
+    "id": "out",
+    "operands": [
+      "W1.00"
+    ],
+    "mnemonic": "OUT"
+  },
+  {
+    "id": "set",
+    "operands": [
+      "W1.00"
+    ],
+    "mnemonic": "SET"
+  },
+  {
+    "id": "mov",
+    "operands": [
+      "#100",
+      "D0"
+    ],
+    "mnemonic": "MOV"
+  },
+  {
+    "id": "cmp",
+    "operands": [
+      "#DEAD",
+      "#DEAD"
+    ],
+    "mnemonic": "CMP"
+  },
+  {
+    "id": "timh",
+    "operands": [
+      "0",
+      "#0010"
+    ],
+    "mnemonic": "TIMH(015)"
+  },
+  {
+    "id": "cnt",
+    "operands": [
+      "0",
+      "#0010"
+    ],
+    "mnemonic": "CNT"
+  },
+  {
+    "id": "nop",
+    "operands": [],
+    "mnemonic": "NOP"
+  },
+  {
+    "id": "end",
+    "operands": [],
+    "mnemonic": "END"
+  },
+  {
+    "id": "andld",
+    "operands": [],
+    "mnemonic": "ANDLD"
+  },
+  {
+    "id": "not",
+    "operands": [],
+    "mnemonic": "NOT"
+  },
+  {
+    "id": "up",
+    "operands": [],
+    "mnemonic": "UP(521)"
+  },
+  {
+    "id": "down",
+    "operands": [],
+    "mnemonic": "DOWN(522)"
+  },
+  {
+    "id": "rising-ld",
+    "operands": [
+      "W0.00"
+    ],
+    "mnemonic": "@LD"
+  },
+  {
+    "id": "falling-set",
+    "operands": [
+      "W0.00"
+    ],
+    "mnemonic": "%SET"
+  },
+  {
+    "id": "fbicall",
+    "operands": [
+      "&0",
+      "&1024"
+    ],
+    "mnemonic": "FBICALL"
+  },
+  {
+    "id": "fbcall",
+    "operands": [
+      "&10"
+    ],
+    "mnemonic": "FBCALL"
+  },
+  {
+    "id": "fbend",
+    "operands": [],
+    "mnemonic": "FBEND"
+  },
+  {
+    "id": "fbbody",
+    "operands": [
+      "1024"
+    ],
+    "mnemonic": "FBBN"
+  },
+  {
+    "id": "fbinstance",
+    "operands": [
+      "3"
+    ],
+    "mnemonic": "FBIN"
+  },
+  {
+    "id": "fbiret",
+    "operands": [],
+    "mnemonic": "FBIRET"
+  },
+  {
+    "id": "fbbret",
+    "operands": [],
+    "mnemonic": "FBBRET"
+  },
+  {
+    "id": "invalid",
+    "operands": [],
+    "mnemonic": "MISSING"
+  },
+  {
+    "id": "bad-mov",
+    "operands": [
+      "#10000",
+      "D0"
+    ],
+    "mnemonic": "MOV"
+  }
+]

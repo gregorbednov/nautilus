@@ -1,0 +1,172 @@
+[
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "TaskA",
+      "protection": 0,
+      "number": -2
+    },
+    "id": "id--2"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "TaskA",
+      "protection": 0,
+      "number": -1
+    },
+    "id": "id--1"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "TaskA",
+      "protection": 0,
+      "number": 0
+    },
+    "id": "id-0"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "TaskA",
+      "protection": 0,
+      "number": 31
+    },
+    "id": "id-31"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "TaskA",
+      "protection": 0,
+      "number": 32
+    },
+    "id": "id-32"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "TaskA",
+      "protection": 0,
+      "number": 255
+    },
+    "id": "id-255"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "TaskA",
+      "protection": 0,
+      "number": 256
+    },
+    "id": "id-256"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "TaskA",
+      "protection": 0,
+      "number": 257
+    },
+    "id": "id-257"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "TaskA",
+      "protection": 0,
+      "number": 287
+    },
+    "id": "id-287"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "TaskA",
+      "protection": 0,
+      "number": 288
+    },
+    "id": "id-288"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "TaskA",
+      "protection": 0,
+      "number": 289
+    },
+    "id": "id-289"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "TaskA",
+      "protection": 0,
+      "number": 290
+    },
+    "id": "id-290"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "TaskA",
+      "protection": 0,
+      "number": 65535
+    },
+    "id": "id-65535"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "",
+      "protection": 0,
+      "number": 256
+    },
+    "id": "name-0"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "AAAAAAAAAAAAAAAAAAAAAAAA",
+      "protection": 0,
+      "number": 256
+    },
+    "id": "name-24"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "AAAAAAAAAAAAAAAAAAAAAAAAA",
+      "protection": 0,
+      "number": 256
+    },
+    "id": "name-25"
+  },
+  {
+    "operands": [],
+    "mnemonic": "NOP",
+    "taskProperties": {
+      "name": "TaskA",
+      "protection": 1,
+      "number": 256
+    },
+    "id": "protected"
+  }
+]

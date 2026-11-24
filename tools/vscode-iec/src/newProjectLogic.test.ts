@@ -3,6 +3,7 @@
 // isn't worth mocking, cliInstall.test.ts-style).
 
 import { test } from "node:test";
+import { cj1ProjectArgs } from "./newProjectLogic";
 import * as assert from "node:assert/strict";
 import { NEW_PROJECT_LANGUAGES, NEW_PROJECT_TEMPLATES, templateTakesLanguage, newProjectArgs, validateProjectName, resolveParentInput, parentFolderProblem } from "./newProjectLogic";
 
@@ -35,8 +36,13 @@ test("newProjectArgs: builds naut new's non-interactive argv", () => {
 test("NEW_PROJECT_TEMPLATES: covers every template naut new supports, demo first", () => {
   assert.deepEqual(
     NEW_PROJECT_TEMPLATES.map((t) => t.template),
-    ["demo", "minimal", "sdk", "sdk-demo"]
+    ["demo", "minimal", "sdk", "sdk-demo", "cj1"]
   );
+});
+
+test("CJ1 import preserves model, mode and paths as separate arguments", () => {
+  assert.deepEqual(cj1ProjectArgs("plant", {model: "CJ1M CPU21", timerMode: "bcd", imported: {source: "Lift 1.cxp", settings: "Lift settings.json"}}),
+    ["omron", "new-project", "-model", "CJ1M CPU21", "-timer-mode", "bcd", "-source", "Lift 1.cxp", "-settings", "Lift settings.json", "--", "plant"]);
 });
 
 test("newProjectArgs: passes --language for Minimal and SDK", () => {

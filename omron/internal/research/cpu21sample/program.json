@@ -1,0 +1,24 @@
+{
+  "definitions": [
+    {"name":"Humidity","bodyNumber":1025},
+    {"name":"Temperature","bodyNumber":1024}
+  ],
+  "instances": [
+    {"number":1,"definition":"Temperature","holding":536},
+    {"number":2,"definition":"Temperature","holding":512},
+    {"number":3,"definition":"Temperature","holding":520},
+    {"number":4,"definition":"Temperature","holding":528},
+    {"number":5,"definition":"Humidity","holding":580},
+    {"number":6,"definition":"Temperature","holding":544}
+  ],
+  "task": {
+    "number":256,
+    "name":"НоваяЗадача1",
+    "operationStart":true,
+    "instructions":[
+      "LD CF113", "CALL 6 2097 D100", "OUT W0.02",
+      "LD CF113", "CALL 5 2098 D200", "OUT W0.03",
+      "LD CF113", "SET 2090.00", "MOV D300 2091", "CMP #DEAD #DEAD", "END"
+    ]
+  }
+}

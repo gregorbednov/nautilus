@@ -11,7 +11,7 @@
 	// SVG), resolved at pointerup via elementFromPoint with a
 	// nearest-hotspot snap fallback.
 	import { isToggleKey, ldElementTag, tagContext } from './liveTag';
-	import { annotate, argIdents, offerType, useTypes, type Ann, type LdElement, type LdFbType, type LdModel, type LdRung, type RungStatus } from './ladder';
+	import { annotate, argIdents, functionLabel, offerType, useTypes, type Ann, type LdElement, type LdFbType, type LdModel, type LdRung, type RungStatus } from './ladder';
 	import LdBlockPicker from './LdBlockPicker.svelte';
 	import { FB_TYPES } from './suggest';
 	import { layoutRung, rungMinWidth, fitArgs, assignLines, assignLineDy, L, OPERAND_LABEL_MAX, type LSpot, type LNode, type LBranch, type RungLayout } from './ladderLayout';
@@ -29,6 +29,7 @@
 		diags = [],
 		status = {},
 		showLive = true,
+		sampleValue,
 		zoom = 1,
 		onOp,
 		onTrace,
@@ -43,6 +44,7 @@
 		diags?: Diag[];
 		status?: Record<string, RungStatus>;
 		showLive?: boolean;
+		sampleValue?: (ref: string, scope?: string) => string;
 		/** Display scale (ZoomPane): the SVGs draw at width/height × zoom
 		 * over an unscaled viewBox, so layout units never change. */
 		zoom?: number;
@@ -99,6 +101,7 @@
 
 	/** Right-click context for VS Code (webview/context menus): the tag. */
 	function vsContext(r: { scope?: unknown; pou?: string }, el: { kind: string; ref?: string }): string | undefined {
+		if (sampleValue) return undefined;
 		return tagContext(writableTag(r, el));
 	}
 
@@ -180,6 +183,7 @@
 	const diffNote = (el: { _diff?: string; _was?: string }) =>
 		el._diff === 'changed' ? ` — changed${el._was ? ` (was ${el._was})` : ''}` : el._diff ? ` — ${el._diff}` : '';
 	const valText = (r: { scope?: string; pou?: string }, ref: string | undefined) => {
+		if (sampleValue) return ref ? sampleValue(ref, r.scope) : '';
 		if (!showVal || !ref) return '';
 		const v = lv(r, ref);
 		// A Logix rung's scoped name is not a controller path: no type.
@@ -1048,9 +1052,12 @@
 				<text x={n.w / 2} y={n.h + 24} text-anchor="middle" class="liveval" class:lit={n.ann.val === true} class:enum={liveEnum(addrOf(r, n.ann.el.ref))}>{#if liveForced(addrOf(r, n.ann.el.ref))}<tspan class="nx-forced-mark">{'F '}</tspan>{/if}{valText(r, n.ann.el.ref)}</text>
 			{/if}
 		{:else if n.kind === 'fn'}
-			<title>{n.ann.el.fn}({n.ann.el.args}){diffNote(n.ann.el)}{editable ? ' — dblclick: edit the call (any function) · Del · drag to move' : ''}</title>
+			<title>{functionLabel(n.ann.el)}{diffNote(n.ann.el)}{editable ? ' — dblclick: edit the call (any function) · Del · drag to move' : ''}</title>
 			<rect x="0" y="0" width={n.w} height={n.h} rx="4" class="box" />
-			<text x={n.w / 2} y={n.h / 2 + 3.5} text-anchor="middle" class="fntext">{n.ann.el.fn}({n.ann.el.args})</text>
+			<text x={n.w / 2} y={n.h / 2 + 3.5} text-anchor="middle" class="fntext">{functionLabel(n.ann.el)}</text>
+			{#if n.ann.el.ref && sampleValue}
+				<text x={n.w / 2} y={n.h + 13} text-anchor="middle" class="liveval">{sampleValue(n.ann.el.ref + '.PV', r.scope)}</text>
+			{/if}
 		{:else if n.kind === 'assign'}
 			<title>{'{ ' + (n.ann.el.text ?? '') + ' }'}{diffNote(n.ann.el)}{editable ? ' — dblclick: edit the assignment(s) · Del · drag to move' : ''}</title>
 			<rect x="0" y="0" width={n.w} height={n.h} rx="4" class="box" />

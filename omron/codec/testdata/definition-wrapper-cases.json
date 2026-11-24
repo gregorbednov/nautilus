@@ -1,0 +1,133 @@
+[
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "&0"
+    ],
+    "id": "entry-0"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "0"
+    ],
+    "id": "entry-1"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "&1"
+    ],
+    "id": "entry-2"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "1"
+    ],
+    "id": "entry-3"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "&1023"
+    ],
+    "id": "entry-4"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "1023"
+    ],
+    "id": "entry-5"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "&1024"
+    ],
+    "id": "entry-6"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "1024"
+    ],
+    "id": "entry-7"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "&1025"
+    ],
+    "id": "entry-8"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "1025"
+    ],
+    "id": "entry-9"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "&2047"
+    ],
+    "id": "entry-10"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "2047"
+    ],
+    "id": "entry-11"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "&2048"
+    ],
+    "id": "entry-12"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "2048"
+    ],
+    "id": "entry-13"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "&65535"
+    ],
+    "id": "entry-14"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "65535"
+    ],
+    "id": "entry-15"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "&65536"
+    ],
+    "id": "entry-16"
+  },
+  {
+    "mnemonic": "FBBN",
+    "operands": [
+      "65536"
+    ],
+    "id": "entry-17"
+  },
+  {
+    "mnemonic": "FBBRET",
+    "operands": [],
+    "id": "return"
+  }
+]

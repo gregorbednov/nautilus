@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "origin": "retained-disposable-native-library-worker",
+  "sourceEventLogSHA256": "b2f1813d2a2a55d0270cb9ec88c715353f8afecd7c88f6490f19cf48b618c9a8",
+  "events": [
+    {
+      "schemaVersion": 1,
+      "kind": "begin",
+      "sequence": 0,
+      "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+      "requestSHA256": "59231d2a24600a1396d8eb896469da21de14af6438117a8c333ae7946d537fa5",
+      "fridaVersion": "17.26.3",
+      "architecture": "ia32",
+      "programType": 0,
+      "unitVersion": null,
+      "timerCounterMode": "bcd",
+      "fullProgramCompiled": false,
+      "probe": "program-object-v1"
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "profile",
+      "sequence": 1,
+      "device": "CJ1M",
+      "cpu": "CPU21",
+      "selector": 8,
+      "familyMaskLow": 1024,
+      "familyMaskHigh": 0,
+      "timerModeBcd": 1,
+      "timerModeBinary": 0
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "profile",
+      "sequence": 32,
+      "device": "CJ1H-H",
+      "cpu": "CPU65",
+      "selector": 8,
+      "familyMaskLow": 524288,
+      "familyMaskHigh": 0,
+      "timerModeBcd": 1,
+      "timerModeBinary": 0
+    }
+  ],
+  "hardwareQualified": false,
+  "unitVersionKnown": false
+}

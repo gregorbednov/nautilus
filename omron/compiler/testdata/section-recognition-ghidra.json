@@ -1,0 +1,877 @@
+{
+  "schemaVersion": 1,
+  "engine": "ghidra",
+  "engineVersion": "12.1.4",
+  "sourceSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "language": "x86:LE:32:default",
+  "imageBase": "12000000",
+  "status": "research-only; CPU encoding unverified",
+  "analysisMode": "selected-functions; no whole-program auto-analysis",
+  "limitations": "Types and calling conventions may be incomplete; compare assembly before assigning semantics.",
+  "functions": [
+    {
+      "requestedAddress": "121ebe62",
+      "entry": "121ebe62",
+      "name": "FUN_121ebe62",
+      "signature": "undefined FUN_121ebe62(void)",
+      "instructions": [
+        {
+          "address": "121ebe62",
+          "text": "PUSH EBP"
+        },
+        {
+          "address": "121ebe63",
+          "text": "MOV EBP,ESP"
+        },
+        {
+          "address": "121ebe65",
+          "text": "PUSH -0x1"
+        },
+        {
+          "address": "121ebe67",
+          "text": "PUSH 0x1226512d"
+        },
+        {
+          "address": "121ebe6c",
+          "text": "MOV EAX,FS:[0x0]"
+        },
+        {
+          "address": "121ebe72",
+          "text": "PUSH EAX"
+        },
+        {
+          "address": "121ebe73",
+          "text": "MOV dword ptr FS:[0x0],ESP"
+        },
+        {
+          "address": "121ebe7a",
+          "text": "SUB ESP,0x20"
+        },
+        {
+          "address": "121ebe7d",
+          "text": "MOV EAX,dword ptr [EBP + 0xc]"
+        },
+        {
+          "address": "121ebe80",
+          "text": "MOV ECX,dword ptr [EAX + 0x8c]"
+        },
+        {
+          "address": "121ebe86",
+          "text": "AND ECX,0xff7fffff"
+        },
+        {
+          "address": "121ebe8c",
+          "text": "MOV EDX,dword ptr [EBP + 0xc]"
+        },
+        {
+          "address": "121ebe8f",
+          "text": "MOV dword ptr [EDX + 0x8c],ECX"
+        },
+        {
+          "address": "121ebe95",
+          "text": "PUSH 0x12221a50"
+        },
+        {
+          "address": "121ebe9a",
+          "text": "PUSH 0x12221a30"
+        },
+        {
+          "address": "121ebe9f",
+          "text": "PUSH 0x2"
+        },
+        {
+          "address": "121ebea1",
+          "text": "PUSH 0xc"
+        },
+        {
+          "address": "121ebea3",
+          "text": "LEA EAX,[EBP + -0x24]"
+        },
+        {
+          "address": "121ebea6",
+          "text": "PUSH EAX"
+        },
+        {
+          "address": "121ebea7",
+          "text": "CALL 0x1224e902"
+        },
+        {
+          "address": "121ebeac",
+          "text": "MOV dword ptr [EBP + -0x4],0x0"
+        },
+        {
+          "address": "121ebeb3",
+          "text": "PUSH 0x2"
+        },
+        {
+          "address": "121ebeb5",
+          "text": "LEA ECX,[EBP + -0x24]"
+        },
+        {
+          "address": "121ebeb8",
+          "text": "PUSH ECX"
+        },
+        {
+          "address": "121ebeb9",
+          "text": "MOV EDX,dword ptr [EBP + 0x8]"
+        },
+        {
+          "address": "121ebebc",
+          "text": "PUSH EDX"
+        },
+        {
+          "address": "121ebebd",
+          "text": "CALL 0x121eb7c9"
+        },
+        {
+          "address": "121ebec2",
+          "text": "ADD ESP,0xc"
+        },
+        {
+          "address": "121ebec5",
+          "text": "CMP dword ptr [EBP + -0x1c],0x0"
+        },
+        {
+          "address": "121ebec9",
+          "text": "JZ 0x121ebed1"
+        },
+        {
+          "address": "121ebecb",
+          "text": "CMP dword ptr [EBP + -0x10],0x0"
+        },
+        {
+          "address": "121ebecf",
+          "text": "JNZ 0x121ebeec"
+        },
+        {
+          "address": "121ebed1",
+          "text": "MOV dword ptr [EBP + -0x4],0xffffffff"
+        },
+        {
+          "address": "121ebed8",
+          "text": "PUSH 0x12221a50"
+        },
+        {
+          "address": "121ebedd",
+          "text": "PUSH 0x2"
+        },
+        {
+          "address": "121ebedf",
+          "text": "PUSH 0xc"
+        },
+        {
+          "address": "121ebee1",
+          "text": "LEA EAX,[EBP + -0x24]"
+        },
+        {
+          "address": "121ebee4",
+          "text": "PUSH EAX"
+        },
+        {
+          "address": "121ebee5",
+          "text": "CALL 0x1224e7d0"
+        },
+        {
+          "address": "121ebeea",
+          "text": "JMP 0x121ebf4c"
+        },
+        {
+          "address": "121ebeec",
+          "text": "MOV ECX,dword ptr [EBP + -0x1c]"
+        },
+        {
+          "address": "121ebeef",
+          "text": "MOV EDX,dword ptr [ECX + 0x48]"
+        },
+        {
+          "address": "121ebef2",
+          "text": "MOV dword ptr [EBP + -0x28],EDX"
+        },
+        {
+          "address": "121ebef5",
+          "text": "CMP dword ptr [EBP + -0x28],0x1"
+        },
+        {
+          "address": "121ebef9",
+          "text": "JNZ 0x121ebf33"
+        },
+        {
+          "address": "121ebefb",
+          "text": "MOV EAX,dword ptr [EBP + -0x10]"
+        },
+        {
+          "address": "121ebefe",
+          "text": "MOV ECX,dword ptr [EAX + 0x48]"
+        },
+        {
+          "address": "121ebf01",
+          "text": "MOV dword ptr [EBP + -0x2c],ECX"
+        },
+        {
+          "address": "121ebf04",
+          "text": "CMP dword ptr [EBP + -0x2c],0x1"
+        },
+        {
+          "address": "121ebf08",
+          "text": "JNZ 0x121ebf33"
+        },
+        {
+          "address": "121ebf0a",
+          "text": "CMP dword ptr [EBP + -0x20],0xdead"
+        },
+        {
+          "address": "121ebf11",
+          "text": "JNZ 0x121ebf33"
+        },
+        {
+          "address": "121ebf13",
+          "text": "CMP dword ptr [EBP + -0x14],0xdead"
+        },
+        {
+          "address": "121ebf1a",
+          "text": "JNZ 0x121ebf33"
+        },
+        {
+          "address": "121ebf1c",
+          "text": "MOV EDX,dword ptr [EBP + 0xc]"
+        },
+        {
+          "address": "121ebf1f",
+          "text": "MOV EAX,dword ptr [EDX + 0x8c]"
+        },
+        {
+          "address": "121ebf25",
+          "text": "OR EAX,0x800000"
+        },
+        {
+          "address": "121ebf2a",
+          "text": "MOV ECX,dword ptr [EBP + 0xc]"
+        },
+        {
+          "address": "121ebf2d",
+          "text": "MOV dword ptr [ECX + 0x8c],EAX"
+        },
+        {
+          "address": "121ebf33",
+          "text": "MOV dword ptr [EBP + -0x4],0xffffffff"
+        },
+        {
+          "address": "121ebf3a",
+          "text": "PUSH 0x12221a50"
+        },
+        {
+          "address": "121ebf3f",
+          "text": "PUSH 0x2"
+        },
+        {
+          "address": "121ebf41",
+          "text": "PUSH 0xc"
+        },
+        {
+          "address": "121ebf43",
+          "text": "LEA EDX,[EBP + -0x24]"
+        },
+        {
+          "address": "121ebf46",
+          "text": "PUSH EDX"
+        },
+        {
+          "address": "121ebf47",
+          "text": "CALL 0x1224e7d0"
+        },
+        {
+          "address": "121ebf4c",
+          "text": "MOV ECX,dword ptr [EBP + -0xc]"
+        },
+        {
+          "address": "121ebf4f",
+          "text": "MOV dword ptr FS:[0x0],ECX"
+        },
+        {
+          "address": "121ebf56",
+          "text": "MOV ESP,EBP"
+        },
+        {
+          "address": "121ebf58",
+          "text": "POP EBP"
+        },
+        {
+          "address": "121ebf59",
+          "text": "RET"
+        }
+      ],
+      "calls": [
+        {
+          "site": "121ebea7",
+          "target": "1224e902"
+        },
+        {
+          "site": "121ebebd",
+          "target": "121eb7c9"
+        },
+        {
+          "site": "121ebee5",
+          "target": "1224e7d0"
+        },
+        {
+          "site": "121ebf47",
+          "target": "1224e7d0"
+        }
+      ],
+      "decompileCompleted": true,
+      "pseudocode": "\r\nvoid FUN_121ebe62(undefined4 param_1,int param_2)\r\n\r\n{\r\n  undefined4 *unaff_FS_OFFSET;\r\n  undefined1 auStack_28 [4];\r\n  int iStack_24;\r\n  int iStack_20;\r\n  int iStack_18;\r\n  int iStack_14;\r\n  undefined4 uStack_10;\r\n  undefined *puStack_c;\r\n  undefined4 uStack_8;\r\n  \r\n  uStack_8 \u003d 0xffffffff;\r\n  puStack_c \u003d \u0026UNK_1226512d;\r\n  uStack_10 \u003d *unaff_FS_OFFSET;\r\n  *unaff_FS_OFFSET \u003d \u0026uStack_10;\r\n  *(uint *)(param_2 + 0x8c) \u003d *(uint *)(param_2 + 0x8c) \u0026 0xff7fffff;\r\n  func_0x1224e902(auStack_28,0xc,2,\u0026UNK_12221a30,\u0026UNK_12221a50);\r\n  uStack_8 \u003d 0;\r\n  func_0x121eb7c9(param_1,auStack_28,2);\r\n  if ((iStack_20 \u003d\u003d 0) || (iStack_14 \u003d\u003d 0)) {\r\n    uStack_8 \u003d 0xffffffff;\r\n    func_0x1224e7d0(auStack_28,0xc,2,\u0026UNK_12221a50);\r\n  }\r\n  else {\r\n    if ((*(int *)(iStack_20 + 0x48) \u003d\u003d 1) \u0026\u0026\r\n       (((*(int *)(iStack_14 + 0x48) \u003d\u003d 1 \u0026\u0026 (iStack_24 \u003d\u003d 0xdead)) \u0026\u0026 (iStack_18 \u003d\u003d 0xdead)))) {\r\n      *(uint *)(param_2 + 0x8c) \u003d *(uint *)(param_2 + 0x8c) | 0x800000;\r\n    }\r\n    uStack_8 \u003d 0xffffffff;\r\n    func_0x1224e7d0(auStack_28,0xc,2,\u0026UNK_12221a50);\r\n  }\r\n  *unaff_FS_OFFSET \u003d uStack_10;\r\n  return;\r\n}\r\n\r\n"
+    },
+    {
+      "requestedAddress": "1220c77b",
+      "entry": "1220c77b",
+      "name": "FUN_1220c77b",
+      "signature": "undefined FUN_1220c77b(void)",
+      "instructions": [
+        {
+          "address": "1220c77b",
+          "text": "PUSH EBP"
+        },
+        {
+          "address": "1220c77c",
+          "text": "MOV EBP,ESP"
+        },
+        {
+          "address": "1220c77e",
+          "text": "PUSH -0x1"
+        },
+        {
+          "address": "1220c780",
+          "text": "PUSH 0x12266481"
+        },
+        {
+          "address": "1220c785",
+          "text": "MOV EAX,FS:[0x0]"
+        },
+        {
+          "address": "1220c78b",
+          "text": "PUSH EAX"
+        },
+        {
+          "address": "1220c78c",
+          "text": "MOV dword ptr FS:[0x0],ESP"
+        },
+        {
+          "address": "1220c793",
+          "text": "SUB ESP,0x3c"
+        },
+        {
+          "address": "1220c796",
+          "text": "CMP dword ptr [EBP + 0x14],0x0"
+        },
+        {
+          "address": "1220c79a",
+          "text": "JNZ 0x1220c860"
+        },
+        {
+          "address": "1220c7a0",
+          "text": "PUSH 0x12221a50"
+        },
+        {
+          "address": "1220c7a5",
+          "text": "PUSH 0x12221a30"
+        },
+        {
+          "address": "1220c7aa",
+          "text": "PUSH 0x2"
+        },
+        {
+          "address": "1220c7ac",
+          "text": "PUSH 0xc"
+        },
+        {
+          "address": "1220c7ae",
+          "text": "LEA EAX,[EBP + -0x24]"
+        },
+        {
+          "address": "1220c7b1",
+          "text": "PUSH EAX"
+        },
+        {
+          "address": "1220c7b2",
+          "text": "CALL 0x1224e902"
+        },
+        {
+          "address": "1220c7b7",
+          "text": "MOV dword ptr [EBP + -0x4],0x0"
+        },
+        {
+          "address": "1220c7be",
+          "text": "PUSH 0x2"
+        },
+        {
+          "address": "1220c7c0",
+          "text": "LEA ECX,[EBP + -0x24]"
+        },
+        {
+          "address": "1220c7c3",
+          "text": "PUSH ECX"
+        },
+        {
+          "address": "1220c7c4",
+          "text": "MOV EDX,dword ptr [EBP + 0x10]"
+        },
+        {
+          "address": "1220c7c7",
+          "text": "PUSH EDX"
+        },
+        {
+          "address": "1220c7c8",
+          "text": "CALL 0x121eb7c9"
+        },
+        {
+          "address": "1220c7cd",
+          "text": "ADD ESP,0xc"
+        },
+        {
+          "address": "1220c7d0",
+          "text": "CMP dword ptr [EBP + -0x1c],0x0"
+        },
+        {
+          "address": "1220c7d4",
+          "text": "JZ 0x1220c847"
+        },
+        {
+          "address": "1220c7d6",
+          "text": "CMP dword ptr [EBP + -0x10],0x0"
+        },
+        {
+          "address": "1220c7da",
+          "text": "JZ 0x1220c847"
+        },
+        {
+          "address": "1220c7dc",
+          "text": "MOV EAX,dword ptr [EBP + -0x1c]"
+        },
+        {
+          "address": "1220c7df",
+          "text": "MOV ECX,dword ptr [EAX + 0x48]"
+        },
+        {
+          "address": "1220c7e2",
+          "text": "MOV dword ptr [EBP + -0x30],ECX"
+        },
+        {
+          "address": "1220c7e5",
+          "text": "CMP dword ptr [EBP + -0x30],0x1"
+        },
+        {
+          "address": "1220c7e9",
+          "text": "JNZ 0x1220c847"
+        },
+        {
+          "address": "1220c7eb",
+          "text": "MOV EDX,dword ptr [EBP + -0x10]"
+        },
+        {
+          "address": "1220c7ee",
+          "text": "MOV EAX,dword ptr [EDX + 0x48]"
+        },
+        {
+          "address": "1220c7f1",
+          "text": "MOV dword ptr [EBP + -0x34],EAX"
+        },
+        {
+          "address": "1220c7f4",
+          "text": "CMP dword ptr [EBP + -0x34],0x1"
+        },
+        {
+          "address": "1220c7f8",
+          "text": "JNZ 0x1220c847"
+        },
+        {
+          "address": "1220c7fa",
+          "text": "CMP dword ptr [EBP + -0x20],0xdead"
+        },
+        {
+          "address": "1220c801",
+          "text": "JNZ 0x1220c847"
+        },
+        {
+          "address": "1220c803",
+          "text": "CMP dword ptr [EBP + -0x14],0xdead"
+        },
+        {
+          "address": "1220c80a",
+          "text": "JNZ 0x1220c847"
+        },
+        {
+          "address": "1220c80c",
+          "text": "PUSH 0x122aae58"
+        },
+        {
+          "address": "1220c811",
+          "text": "MOV ECX,dword ptr [EBP + 0x10]"
+        },
+        {
+          "address": "1220c814",
+          "text": "MOV ECX,dword ptr [ECX + 0x10]"
+        },
+        {
+          "address": "1220c817",
+          "text": "ADD ECX,0x38"
+        },
+        {
+          "address": "1220c81a",
+          "text": "CALL 0x1224e2ba"
+        },
+        {
+          "address": "1220c81f",
+          "text": "MOV dword ptr [EBP + -0x2c],0x1"
+        },
+        {
+          "address": "1220c826",
+          "text": "MOV dword ptr [EBP + -0x4],0xffffffff"
+        },
+        {
+          "address": "1220c82d",
+          "text": "PUSH 0x12221a50"
+        },
+        {
+          "address": "1220c832",
+          "text": "PUSH 0x2"
+        },
+        {
+          "address": "1220c834",
+          "text": "PUSH 0xc"
+        },
+        {
+          "address": "1220c836",
+          "text": "LEA EDX,[EBP + -0x24]"
+        },
+        {
+          "address": "1220c839",
+          "text": "PUSH EDX"
+        },
+        {
+          "address": "1220c83a",
+          "text": "CALL 0x1224e7d0"
+        },
+        {
+          "address": "1220c83f",
+          "text": "MOV EAX,dword ptr [EBP + -0x2c]"
+        },
+        {
+          "address": "1220c842",
+          "text": "JMP 0x1220c92e"
+        },
+        {
+          "address": "1220c847",
+          "text": "MOV dword ptr [EBP + -0x4],0xffffffff"
+        },
+        {
+          "address": "1220c84e",
+          "text": "PUSH 0x12221a50"
+        },
+        {
+          "address": "1220c853",
+          "text": "PUSH 0x2"
+        },
+        {
+          "address": "1220c855",
+          "text": "PUSH 0xc"
+        },
+        {
+          "address": "1220c857",
+          "text": "LEA EAX,[EBP + -0x24]"
+        },
+        {
+          "address": "1220c85a",
+          "text": "PUSH EAX"
+        },
+        {
+          "address": "1220c85b",
+          "text": "CALL 0x1224e7d0"
+        },
+        {
+          "address": "1220c860",
+          "text": "MOV ECX,dword ptr [EBP + 0xc]"
+        },
+        {
+          "address": "1220c863",
+          "text": "MOV EDX,dword ptr [ECX + 0x2d50]"
+        },
+        {
+          "address": "1220c869",
+          "text": "MOV EAX,dword ptr [EDX + 0x44]"
+        },
+        {
+          "address": "1220c86c",
+          "text": "AND EAX,0x2"
+        },
+        {
+          "address": "1220c86f",
+          "text": "TEST EAX,EAX"
+        },
+        {
+          "address": "1220c871",
+          "text": "JZ 0x1220c87c"
+        },
+        {
+          "address": "1220c873",
+          "text": "MOV dword ptr [EBP + -0x38],0x1"
+        },
+        {
+          "address": "1220c87a",
+          "text": "JMP 0x1220c883"
+        },
+        {
+          "address": "1220c87c",
+          "text": "MOV dword ptr [EBP + -0x38],0x0"
+        },
+        {
+          "address": "1220c883",
+          "text": "CMP dword ptr [EBP + -0x38],0x0"
+        },
+        {
+          "address": "1220c887",
+          "text": "JZ 0x1220c929"
+        },
+        {
+          "address": "1220c88d",
+          "text": "PUSH 0x122aae5c"
+        },
+        {
+          "address": "1220c892",
+          "text": "LEA ECX,[EBP + -0x28]"
+        },
+        {
+          "address": "1220c895",
+          "text": "CALL 0x1224e2de"
+        },
+        {
+          "address": "1220c89a",
+          "text": "MOV dword ptr [EBP + -0x4],0x1"
+        },
+        {
+          "address": "1220c8a1",
+          "text": "CMP dword ptr [EBP + 0x14],0x1"
+        },
+        {
+          "address": "1220c8a5",
+          "text": "JNZ 0x1220c8b4"
+        },
+        {
+          "address": "1220c8a7",
+          "text": "PUSH 0x122aae68"
+        },
+        {
+          "address": "1220c8ac",
+          "text": "LEA ECX,[EBP + -0x28]"
+        },
+        {
+          "address": "1220c8af",
+          "text": "CALL 0x1224e2ba"
+        },
+        {
+          "address": "1220c8b4",
+          "text": "MOV ECX,dword ptr [EBP + 0xc]"
+        },
+        {
+          "address": "1220c8b7",
+          "text": "MOV EDX,dword ptr [ECX + 0x2d50]"
+        },
+        {
+          "address": "1220c8bd",
+          "text": "MOV EAX,dword ptr [EDX + 0x68]"
+        },
+        {
+          "address": "1220c8c0",
+          "text": "MOV dword ptr [EBP + -0x40],EAX"
+        },
+        {
+          "address": "1220c8c3",
+          "text": "MOV ECX,dword ptr [EDX + 0x6c]"
+        },
+        {
+          "address": "1220c8c6",
+          "text": "MOV dword ptr [EBP + -0x3c],ECX"
+        },
+        {
+          "address": "1220c8c9",
+          "text": "MOV EDX,dword ptr [EBP + -0x40]"
+        },
+        {
+          "address": "1220c8cc",
+          "text": "AND EDX,0xe00000"
+        },
+        {
+          "address": "1220c8d2",
+          "text": "MOV EAX,dword ptr [EBP + -0x3c]"
+        },
+        {
+          "address": "1220c8d5",
+          "text": "AND EAX,0x0"
+        },
+        {
+          "address": "1220c8d8",
+          "text": "MOV dword ptr [EBP + -0x48],EDX"
+        },
+        {
+          "address": "1220c8db",
+          "text": "MOV dword ptr [EBP + -0x44],EAX"
+        },
+        {
+          "address": "1220c8de",
+          "text": "MOV ECX,dword ptr [EBP + -0x48]"
+        },
+        {
+          "address": "1220c8e1",
+          "text": "OR ECX,dword ptr [EBP + -0x44]"
+        },
+        {
+          "address": "1220c8e4",
+          "text": "TEST ECX,ECX"
+        },
+        {
+          "address": "1220c8e6",
+          "text": "JZ 0x1220c908"
+        },
+        {
+          "address": "1220c8e8",
+          "text": "PUSH 0x122aae74"
+        },
+        {
+          "address": "1220c8ed",
+          "text": "LEA ECX,[EBP + -0x28]"
+        },
+        {
+          "address": "1220c8f0",
+          "text": "CALL 0x1224e2ba"
+        },
+        {
+          "address": "1220c8f5",
+          "text": "CMP dword ptr [EBP + 0x14],0x1"
+        },
+        {
+          "address": "1220c8f9",
+          "text": "JNZ 0x1220c908"
+        },
+        {
+          "address": "1220c8fb",
+          "text": "PUSH 0x122aae80"
+        },
+        {
+          "address": "1220c900",
+          "text": "LEA ECX,[EBP + -0x28]"
+        },
+        {
+          "address": "1220c903",
+          "text": "CALL 0x1224e2ba"
+        },
+        {
+          "address": "1220c908",
+          "text": "LEA EDX,[EBP + -0x28]"
+        },
+        {
+          "address": "1220c90b",
+          "text": "PUSH EDX"
+        },
+        {
+          "address": "1220c90c",
+          "text": "MOV EAX,dword ptr [EBP + 0x10]"
+        },
+        {
+          "address": "1220c90f",
+          "text": "MOV ECX,dword ptr [EAX + 0x10]"
+        },
+        {
+          "address": "1220c912",
+          "text": "ADD ECX,0x38"
+        },
+        {
+          "address": "1220c915",
+          "text": "CALL 0x1224e2b4"
+        },
+        {
+          "address": "1220c91a",
+          "text": "MOV dword ptr [EBP + -0x4],0xffffffff"
+        },
+        {
+          "address": "1220c921",
+          "text": "LEA ECX,[EBP + -0x28]"
+        },
+        {
+          "address": "1220c924",
+          "text": "CALL 0x1224e2a2"
+        },
+        {
+          "address": "1220c929",
+          "text": "MOV EAX,0x1"
+        },
+        {
+          "address": "1220c92e",
+          "text": "MOV ECX,dword ptr [EBP + -0xc]"
+        },
+        {
+          "address": "1220c931",
+          "text": "MOV dword ptr FS:[0x0],ECX"
+        },
+        {
+          "address": "1220c938",
+          "text": "MOV ESP,EBP"
+        },
+        {
+          "address": "1220c93a",
+          "text": "POP EBP"
+        },
+        {
+          "address": "1220c93b",
+          "text": "RET"
+        }
+      ],
+      "calls": [
+        {
+          "site": "1220c7b2",
+          "target": "1224e902"
+        },
+        {
+          "site": "1220c7c8",
+          "target": "121eb7c9"
+        },
+        {
+          "site": "1220c81a",
+          "target": "1224e2ba"
+        },
+        {
+          "site": "1220c83a",
+          "target": "1224e7d0"
+        },
+        {
+          "site": "1220c85b",
+          "target": "1224e7d0"
+        },
+        {
+          "site": "1220c895",
+          "target": "1224e2de"
+        },
+        {
+          "site": "1220c8af",
+          "target": "1224e2ba"
+        },
+        {
+          "site": "1220c8f0",
+          "target": "1224e2ba"
+        },
+        {
+          "site": "1220c903",
+          "target": "1224e2ba"
+        },
+        {
+          "site": "1220c915",
+          "target": "1224e2b4"
+        },
+        {
+          "site": "1220c924",
+          "target": "1224e2a2"
+        }
+      ],
+      "decompileCompleted": true,
+      "pseudocode": "\r\nundefined4 FUN_1220c77b(undefined4 param_1,int param_2,undefined4 param_3,int param_4)\r\n\r\n{\r\n  undefined4 *unaff_FS_OFFSET;\r\n  undefined1 auStack_2c [4];\r\n  undefined1 auStack_28 [4];\r\n  int iStack_24;\r\n  int iStack_20;\r\n  int iStack_18;\r\n  int iStack_14;\r\n  undefined4 uStack_10;\r\n  undefined *puStack_c;\r\n  undefined4 uStack_8;\r\n  \r\n  uStack_8 \u003d 0xffffffff;\r\n  puStack_c \u003d \u0026UNK_12266481;\r\n  uStack_10 \u003d *unaff_FS_OFFSET;\r\n  *unaff_FS_OFFSET \u003d \u0026uStack_10;\r\n  if (param_4 \u003d\u003d 0) {\r\n    func_0x1224e902(auStack_28,0xc,2,\u0026UNK_12221a30,\u0026UNK_12221a50);\r\n    uStack_8 \u003d 0;\r\n    func_0x121eb7c9(param_3,auStack_28,2);\r\n    if (((((iStack_20 !\u003d 0) \u0026\u0026 (iStack_14 !\u003d 0)) \u0026\u0026 (*(int *)(iStack_20 + 0x48) \u003d\u003d 1)) \u0026\u0026\r\n        ((*(int *)(iStack_14 + 0x48) \u003d\u003d 1 \u0026\u0026 (iStack_24 \u003d\u003d 0xdead)))) \u0026\u0026 (iStack_18 \u003d\u003d 0xdead)) {\r\n      func_0x1224e2ba(0x122aae58);\r\n      uStack_8 \u003d 0xffffffff;\r\n      func_0x1224e7d0(auStack_28,0xc,2,\u0026UNK_12221a50);\r\n      goto LAB_1220c92e;\r\n    }\r\n    uStack_8 \u003d 0xffffffff;\r\n    func_0x1224e7d0(auStack_28,0xc,2,\u0026UNK_12221a50);\r\n  }\r\n  if ((*(uint *)(*(int *)(param_2 + 0x2d50) + 0x44) \u0026 2) !\u003d 0) {\r\n    func_0x1224e2de(0x122aae5c);\r\n    uStack_8 \u003d 1;\r\n    if (param_4 \u003d\u003d 1) {\r\n      func_0x1224e2ba(0x122aae68);\r\n    }\r\n    if (((*(uint *)(*(int *)(param_2 + 0x2d50) + 0x68) \u0026 0xe00000) !\u003d 0) \u0026\u0026\r\n       (func_0x1224e2ba(0x122aae74), param_4 \u003d\u003d 1)) {\r\n      func_0x1224e2ba(0x122aae80);\r\n    }\r\n    func_0x1224e2b4(auStack_2c);\r\n    uStack_8 \u003d 0xffffffff;\r\n    func_0x1224e2a2();\r\n  }\r\nLAB_1220c92e:\r\n  *unaff_FS_OFFSET \u003d uStack_10;\r\n  return 1;\r\n}\r\n\r\n"
+    }
+  ]
+}

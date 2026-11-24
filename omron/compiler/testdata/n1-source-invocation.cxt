@@ -1,0 +1,276 @@
+CXProgVer:="2.0";
+Resource[0]:=
+BEGIN
+ GlobalVariables:=
+ BEGIN
+  VariableList:=
+BEGIN_LIST_$#[309]
+   ,W4.01,BOOL,,,Лифт №1 РЕЛЕ ВКЛ питание;
+   ,W5.01,BOOL,,,Лифт №1 Реле выкл Питание;
+   BLINK_L1," [Auto]",FUNCTION BLOCK,BLINK,A,;
+   DOWN,W1.03,BOOL,,,;
+   DOWN_stop,W0.03,BOOL,,,;
+   HOME_L1,W0.08,BOOL,,,Лифт откальброван;
+   L1_DOWN,W0.00,BOOL,,,;
+   L1_UP,W0.01,BOOL,,,;
+   L2_DOWN,W0.04,BOOL,,,;
+   L2_DOWN_stop,W0.07,BOOL,,,;
+   L2_UP,W0.05,BOOL,,,;
+   L2_UP_stop,W0.06,BOOL,,,;
+   ON,W1.00,BOOL,,,;
+   UP,W1.02,BOOL,,,;
+   UP_stop,W0.02,BOOL,,,;
+END_LIST_$#[309];
+  VariableCount:=15;
+  VariableMultiCommentList:=
+BEGIN_LIST_$#[310]
+END_LIST_$#[310];
+  VariableMultiCommentCount:=0;
+  VariableMultiCommentTypeCount:=16;
+  VariablePredefinedMultiCommentList:=
+BEGIN_LIST_$#[311]
+END_LIST_$#[311];
+  VariablePredefinedMultiCommentCount:=0;
+  POUInstances:=
+  BEGIN
+   Instance[0]:=
+   BEGIN
+    InstanceType:="FB";
+    Name:="BLINK_L1";
+    POUType:="BLINK";
+    InstanceNum:=0;
+    OnlineEditDiffExpand:=0;
+    BR0:="T3072,2";
+    BR1:="C3072,0";
+    BR2:="#00009FFF,0";
+    BR3:="H512,3";
+    BR4:="H1408,0";
+    MemoryAllocated:=true;
+   END;
+   NumInstances:=1;
+  END;
+ END;
+ FunctionBlocks:=
+ BEGIN
+  FunctionBlockCount:=1;
+  FunctionBlockWrapper[0]:=
+  BEGIN
+   FBType:="FBLadder";
+   FunctionBlock:=
+   BEGIN
+    IEC1131Type:=3;
+    CompileInline:=0;
+    Name:="BLINK";
+    FileType:=3;
+    Created:="22 2 2020 15 6 3";
+    Modified:="19 9 2023 10 1 23";
+    Protection:=
+    BEGIN
+     Enabled:=0;
+    END;
+    FBDefVer:="1.8";
+    OnlineReserveMemory:=
+    BEGIN
+     BR[0]:="0,0";
+     BR[1]:="0,0";
+     BR[2]:="0,0";
+     BR[3]:="0,0";
+     BR[4]:="0,0";
+     NumRegisters:=5;
+    END;
+    POUHeader:=
+    BEGIN
+     PouVarList:=
+BEGIN_LIST_$#[312]
+      0,TIMER_1,13,,0,,0,;
+      0,TIMER_2,13,,0,,0,;
+      0,ON,0,,0,FALSE,0,;
+      1,PV,1,,0,0,0,;
+      1,PN,1,,0,0,0,;
+      1,IN,0,,0,FALSE,0,;
+      2,OUT,0,,0,FALSE,0,;
+END_LIST_$#[312];
+     InstanceID:="22.02.2020 15:11:13";
+     PouVarCount:=7;
+    END;
+    POUBody:=
+    BEGIN
+     FBProgramData:=
+     BEGIN
+      FBRC:=6;
+      FBR[0]:=
+      BEGIN
+       Com:="";
+       Flags:="1,0";
+       TotEl:=7;
+       [0]:="0,0,1,1,1,1,IN, 8";
+       [1]:="6,0,1,0,3,5,TIMH(015), 0,TIMER_1, 0,PV, 0";
+       [2]:="2,0,1,1,1,1,EN, 0";
+       [3]:="1,0,1,1,1,1,ON, 8";
+       [4]:="3,0,1,1,0,3";
+       [5]:="4,0,1,1,0,3";
+       [6]:="5,0,1,1,0,3";
+      END;
+      FBR[1]:=
+      BEGIN
+       Com:="";
+       Flags:="1,0";
+       TotEl:=7;
+       [0]:="0,0,1,1,1,1,TIMER_1, 0";
+       [1]:="6,0,1,0,3,5,TIMH(015), 0,TIMER_2, 0,PN, 0";
+       [2]:="1,0,1,1,0,3";
+       [3]:="2,0,1,1,0,3";
+       [4]:="3,0,1,1,0,3";
+       [5]:="4,0,1,1,0,3";
+       [6]:="5,0,1,1,0,3";
+      END;
+      FBR[2]:=
+      BEGIN
+       Com:="";
+       Flags:="1,0";
+       TotEl:=7;
+       [0]:="0,0,1,1,1,1,TIMER_1, 0";
+       [1]:="6,0,1,1,1,2,OUT, 0";
+       [2]:="1,0,1,1,0,3";
+       [3]:="2,0,1,1,0,3";
+       [4]:="3,0,1,1,0,3";
+       [5]:="4,0,1,1,0,3";
+       [6]:="5,0,1,1,0,3";
+      END;
+      FBR[3]:=
+      BEGIN
+       Com:="";
+       Flags:="1,0";
+       TotEl:=7;
+       [0]:="0,0,1,1,1,1,TIMER_2, 0";
+       [1]:="6,0,1,1,1,2,ON, 0";
+       [2]:="1,0,1,1,0,3";
+       [3]:="2,0,1,1,0,3";
+       [4]:="3,0,1,1,0,3";
+       [5]:="4,0,1,1,0,3";
+       [6]:="5,0,1,1,0,3";
+      END;
+      FBR[4]:=
+      BEGIN
+       Com:="";
+       Flags:="1,0";
+       TotEl:=7;
+       [0]:="0,0,1,1,1,1,EN, 0";
+       [1]:="6,0,1,0,2,5,SET, 0,OUT, 0";
+       [2]:="1,0,1,1,1,1,IN, 0";
+       [3]:="2,0,1,1,0,3";
+       [4]:="3,0,1,1,0,3";
+       [5]:="4,0,1,1,0,3";
+       [6]:="5,0,1,1,0,3";
+      END;
+      FBR[5]:=
+      BEGIN
+       Com:="";
+       Flags:="1,0";
+       TotEl:=7;
+       [0]:="0,0,1,1,1,1,EN, 8";
+       [1]:="6,0,1,0,2,5,RSET, 0,OUT, 0";
+       [2]:="1,0,1,1,0,3";
+       [3]:="2,0,1,1,0,3";
+       [4]:="3,0,1,1,0,3";
+       [5]:="4,0,1,1,0,3";
+       [6]:="5,0,1,1,0,3";
+      END;
+     END;
+    END;
+    TaskID:=1024;
+   END;
+  END;
+ END;
+ Programs:=
+ BEGIN
+  ProgramCount:=1;
+  Program[0]:=
+  BEGIN
+   Name:="Probe";
+   FileType:=2;
+   CompileInline:=0;
+   TaskID:=256;
+   OpStart:=1;
+   Protection:=
+   BEGIN
+    Enabled:=0;
+   END;
+   LocalVariables:=
+   BEGIN
+    VariableList:=
+BEGIN_LIST_$#[313]
+     BLINK_1_OUT,W1.01,BOOL,,,;
+     L1_Key_start,0.08,BOOL,,,
+$?St$Bk?_#[314]
+Лифт №1 Кнопка "Старт"$?St$Bk?_#[314];
+     L1_Key_stop,0.09,BOOL,,,
+$?St$Bk?_#[315]
+Лифт №1 Кнопка "Стоп"$?St$Bk?_#[315];
+     L1_Lamp_start,3.06,BOOL,,,Лифт №1 Лампа Старт;
+     L1_in_N_limit,1.06,BOOL,,,Лифт №1 Нижний аварийный концевик ;
+     L1_in_P_limit,1.07,BOOL,,,Лифт №1 Верхний аварийный концевик ;
+     L1_out_Down,4.08,BOOL,,,Лифт №1 Реле ВКЛ движение вниз ;
+     L1_out_Drag,4.12,BOOL,,,Лифт №1 Реле отключение тормоза;
+     L1_out_Up,4.10,BOOL,,,Лифт №1 Реле ВКЛ движение вверх;
+     L1_out_powerON,4.14,BOOL,,,Лифт №1 Реле ВКЛ питание;
+END_LIST_$#[313];
+    VariableCount:=10;
+    VariableMultiCommentList:=
+BEGIN_LIST_$#[316]
+END_LIST_$#[316];
+    VariableMultiCommentCount:=0;
+    VariableMultiCommentTypeCount:=16;
+    SymbolSortType:=false;
+    SymbolSortAddress:=false;
+    POUInstances:=
+    BEGIN
+     NumInstances:=0;
+    END;
+   END;
+   Sections:=
+   BEGIN
+    SC:=1;
+    Sec[0]:=
+    BEGIN
+     IEC1131Type:=11;
+     CompileInline:=0;
+     SecType:=0;
+     SecName:="Main";
+     ProgramData:=
+     BEGIN
+      RC:=2;
+      R[0]:=
+      BEGIN
+       Com:="";
+       Flags:="0,0";
+       FBversion:="22.02.2020 15:11:13";
+       HasRCmts:=0;
+       TotEl:=7;
+       [0]:="01111LDON1";
+       AtCom[0]:="";
+       [1]:="20711FBCALLBLINK_L19";
+       AtCom[1]:="";
+       [2]:="14811FB_INPUTL1_out_powerON10";
+       AtCom[2]:="";
+       [3]:="13811FB_INPUT#10010";
+       AtCom[3]:="";
+       [4]:="42811FB_OUTPUTBLINK_1_OUT11";
+       AtCom[4]:="";
+       [5]:="12811FB_INPUT#10010";
+       AtCom[5]:="";
+       [6]:="113";
+       AtCom[6]:="";
+       UCmts[0]:="";
+      END;
+      R[1]:=
+      BEGIN
+       Flags:="1,0";
+       SL:="END";
+      END;
+     END;
+    END;
+   END;
+  END;
+ END;
+END;

@@ -1,0 +1,36 @@
+[
+  {
+    "target": "cj1h",
+    "endpoint": "10.0.174.37:9600",
+    "model": "CJ1H_CPU65H",
+    "captureUTC": "2026-11-19T11:56:29.1094601Z",
+    "dataHex": "5146422d424a3036303333315f5f5f5f5f20202020030009801a",
+    "dataSHA256": "5def45b53199bcf414df2515527b6496b4a7fa36c7e542d3951d5fffd721e128",
+    "expectedCXVersionDisplay": "3.0",
+    "expectedCXRevisionDisplay": "9",
+    "copiesMatch": true,
+    "statusRawStable": true,
+    "observedMode": 4,
+    "fatal": 0,
+    "nonFatal": 0,
+    "unitVersionIndependentlyVerified": false,
+    "writeQualified": false
+  },
+  {
+    "target": "cj1m",
+    "endpoint": "10.0.174.36:9600",
+    "model": "CJ1M_CPU21",
+    "captureUTC": "2026-11-19T11:56:29.7752451Z",
+    "dataHex": "4941414142473035303132305f5f5f5f5f202020200300068024",
+    "dataSHA256": "c4e2bbb067e29b199dd8e087194800ee82a6f8b896603ebd51706329750e04d3",
+    "expectedCXVersionDisplay": "3.0",
+    "expectedCXRevisionDisplay": "6",
+    "copiesMatch": true,
+    "statusRawStable": true,
+    "observedMode": 4,
+    "fatal": 0,
+    "nonFatal": 0,
+    "unitVersionIndependentlyVerified": false,
+    "writeQualified": false
+  }
+]

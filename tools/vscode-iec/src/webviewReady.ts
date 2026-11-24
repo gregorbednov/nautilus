@@ -24,7 +24,7 @@ import type * as vscode from "vscode";
 type Msg = { type?: unknown };
 
 /** Replay order: the view first, then what decorates it. */
-const ORDER = ["view", "error", "diagnostics", "descriptions", "syncState", "liveValues"];
+const ORDER = ["view", "error", "diagnostics", "descriptions", "syncState", "liveValues", "omronWatch"];
 
 /** The replay slot a state message occupies: model and diff views share
  * one (whichever came last is what the panel shows); an error is kept

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "options": {
+    "independentIRDR": false,
+    "extendedTIMHold": false,
+    "copyProhibited": false,
+    "overwriteProhibited": false
+  },
+  "memory": {
+    "bases": [
+      {"address": "T3072", "size": 1024},
+      {"address": "C3072", "size": 1024},
+      {"address": "DIFF8191", "size": 0},
+      {"address": "H512", "size": 896},
+      {"address": "H1408", "size": 128}
+    ],
+    "stack": {"address": "AC0", "firstSize": 64, "totalSize": 1536}
+  },
+  "definitionNumbers": {"Temperature": 0, "Humidity": 1},
+  "nextEnable": [0, 0, 0, 0, 0, 0, 0]
+}

@@ -6,7 +6,7 @@
 // and FUNCTION_BLOCK heading is one Block, so pagination breaks between
 // rungs and never through one.
 
-import { annotate, normalizeLd, type Ann, type LdModel, type LdRung } from '../ladder.ts';
+import { annotate, functionLabel, normalizeLd, type Ann, type LdModel, type LdRung } from '../ladder.ts';
 import { assignLineDy, assignLines, fitArgs, L, layoutRung, OPERAND_LABEL_MAX, rungMinWidth, type LNode } from '../ladderLayout.ts';
 import { FAINT, INK, MONO_ADVANCE, MUTED, Pen, POWER, textWidth, trunc, wrapText, type Block, type Diagram } from './draw.ts';
 import type { LiveSnapshot } from './live.ts';
@@ -171,7 +171,7 @@ function drawNode(pen: Pen, r: LdRung, n: LNode, live?: LiveSnapshot): void {
 		}
 		case 'fn': {
 			pen.rect(0, 0, n.w, n.h, { rx: 4, s: { color: ink, width: 1.2 } });
-			pen.text(mid, cy + 3.5, `${el.fn}(${el.args ?? ''})`, { size: 10, anchor: 'middle', color: ink });
+			pen.text(mid, cy + 3.5, functionLabel(el), { size: 10, anchor: 'middle', color: ink });
 			break;
 		}
 		case 'assign': {

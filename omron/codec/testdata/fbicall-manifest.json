@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "545db5d10dca05be4e114bd7a3ebe2a7745669ceddfbb8a843af6ff9a7fdd437",
+  "programType": 0,
+  "unitVersion": null,
+  "timerCounterMode": "bcd",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "artifacts": {
+    "cases": {
+      "path": "fbicall-cases.json",
+      "sha256": "545db5d10dca05be4e114bd7a3ebe2a7745669ceddfbb8a843af6ff9a7fdd437",
+      "bytes": 7593
+    },
+    "events": {
+      "path": "fbicall-events.jsonl.gz",
+      "sha256": "9c82f8c9fc19c88cde18762961f2bd16cecd8de6b9f6ee91055e7241edff915c",
+      "bytes": 2335,
+      "encoding": "gzip",
+      "decodedSHA256": "710e17747fc8383ab634b759b19975d132d977f13c25e4de22eb8c3215b76690"
+    },
+    "script": {
+      "path": "fbicall-run.js.gz",
+      "sha256": "bf5a174426fbfd0bdb43774be3859da0a0baf8acb98da73e1844a152a8339336",
+      "bytes": 3865,
+      "encoding": "gzip",
+      "decodedSHA256": "4f78c8e63af8e945ffa55d63bdd7b0c018785644be8c213a1bf72619b0efde5a"
+    },
+    "template": {
+      "path": "fbicall-template.js",
+      "sha256": "b5cec12800c584f0b05a5be7d54c6e31d8f40972dade5a4fb7950ebea6d4ec83",
+      "bytes": 9635
+    },
+    "worker": {
+      "path": "fbicall-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    }
+  }
+}

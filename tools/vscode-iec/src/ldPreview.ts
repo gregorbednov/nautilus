@@ -13,6 +13,7 @@ import { followActiveDoc } from "./previewFollow";
 import { cliCommand, cliExecOptions, cliMissingMessage, isMissing } from "./cli";
 import { graphArgs, isL5X } from "./l5xRouting";
 import { LiveValues } from "./liveValues";
+import { OmronWatch } from "./omronWatch";
 import {
   addSyncTarget,
   attachLiveValues,
@@ -32,11 +33,12 @@ import { findReferencesFromDiagram, isXrefMessage, onProjectTagsChange, postDesc
  * live values) works on Allen-Bradley rungs without knowing it. The only
  * thing that differs is which CLI verb produces the model, and whether the
  * result is editable — it is not: you do not hand-edit a vendor export. */
-export function ldGraph(source: string, at?: string): Promise<{ model?: unknown; error?: string }> {
+export function ldGraph(source: string | Uint8Array, at?: string): Promise<{ model?: unknown; error?: string }> {
   const cli = cliCommand();
-  const args = graphArgs(at);
+  const omron = isOmronCXT(at);
+  const args = omron ? ["omron", "graph", "-"] : graphArgs(at);
   return new Promise((resolve) => {
-    const child = execFile(cli, args, cliExecOptions(), (err, stdout) => {
+    const child = execFile(cli, args, cliExecOptions(), (err, stdout, stderr) => {
       try {
         const parsed = JSON.parse(stdout) as { error?: string };
         if (parsed.error) return resolve({ error: parsed.error });
@@ -45,10 +47,17 @@ export function ldGraph(source: string, at?: string): Promise<{ model?: unknown;
         // fall through
       }
       if (isMissing(err)) return resolve({ error: cliMissingMessage(cli) });
+      if (omron && stderr.trim()) return resolve({ error: stderr.trim() });
       resolve({ error: err ? String(err) : "naut ld graph: empty output" });
     });
+    // A CLI without this command may close stdin before consuming the source.
+    child.stdin?.on("error", () => {});
     child.stdin?.end(source);
   });
+}
+
+function isOmronCXT(at?: string): boolean {
+  return !!at && /\.cxt$/i.test(at);
 }
 
 type LdTextEdit = { line: number; col: number; endLine: number; endCol: number; newText: string };
@@ -160,15 +169,33 @@ function watchLdFbTypes(live: LiveValues | undefined, panel: vscode.WebviewPanel
 }
 
 /** Post the ladder model (or the parse error) into a webview. */
-async function postLdModel(webview: vscode.Webview, doc: vscode.TextDocument): Promise<void> {
-  const res = await ldGraph(doc.getText(), docPath(doc));
+async function postLdModel(webview: vscode.Webview, doc: vscode.TextDocument, watch?: OmronWatch): Promise<void> {
+  const omron = isOmronCXT(doc.uri.path);
+  const version = doc.version;
+  let res: Awaited<ReturnType<typeof ldGraph>>;
+  try {
+    // Read saved CXT bytes so the CLI can decode legacy files itself.
+    const source = omron && !doc.isDirty ? await vscode.workspace.fs.readFile(doc.uri) : doc.getText();
+    res = await ldGraph(source, omron ? doc.uri.path : docPath(doc));
+  } catch (error) {
+    res = { error: String(error) };
+  }
+  if (omron && doc.version !== version) return;
   if (res.error) {
     void webview.postMessage({ type: "error", message: res.error, title: docTitle(doc), lang: "ld" });
   } else {
+    watch?.bind(res.model);
     // readOnly: an L5X renders as ladder but never takes an edit — the
     // webview drops the palette/hotspots and says so, rather than letting
     // every gesture end in the refusal below.
-    void webview.postMessage({ type: "ldModel", model: res.model, title: docTitle(doc), readOnly: isL5XDoc(doc) });
+    void webview.postMessage({
+      type: "ldModel",
+      model: res.model,
+      title: docTitle(doc),
+      readOnly: omron || isL5XDoc(doc),
+      readOnlyLabel: omron ? "Omron CXT" : undefined,
+    });
+    if (omron) return;
     postDiagnostics(webview, doc);
     void postDescriptions(webview, doc);
   }
@@ -185,6 +212,7 @@ export class LdEditorProvider implements vscode.CustomTextEditorProvider {
    * overlay and the revision diff need no idea which one they are looking
    * at. Only editing differs, and that is refused for an L5X. */
   static readonly l5xViewType = "nautilus.l5xDiagram";
+  static readonly omronViewType = "nautilus.omronLadder";
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -204,14 +232,21 @@ export class LdEditorProvider implements vscode.CustomTextEditorProvider {
   ): Promise<void> {
     panel.webview.options = webviewOptions(this.context.extensionUri);
     panel.webview.html = buildWebviewHtml(panel.webview, this.context.extensionUri);
+    const omron = isOmronCXT(document.uri.path);
+    const watch = omron ? new OmronWatch(panel.webview) : undefined;
 
     let debounce: NodeJS.Timeout | undefined;
     const changeSub = vscode.workspace.onDidChangeTextDocument((e) => {
       if (e.document.uri.toString() !== document.uri.toString()) return;
+      watch?.reset();
       if (debounce) clearTimeout(debounce);
-      debounce = setTimeout(() => void postLdModel(panel.webview, document), DEBOUNCE_MS);
+      debounce = setTimeout(() => void postLdModel(panel.webview, document, watch), DEBOUNCE_MS);
     });
     const messageSub = panel.webview.onDidReceiveMessage((msg: { type?: string; op?: unknown }) => {
+      if (watch) {
+        if (msg?.type === "toggleOmronWatch") void watch.toggle();
+        return;
+      }
       if (handleDiagramLiveMessage(panel, msg, (command, tag) => void vscode.commands.executeCommand(command, tag))) return;
       if (watchLdFbTypes(this.live, panel, document.uri, msg)) return;
       handleLdMessage(document, msg);
@@ -221,22 +256,23 @@ export class LdEditorProvider implements vscode.CustomTextEditorProvider {
         postDiagnostics(panel.webview, document);
       }
     });
-    const syncSub = addSyncTarget(panel.webview, () => document.uri);
+    const syncSub = omron ? undefined : addSyncTarget(panel.webview, () => document.uri);
     // The model carries the project's tags: a manifest or tag-file save
     // re-posts it, or an offer to declare a now-declared tag stays up.
-    const tagsSub = onProjectTagsChange(() => void postLdModel(panel.webview, document));
+    const tagsSub = omron ? undefined : onProjectTagsChange(() => void postLdModel(panel.webview, document));
     panel.onDidDispose(() => {
       this.live?.unwatchFbTypes(panel);
       if (debounce) clearTimeout(debounce);
-      tagsSub.dispose();
+      watch?.dispose();
+      tagsSub?.dispose();
       changeSub.dispose();
       messageSub.dispose();
       diagSub.dispose();
-      syncSub.dispose();
+      syncSub?.dispose();
     });
-    attachLiveValues(this.live, panel);
+    if (!omron) attachLiveValues(this.live, panel);
 
-    await postLdModel(panel.webview, document);
+    await postLdModel(panel.webview, document, watch);
   }
 }
 

@@ -1,0 +1,11 @@
+{
+  "model": "CJ1M CPU21",
+  "programSHA256": "a4c0b45ba391fcd0cefb49bce52058168971e4aca1e6b29fe05937f80961c8cf",
+  "changedRanges": [
+    "H580",
+    "D100",
+    "CIO2097"
+  ],
+  "sampledRanges": 12,
+  "simultaneous": false
+}

@@ -1,0 +1,500 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "sourceEventLogSHA256": "34bb6dbdcb29a5f97aee6263af9af307225cffe07ef163f97d7a8c227cab8fdf",
+  "observerSHA256": "7fd52a23f60273e793ede67ce4448e64e26b30fcd2db5586c83bb33abef4042a",
+  "launcherSHA256": "e1c172fe110035a541c7ff118605803b597ce892677caee638a900b991ad2994",
+  "workerSHA256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+  "events": [
+    {
+      "schemaVersion": 1,
+      "kind": "begin",
+      "sequence": 0,
+      "probe": "current-version-3-v1",
+      "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+      "architecture": "ia32",
+      "networkAccess": false,
+      "fullProgramCompiled": false,
+      "hardwareQualified": false,
+      "writeQualified": false
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "state",
+      "sequence": 1,
+      "device": "CJ1M",
+      "cpu": "CPU21",
+      "state": "default",
+      "descriptorName": "CJ1M",
+      "selector": 8,
+      "familyMaskLow": 1024,
+      "familyMaskHigh": 0,
+      "defaultVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "currentVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "fieldDefaultVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "fieldCurrentVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "fbSupportCurrent": 1,
+      "fbSupportDefault": 1,
+      "localExtendedProtect": 0,
+      "extendedSupportArguments": [
+        {
+          "packedVersion": 768,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 768,
+          "arg2": 1,
+          "result": 0
+        },
+        {
+          "packedVersion": 1024,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 1024,
+          "arg2": 1,
+          "result": 0
+        },
+        {
+          "packedVersion": 1025,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 1025,
+          "arg2": 1,
+          "result": 0
+        }
+      ],
+      "nop": {
+        "initialised": 1,
+        "encoded": 0,
+        "words": [
+          2684354560
+        ]
+      },
+      "networkAccess": false,
+      "hardwareQualified": false,
+      "writeQualified": false
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "state",
+      "sequence": 2,
+      "device": "CJ1M",
+      "cpu": "CPU21",
+      "state": "current3",
+      "descriptorName": "CJ1M",
+      "selector": 8,
+      "familyMaskLow": 1024,
+      "familyMaskHigh": 0,
+      "defaultVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "currentVersionBytes": [
+        3,
+        0,
+        0
+      ],
+      "fieldDefaultVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "fieldCurrentVersionBytes": [
+        3,
+        0,
+        0
+      ],
+      "fbSupportCurrent": 1,
+      "fbSupportDefault": 1,
+      "localExtendedProtect": 0,
+      "extendedSupportArguments": [
+        {
+          "packedVersion": 768,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 768,
+          "arg2": 1,
+          "result": 0
+        },
+        {
+          "packedVersion": 1024,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 1024,
+          "arg2": 1,
+          "result": 0
+        },
+        {
+          "packedVersion": 1025,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 1025,
+          "arg2": 1,
+          "result": 0
+        }
+      ],
+      "nop": {
+        "initialised": 1,
+        "encoded": 0,
+        "words": [
+          2684354560
+        ]
+      },
+      "networkAccess": false,
+      "hardwareQualified": false,
+      "writeQualified": false
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "state",
+      "sequence": 3,
+      "device": "CJ1M",
+      "cpu": "CPU21",
+      "state": "reset",
+      "descriptorName": "CJ1M",
+      "selector": 8,
+      "familyMaskLow": 1024,
+      "familyMaskHigh": 0,
+      "defaultVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "currentVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "fieldDefaultVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "fieldCurrentVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "fbSupportCurrent": 1,
+      "fbSupportDefault": 1,
+      "localExtendedProtect": 0,
+      "extendedSupportArguments": [
+        {
+          "packedVersion": 768,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 768,
+          "arg2": 1,
+          "result": 0
+        },
+        {
+          "packedVersion": 1024,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 1024,
+          "arg2": 1,
+          "result": 0
+        },
+        {
+          "packedVersion": 1025,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 1025,
+          "arg2": 1,
+          "result": 0
+        }
+      ],
+      "nop": {
+        "initialised": 1,
+        "encoded": 0,
+        "words": [
+          2684354560
+        ]
+      },
+      "networkAccess": false,
+      "hardwareQualified": false,
+      "writeQualified": false
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "state",
+      "sequence": 4,
+      "device": "CJ1H-H",
+      "cpu": "CPU65",
+      "state": "default",
+      "descriptorName": "CJ1H-H",
+      "selector": 8,
+      "familyMaskLow": 524288,
+      "familyMaskHigh": 0,
+      "defaultVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "currentVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "fieldDefaultVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "fieldCurrentVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "fbSupportCurrent": 1,
+      "fbSupportDefault": 1,
+      "localExtendedProtect": 0,
+      "extendedSupportArguments": [
+        {
+          "packedVersion": 768,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 768,
+          "arg2": 1,
+          "result": 0
+        },
+        {
+          "packedVersion": 1024,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 1024,
+          "arg2": 1,
+          "result": 0
+        },
+        {
+          "packedVersion": 1025,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 1025,
+          "arg2": 1,
+          "result": 0
+        }
+      ],
+      "nop": {
+        "initialised": 1,
+        "encoded": 0,
+        "words": [
+          2684354560
+        ]
+      },
+      "networkAccess": false,
+      "hardwareQualified": false,
+      "writeQualified": false
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "state",
+      "sequence": 5,
+      "device": "CJ1H-H",
+      "cpu": "CPU65",
+      "state": "current3",
+      "descriptorName": "CJ1H-H",
+      "selector": 8,
+      "familyMaskLow": 524288,
+      "familyMaskHigh": 0,
+      "defaultVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "currentVersionBytes": [
+        3,
+        0,
+        0
+      ],
+      "fieldDefaultVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "fieldCurrentVersionBytes": [
+        3,
+        0,
+        0
+      ],
+      "fbSupportCurrent": 1,
+      "fbSupportDefault": 1,
+      "localExtendedProtect": 0,
+      "extendedSupportArguments": [
+        {
+          "packedVersion": 768,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 768,
+          "arg2": 1,
+          "result": 0
+        },
+        {
+          "packedVersion": 1024,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 1024,
+          "arg2": 1,
+          "result": 0
+        },
+        {
+          "packedVersion": 1025,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 1025,
+          "arg2": 1,
+          "result": 0
+        }
+      ],
+      "nop": {
+        "initialised": 1,
+        "encoded": 0,
+        "words": [
+          2684354560
+        ]
+      },
+      "networkAccess": false,
+      "hardwareQualified": false,
+      "writeQualified": false
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "state",
+      "sequence": 6,
+      "device": "CJ1H-H",
+      "cpu": "CPU65",
+      "state": "reset",
+      "descriptorName": "CJ1H-H",
+      "selector": 8,
+      "familyMaskLow": 524288,
+      "familyMaskHigh": 0,
+      "defaultVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "currentVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "fieldDefaultVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "fieldCurrentVersionBytes": [
+        4,
+        0,
+        0
+      ],
+      "fbSupportCurrent": 1,
+      "fbSupportDefault": 1,
+      "localExtendedProtect": 0,
+      "extendedSupportArguments": [
+        {
+          "packedVersion": 768,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 768,
+          "arg2": 1,
+          "result": 0
+        },
+        {
+          "packedVersion": 1024,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 1024,
+          "arg2": 1,
+          "result": 0
+        },
+        {
+          "packedVersion": 1025,
+          "arg2": 0,
+          "result": 0
+        },
+        {
+          "packedVersion": 1025,
+          "arg2": 1,
+          "result": 0
+        }
+      ],
+      "nop": {
+        "initialised": 1,
+        "encoded": 0,
+        "words": [
+          2684354560
+        ]
+      },
+      "networkAccess": false,
+      "hardwareQualified": false,
+      "writeQualified": false
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "done",
+      "sequence": 7,
+      "states": 6,
+      "networkAccess": false,
+      "fullProgramCompiled": false,
+      "hardwareQualified": false,
+      "writeQualified": false
+    }
+  ],
+  "networkAccess": false,
+  "fullProgramCompiled": false,
+  "explicitCodecUnitVersionQualified": false,
+  "hardwareQualified": false,
+  "writeQualified": false
+}

@@ -1,0 +1,100 @@
+{
+  "endpoint": "10.0.174.36:9600",
+  "error": "program session stopped: FINS 0501 end code 0080",
+  "finishedUTC": "2026-11-21T21:29:04.1932735Z",
+  "fullControllerBackup": false,
+  "hardwareQualified": false,
+  "initial": {
+    "cpu": {
+      "model": "CJ1M_CPU21",
+      "version": "03.00\u0000\u0000\u0000\u0000\u000003.06",
+      "raw": "Q0oxTV9DUFUyMSAgICAgICAgICAwMy4wMAAAAAAAMDMuMDYAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAABgACAMIAwgDCAAAAAAAAAAAADAAYACheAAAgAAAAAAAAgIMVU00MgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAAE="
+    },
+    "status": {
+      "status": 4,
+      "mode": 0,
+      "fatal": 0,
+      "nonFatal": 0,
+      "raw": "BAAAAAAAAAAAACAgICAgICAgICAgICAgICA="
+    }
+  },
+  "phase": "explicit-run-unchanged-original",
+  "programWriteInvoked": false,
+  "restoreQualified": false,
+  "session": {
+    "controlled": true,
+    "accessState": "uncertain",
+    "programEntered": true,
+    "finished": false,
+    "executionRequested": true,
+    "state": "stopped",
+    "stopReason": "FINS 0501 end code 0080",
+    "binding": {
+      "transport": "tcp",
+      "peer": "10.0.174.36:9600",
+      "route": {
+        "Source": {
+          "Network": 0,
+          "Node": 239,
+          "Unit": 0
+        },
+        "Destination": {
+          "Network": 0,
+          "Node": 36,
+          "Unit": 0
+        }
+      }
+    },
+    "candidate": {
+      "format": "cj1-offline-program-write-audit",
+      "state": "ready",
+      "imageSHA256": "598e01ac119b890c94f5495e267269fa9546aff32e130f481d68e1ed35601b84",
+      "imageBytes": 2624,
+      "plannedBlocks": 3,
+      "attemptedBlocks": 0,
+      "acknowledgedBlocks": 0,
+      "acknowledgedBytes": 0,
+      "nextOffsetBytes": 0,
+      "allBlocksAcknowledged": false,
+      "uncertainWrite": false,
+      "reconciliationRequired": false,
+      "networkAccess": false,
+      "routeSIDVerified": false,
+      "hardwareQualified": false,
+      "writeQualified": false,
+      "rollbackPerformed": false
+    },
+    "originalReturn": {
+      "format": "cj1-offline-program-write-audit",
+      "state": "ready",
+      "imageSHA256": "a4c0b45ba391fcd0cefb49bce52058168971e4aca1e6b29fe05937f80961c8cf",
+      "imageBytes": 4672,
+      "plannedBlocks": 5,
+      "attemptedBlocks": 0,
+      "acknowledgedBlocks": 0,
+      "acknowledgedBytes": 0,
+      "nextOffsetBytes": 0,
+      "allBlocksAcknowledged": false,
+      "uncertainWrite": false,
+      "reconciliationRequired": false,
+      "networkAccess": false,
+      "routeSIDVerified": false,
+      "hardwareQualified": false,
+      "writeQualified": false,
+      "rollbackPerformed": false
+    },
+    "original": {
+      "sha256": "a4c0b45ba391fcd0cefb49bce52058168971e4aca1e6b29fe05937f80961c8cf",
+      "byteLength": 4672,
+      "parseableN1": true
+    },
+    "returnAttempted": false,
+    "programBytesReconciled": false,
+    "hardwareQualified": false,
+    "writeQualified": false,
+    "restoreQualified": false,
+    "fullControllerBackup": false
+  },
+  "startedUTC": "2026-11-21T21:28:38.6903063Z",
+  "writeQualified": false
+}

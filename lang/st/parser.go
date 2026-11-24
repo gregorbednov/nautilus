@@ -28,13 +28,39 @@ func (p *Parser) peekPos() Pos { return tokPos(p.peek()) }
 // the rest of its line or file and the parser reports something else, or
 // nothing.
 func Parse(source string) (*Program, error) {
+	p, err := newSourceParser(source)
+	if err != nil {
+		return nil, err
+	}
+	return p.parseProgram()
+}
+
+// ParseFunctionBlock parses one standalone definition up to end of file.
+func ParseFunctionBlock(source string) (*FunctionBlockDecl, error) {
+	p, err := newSourceParser(source)
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Type != TokenFunctionBlock {
+		return nil, fmt.Errorf("expected FUNCTION_BLOCK")
+	}
+	fb, err := p.parseFunctionBlock()
+	if err != nil {
+		return nil, err
+	}
+	if _, err = p.expect(TokenEOF); err != nil {
+		return nil, err
+	}
+	return fb, nil
+}
+
+func newSourceParser(source string) (*Parser, error) {
 	tokens, lexErrs := LexErrors(source)
 	if len(lexErrs) > 0 {
 		e := lexErrs[0]
 		return nil, fmt.Errorf("line %d:%d: %s", e.Pos.Line, e.Pos.Col, e.Msg)
 	}
-	p := &Parser{tokens: tokens}
-	return p.parseProgram()
+	return &Parser{tokens: tokens}, nil
 }
 
 func (p *Parser) peek() Token {

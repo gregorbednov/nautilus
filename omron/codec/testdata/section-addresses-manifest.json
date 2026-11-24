@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "d338102e3ddc7fab1998db808ce9553c8a1f677a63e26e76e99cce6dec1e4ebf",
+  "programType": 0,
+  "unitVersion": null,
+  "timerCounterMode": "bcd",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "probe": "fb-section-addresses-v1",
+  "artifacts": {
+    "cases": {
+      "path": "section-addresses-cases.json",
+      "sha256": "d338102e3ddc7fab1998db808ce9553c8a1f677a63e26e76e99cce6dec1e4ebf",
+      "bytes": 5541
+    },
+    "events": {
+      "path": "section-addresses-events.jsonl.gz",
+      "sha256": "75a42de334d46ae87f6ee9703fde6a1f06ff73f580fe26a1cae80f1f4854f7d2",
+      "bytes": 1526,
+      "encoding": "gzip",
+      "decodedSHA256": "2b87bc83c942101e94f8d31e08385656d5f75cdc8a023723e6226631c54301dd"
+    },
+    "script": {
+      "path": "section-addresses-run.js.gz",
+      "sha256": "fd0a901eb6cd4550afe8e5445495e72e37030dcba16961f72aa98a75a74689fb",
+      "bytes": 5241,
+      "encoding": "gzip",
+      "decodedSHA256": "48d89672f2b858f1b9b711ab9ac21f90ba71a5b5e91f9b1abcfd4b1b289d20f4"
+    },
+    "template": {
+      "path": "section-addresses-template.js",
+      "sha256": "2ef8a83848cc1229b6f2ec9d04ceb8bdef6199bcf7a62d5d19f180d2de219f9e",
+      "bytes": 16239
+    },
+    "worker": {
+      "path": "section-addresses-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    }
+  }
+}

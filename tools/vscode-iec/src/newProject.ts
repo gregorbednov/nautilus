@@ -20,6 +20,8 @@ import * as vscode from "vscode";
 import { cliCommand, cliExecOptions, cliMissingMessage, isMissing } from "./cli";
 import {
   NEW_PROJECT_LANGUAGES,
+  CJ1Options,
+  cj1ProjectArgs,
   NEW_PROJECT_TEMPLATES,
   newProjectArgs,
   parentFolderProblem,
@@ -57,6 +59,13 @@ export function registerNewProjectCommand(): vscode.Disposable {
     );
     if (!template) return;
 
+    if (template.value.template === "cj1") {
+      template.input.dispose();
+      const options = await pickCJ1Options();
+      if (options) await createProject(parent.value, name.value.trim(), cj1ProjectArgs(name.value.trim(), options));
+      return;
+    }
+
     let language: string | undefined;
     let last: vscode.QuickInput = template.input;
     if (templateTakesLanguage(template.value.template)) {
@@ -72,7 +81,7 @@ export function registerNewProjectCommand(): vscode.Disposable {
     }
     last.dispose();
 
-    await createProject(parent.value, name.value.trim(), template.value.template, language);
+    await createProject(parent.value, name.value.trim(), newProjectArgs(name.value.trim(), template.value.template, language));
   });
 }
 
@@ -228,11 +237,23 @@ function pickParentFolder(): Promise<Step<vscode.Uri> | undefined> {
   }, () => browsing);
 }
 
-async function createProject(parent: vscode.Uri, name: string, template: string,
-  language?: string
-): Promise<void> {
+async function pickCJ1Options(): Promise<CJ1Options | undefined> {
+  const model = await vscode.window.showQuickPick(["CJ1M CPU21", "CJ1H-H CPU65"], {title: "CJ1 CPU model"});
+  if (!model) return;
+  const timerMode = await vscode.window.showQuickPick(["bcd", "binary"], {title: "Timer/counter mode (use BCD for function blocks)"});
+  if (!timerMode) return;
+  const start = await vscode.window.showQuickPick(["Empty project", "Import CXP or CXT"], {title: "CJ1 project source"});
+  if (!start) return;
+  if (start === "Empty project") return {model, timerMode};
+  const source = await vscode.window.showOpenDialog({title: "Choose CJ1 source", filters: {"Omron projects": ["cxp", "cxt"]}, canSelectMany: false});
+  if (!source?.length) return;
+  const settings = await vscode.window.showOpenDialog({title: "Choose N1 image settings", filters: {"Image settings": ["json"]}, canSelectMany: false});
+  if (!settings?.length) return;
+  return {model, timerMode, imported: {source: source[0].fsPath, settings: settings[0].fsPath}};
+}
+
+async function createProject(parent: vscode.Uri, name: string, args: string[]): Promise<void> {
   const cli = cliCommand();
-  const args = newProjectArgs(name, template, language);
   const projectUri = vscode.Uri.joinPath(parent, name);
 
   const ok = await vscode.window.withProgress(
@@ -249,7 +270,7 @@ async function createProject(parent: vscode.Uri, name: string, template: string,
                 void vscode.window.showErrorMessage(cliMissingMessage(cli));
               } else {
                 void vscode.window.showErrorMessage(
-                  `nautilus: naut new failed — ${stderr.trim() || err.message}`
+                  `nautilus: project creation failed — ${stderr.trim() || err.message}`
                 );
               }
               resolve(false);

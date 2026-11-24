@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "method": "native-library-calls-in-disposable-worker",
+  "compilerSHA256": "a32ada50d87bc39697ca7c57337b8e64b14e59bca54d54791929cbe7db678141",
+  "requestSHA256": "cf38e95f6f31f3b65e9d1a39c8637a12d41596c8507a58c7cb4a3229cf01f05f",
+  "programType": 0,
+  "unitVersion": null,
+  "timerCounterMode": "library-default",
+  "fullProgramCompiled": false,
+  "hardwareQualified": false,
+  "artifacts": {
+    "cases": {
+      "path": "modifier-cases.json",
+      "sha256": "cf38e95f6f31f3b65e9d1a39c8637a12d41596c8507a58c7cb4a3229cf01f05f",
+      "bytes": 46607
+    },
+    "events": {
+      "path": "modifier-events.jsonl.gz",
+      "sha256": "3ec088c19e107f7e2ef8f49f6bd1b07d0832a80980d6b5041f8ec6dd6d1138fb",
+      "bytes": 12735,
+      "encoding": "gzip",
+      "decodedSHA256": "d991c009d11292f2a51f5b19bbc7bcde239226d54bc27a0af1ac6a3c4cf1b3a6"
+    },
+    "script": {
+      "path": "modifier-run.js.gz",
+      "sha256": "2faac66ffaf0e0a8ec844c088294ee62971725763f019fb16fc963b4f238604d",
+      "bytes": 5132,
+      "encoding": "gzip",
+      "decodedSHA256": "4b195f0899c43d7669ff53d8ec18c445a7d455da9fc39b902336573ca68cd528"
+    },
+    "template": {
+      "path": "modifier-template.js",
+      "sha256": "b70d99c337a424c126ee0912e3221242b6e19cb0aaa8e1a9f8bbc0c4309ed928",
+      "bytes": 5476
+    },
+    "worker": {
+      "path": "modifier-worker.ps1",
+      "sha256": "4b9c7a04565047b6a7941cfd4b642db11fa03919cf1e958619f2457c11a53344",
+      "bytes": 584
+    }
+  }
+}

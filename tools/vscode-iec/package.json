@@ -114,6 +114,11 @@
         }
       },
       {
+        "id": "omron-cxt",
+        "aliases": ["Omron CXT"],
+        "extensions": [".cxt", ".CXT"]
+      },
+      {
         "id": "logix-l5x",
         "aliases": [
           "Logix L5X Export",
@@ -354,6 +359,19 @@
         "title": "nautilus: Create Project…"
       },
       {
+        "command": "nautilus.omron.buildProject",
+        "title": "nautilus: Build Omron CJ1 Project"
+      },
+      {
+        "command": "nautilus.omron.downloadProject",
+        "title": "nautilus: Download Omron CJ1 Project",
+        "enablement": "isWorkspaceTrusted && workbenchState != empty && !isWeb"
+      },
+      {
+        "command": "nautilus.omron.readStatus",
+        "title": "nautilus: Read Omron CJ1 CPU Status"
+      },
+      {
         "command": "nautilus.agentsMd.update",
         "title": "nautilus: Add or Update AGENTS.md"
       },
@@ -557,7 +575,7 @@
       "editor/title": [
         {
           "command": "nautilus.diagram.openAsDiagram",
-          "when": "!activeCustomEditorId && resourceLangId =~ /^(iec-fbd|iec-ld|iec-sfc|logix-l5x)$/",
+          "when": "!activeCustomEditorId && resourceLangId =~ /^(iec-fbd|iec-ld|iec-sfc|logix-l5x|omron-cxt)$/",
           "group": "navigation@1"
         },
         {
@@ -602,7 +620,7 @@
         },
         {
           "command": "nautilus.diagram.showSource",
-          "when": "activeCustomEditorId =~ /^nautilus\\.(fbd|ld|l5x|sfc)Diagram$/",
+          "when": "activeCustomEditorId == nautilus.omronLadder || activeCustomEditorId =~ /^nautilus\\.(fbd|ld|l5x|sfc)Diagram$/",
           "group": "navigation@2"
         },
         {
@@ -672,11 +690,11 @@
         },
         {
           "command": "nautilus.diagram.openAsDiagram",
-          "when": "resourceLangId =~ /^(iec-fbd|iec-ld|iec-sfc|logix-l5x)$/"
+          "when": "resourceLangId =~ /^(iec-fbd|iec-ld|iec-sfc|logix-l5x|omron-cxt)$/"
         },
         {
           "command": "nautilus.diagram.showSource",
-          "when": "activeCustomEditorId =~ /^nautilus\\.(fbd|ld|l5x|sfc)Diagram$/"
+          "when": "activeCustomEditorId == nautilus.omronLadder || activeCustomEditorId =~ /^nautilus\\.(fbd|ld|l5x|sfc)Diagram$/"
         },
         {
           "command": "nautilus.fbd.preview",
@@ -922,6 +940,15 @@
         "priority": "option"
       },
       {
+        "viewType": "nautilus.omronLadder",
+        "displayName": "Ladder Diagram (Omron CXT)",
+        "selector": [
+          { "filenamePattern": "*.cxt" },
+          { "filenamePattern": "*.CXT" }
+        ],
+        "priority": "option"
+      },
+      {
         "viewType": "nautilus.sfcDiagram",
         "displayName": "SFC Diagram",
         "selector": [
@@ -1131,6 +1158,7 @@
     "test": "npm run compile && node --test out/fbMonitorTitle.test.js out/testState.test.js out/sourceGuard.test.js out/scan.test.js out/cliResolve.test.js out/cliInstall.test.js out/cliPath.test.js out/cli.test.js out/gitHistory.test.js out/programSync.test.js out/composeCli.test.js out/onlineEditConfirm.test.js out/logixDeployLogic.test.js out/mimicOps.test.js out/mimicComponentIndex.test.js out/userComponentBuild.test.js out/componentPreview.test.js out/copyKitComponent.test.js out/builtinComponents.test.js out/pagePreviewLogic.test.js out/l5xRouting.test.js out/previewFollow.test.js out/newProjectLogic.test.js out/diagramKeyPolicy.test.js out/webviewReady.test.js out/sourceDoc.test.js out/sceneKinds.test.js out/sceneOps.test.js out/sceneEditorLogic.test.js out/kindSchema.test.js out/kindEditorLogic.test.js out/kindOps.test.js out/kindEject.test.js out/acceptanceMessage.test.js out/forces.test.js out/xrefTarget.test.js out/projectTagsLogic.test.js out/tagTypes.test.js out/diagramExportLogic.test.js out/liveActions.test.js out/diagramSelection.test.js out/agentsMdLogic.test.js out/componentCompiler.test.js out/runtimeModules.test.js out/controllerStatus.test.js out/apiAuth.test.js out/languageConfiguration.test.js && npm --prefix webview-ui run test",
     "build:webview": "npm --prefix webview-ui run build",
     "test:e2e": "npm run compile && node out/e2e/run.js",
+    "test:e2e:cj1": "npm run compile && node out/e2e/cj1Run.js",
     "gen:kind-schema": "npm run compile && node out/kindSchema.js --write"
   },
   "dependencies": {

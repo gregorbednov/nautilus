@@ -1,0 +1,826 @@
+[
+  {
+    "id": "compare-0",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "0",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-1",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "0"
+    ]
+  },
+  {
+    "id": "compare-2",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "6143",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-3",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "6143"
+    ]
+  },
+  {
+    "id": "compare-4",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "6144",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-5",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "6144"
+    ]
+  },
+  {
+    "id": "compare-6",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "W0",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-7",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "W0"
+    ]
+  },
+  {
+    "id": "compare-8",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "W511",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-9",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "W511"
+    ]
+  },
+  {
+    "id": "compare-10",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "W512",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-11",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "W512"
+    ]
+  },
+  {
+    "id": "compare-12",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "H0",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-13",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "H0"
+    ]
+  },
+  {
+    "id": "compare-14",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "H511",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-15",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "H511"
+    ]
+  },
+  {
+    "id": "compare-16",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "H512",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-17",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "H512"
+    ]
+  },
+  {
+    "id": "compare-18",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "A0",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-19",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "A0"
+    ]
+  },
+  {
+    "id": "compare-20",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "A447",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-21",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "A447"
+    ]
+  },
+  {
+    "id": "compare-22",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "A448",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-23",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "A448"
+    ]
+  },
+  {
+    "id": "compare-24",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "A959",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-25",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "A959"
+    ]
+  },
+  {
+    "id": "compare-26",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "A960",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-27",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "A960"
+    ]
+  },
+  {
+    "id": "compare-28",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D0",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-29",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "D0"
+    ]
+  },
+  {
+    "id": "compare-30",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D32767",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-31",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "D32767"
+    ]
+  },
+  {
+    "id": "compare-32",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D32768",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-33",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "D32768"
+    ]
+  },
+  {
+    "id": "compare-34",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "T0",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-35",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "T0"
+    ]
+  },
+  {
+    "id": "compare-36",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "T4095",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-37",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "T4095"
+    ]
+  },
+  {
+    "id": "compare-38",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "T4096",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-39",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "T4096"
+    ]
+  },
+  {
+    "id": "compare-40",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "C0",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-41",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "C0"
+    ]
+  },
+  {
+    "id": "compare-42",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "C4095",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-43",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "C4095"
+    ]
+  },
+  {
+    "id": "compare-44",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "C4096",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-45",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "C4096"
+    ]
+  },
+  {
+    "id": "compare-46",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "#0000",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-47",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "#0000"
+    ]
+  },
+  {
+    "id": "compare-48",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "#FFFF",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-49",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "#FFFF"
+    ]
+  },
+  {
+    "id": "compare-50",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "#DEAD",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-51",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "#DEAD"
+    ]
+  },
+  {
+    "id": "compare-52",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "#10000",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-53",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "#10000"
+    ]
+  },
+  {
+    "id": "compare-54",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "#GGGG",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-55",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "#GGGG"
+    ]
+  },
+  {
+    "id": "compare-56",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "&0",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-57",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "&0"
+    ]
+  },
+  {
+    "id": "compare-58",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "&65535",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-59",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "&65535"
+    ]
+  },
+  {
+    "id": "compare-60",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "&65536",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-61",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "&65536"
+    ]
+  },
+  {
+    "id": "compare-62",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "#-1",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-63",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "#-1"
+    ]
+  },
+  {
+    "id": "compare-64",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "&-1",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-65",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "&-1"
+    ]
+  },
+  {
+    "id": "compare-66",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "&+1",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-67",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "&+1"
+    ]
+  },
+  {
+    "id": "compare-68",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "0.00",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-69",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "0.00"
+    ]
+  },
+  {
+    "id": "compare-70",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "W0.00",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-71",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "W0.00"
+    ]
+  },
+  {
+    "id": "compare-72",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "*D0",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-73",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "*D0"
+    ]
+  },
+  {
+    "id": "compare-74",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "@D0",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-75",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "@D0"
+    ]
+  },
+  {
+    "id": "compare-76",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "IR0",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-77",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "IR0"
+    ]
+  },
+  {
+    "id": "compare-78",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "TR0",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-79",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "TR0"
+    ]
+  },
+  {
+    "id": "compare-80",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "TRUE",
+      "D100"
+    ]
+  },
+  {
+    "id": "compare-81",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D100",
+      "TRUE"
+    ]
+  },
+  {
+    "id": "compare-82",
+    "mnemonic": "CMP",
+    "operands": [
+      "#DEAD",
+      "#DEAD"
+    ]
+  },
+  {
+    "id": "compare-83",
+    "mnemonic": "CMP",
+    "operands": [
+      "&65535",
+      "#FFFF"
+    ]
+  },
+  {
+    "id": "compare-84",
+    "mnemonic": "CMP",
+    "operands": [
+      "D0"
+    ]
+  },
+  {
+    "id": "compare-85",
+    "mnemonic": "CMP",
+    "operands": []
+  },
+  {
+    "id": "compare-86",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "#DEAD",
+      "#DEAD"
+    ]
+  },
+  {
+    "id": "compare-87",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "&65535",
+      "#FFFF"
+    ]
+  },
+  {
+    "id": "compare-88",
+    "mnemonic": "CMP(020)",
+    "operands": [
+      "D0"
+    ]
+  },
+  {
+    "id": "compare-89",
+    "mnemonic": "CMP(020)",
+    "operands": []
+  },
+  {
+    "id": "compare-90",
+    "mnemonic": "CMP(20)",
+    "operands": [
+      "#DEAD",
+      "#DEAD"
+    ]
+  },
+  {
+    "id": "compare-91",
+    "mnemonic": "CMP(20)",
+    "operands": [
+      "&65535",
+      "#FFFF"
+    ]
+  },
+  {
+    "id": "compare-92",
+    "mnemonic": "CMP(20)",
+    "operands": [
+      "D0"
+    ]
+  },
+  {
+    "id": "compare-93",
+    "mnemonic": "CMP(20)",
+    "operands": []
+  },
+  {
+    "id": "compare-94",
+    "mnemonic": "CMP(999)",
+    "operands": [
+      "#DEAD",
+      "#DEAD"
+    ]
+  },
+  {
+    "id": "compare-95",
+    "mnemonic": "CMP(999)",
+    "operands": [
+      "&65535",
+      "#FFFF"
+    ]
+  },
+  {
+    "id": "compare-96",
+    "mnemonic": "CMP(999)",
+    "operands": [
+      "D0"
+    ]
+  },
+  {
+    "id": "compare-97",
+    "mnemonic": "CMP(999)",
+    "operands": []
+  },
+  {
+    "id": "compare-98",
+    "mnemonic": "@CMP(020)",
+    "operands": [
+      "#DEAD",
+      "#DEAD"
+    ]
+  },
+  {
+    "id": "compare-99",
+    "mnemonic": "@CMP(020)",
+    "operands": [
+      "&65535",
+      "#FFFF"
+    ]
+  },
+  {
+    "id": "compare-100",
+    "mnemonic": "@CMP(020)",
+    "operands": [
+      "D0"
+    ]
+  },
+  {
+    "id": "compare-101",
+    "mnemonic": "@CMP(020)",
+    "operands": []
+  },
+  {
+    "id": "compare-102",
+    "mnemonic": "%CMP(020)",
+    "operands": [
+      "#DEAD",
+      "#DEAD"
+    ]
+  },
+  {
+    "id": "compare-103",
+    "mnemonic": "%CMP(020)",
+    "operands": [
+      "&65535",
+      "#FFFF"
+    ]
+  },
+  {
+    "id": "compare-104",
+    "mnemonic": "%CMP(020)",
+    "operands": [
+      "D0"
+    ]
+  },
+  {
+    "id": "compare-105",
+    "mnemonic": "%CMP(020)",
+    "operands": []
+  }
+]
