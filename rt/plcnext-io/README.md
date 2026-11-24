@@ -155,7 +155,7 @@ else.
 
 A CLI release attaches the build as
 `nautilus-plcnext-io_<version>_linux_armv7.tar.gz` (with a `.sha256`
-beside it): `nautilus_io`, the two ACF files and this README, under one
+beside it): `nautilus_io`, `naut-launch`, the two ACF files and this README, under one
 directory. Unpack it and run the copy steps below from inside that
 directory, with the `dist/plcnext-io/` and `rt/plcnext-io/` prefixes
 dropped. To build it instead
@@ -207,12 +207,84 @@ Without it both run best-effort and say so (the page's `NIO_ST_FIFO`,
 the log's `refused`, naut's `scan.sched`). naut needs it only for a
 task with `priority:`; the bench's scan task is at 40 once it is set.
 
+**The cycle is bounded** (`rtguard.h`, #836). Before it takes
+`SCHED_FIFO` the shim sets `RLIMIT_RTTIME`. A cycle that runs 200 ms
+without sleeping (it sleeps every 1 ms when healthy) gets `SIGXCPU`, and
+the handler moves the cycle thread back to normal priority until a
+restart. That frees the core either way. What follows depends on whether
+the cycle comes round again:
+
+- **A cycle that was merely slow comes round.** It logs `SCHED_FIFO
+  withdrawn`, the page's `NIO_ST_FIFO` drops, and it carries on at normal
+  priority.
+- **A cycle that is stuck doesn't** (inside the firmware's
+  `BeginWrite`, say). Nothing is logged, the bit never drops, and the
+  output watchdog never runs, because it runs on that same thread. The
+  output frame keeps its last values. The 500 ms kill never comes either:
+  the limit stops counting once the thread is no longer real-time. Only
+  naut sees it, when the page's cycle stamp goes stale for 100 ms.
+
+If the limit can't be set, the shim doesn't take FIFO at all.
+At 500 ms the kernel kills it, as a backstop. What the firmware then does
+with its ACF process, and what the output frame holds once the shim is
+gone, has not been tried on the bench. The shim's own output watchdog
+dies with it. The demotion is the path this is built for.
+
 The shim asks for priority 80 — over the firmware's interrupt threads
 (50), under `T_Cyclic100` (82), its network receive task (95) and the
 ESM (97–98); the FIFO table above is why not 50. A `nautilus_io.prio`
 file beside the binary holding one number (1–96) asks for another; the
 page reports what was asked (`NIO_OFF_PRIO`) and whether it was granted
 (`NIO_ST_FIFO`).
+
+### naut-launch: priority that survives an update
+
+naut changes with every release, so a capability on `naut` itself has
+to be set again by root after each update. `naut-launch` (`naut_launch.c`,
+built and shipped beside `nautilus_io`) carries it instead. It raises
+`CAP_SYS_NICE` into its inheritable and ambient sets and execs
+`current/controller` beside it, with its own arguments and pid, so
+whatever release `current` points at runs with that one capability.
+First it sets `RLIMIT_RTTIME` (200 ms of real-time CPU without blocking,
+then `SIGXCPU`; at 500 ms, `SIGKILL`; `NAUTILUS_RT_LIMIT_MS` changes it,
+and a stricter limit already in force is kept). Limits survive the exec,
+so whatever it starts is bounded, including a program that sets no limit
+of its own, such as `tools/jitter`. naut sets the same limit itself, and
+demotes instead of dying.
+
+Install it once, as admin, in the directory that holds `current`:
+
+```sh
+scp dist/plcnext-io/naut-launch admin@<plc>:/opt/plcnext/apps/nautilus/
+ssh admin@<plc> 'chmod 755 /opt/plcnext/apps/nautilus/naut-launch'   # owned by admin, as copied
+ssh -t admin@<plc> 'sudo passwd root && su -c "setcap cap_sys_nice+ep /opt/plcnext/apps/nautilus/naut-launch; getcap /opt/plcnext/apps/nautilus/naut-launch"; sudo passwd -l root'
+```
+
+The last line is the controller owner's, typed once; it is needed
+again only when `naut-launch` itself is replaced. `current/controller`
+is a `naut build` controller. Once `naut deploy` has its cron mode
+(#768, after #764) it lays out `releases/`, `current` and `previous`
+here and starts the controller through `naut-launch`; until then
+`current` is placed by hand.
+
+Before it execs anything it checks that the caller's real uid owns
+`naut-launch`, that the resolved controller is a regular file owned by
+that user, and that `naut-launch`'s directory and the controller's
+belong to that user (or root). None of the three may be writable by
+group or others; otherwise it exits 126. Without the capability (not
+set yet, or lost when the file was replaced) it says so on stderr and
+starts the controller anyway, at normal priority.
+
+What it does not do is confine the capability to nautilus. Anyone who
+can act as the owner (admin) effectively holds `CAP_SYS_NICE`: they
+decide what `current` points at, every process the controller starts
+inherits the ambient capability, and an admin process can ptrace the
+controller. `CAP_SYS_NICE` reaches every pid, the firmware's own FIFO
+97–98 tasks included, so misused it can starve the controller. The
+risk is availability, not confidentiality or more privilege, and it
+gives admin nothing new: admin already has a documented way to root
+(`sudo passwd root`, above). The shim still needs its own `setcap`,
+but it changes rarely.
 
 A `nautilus_io.cpu` file beside the binary pins the cycle to one CPU;
 that needs no capability. Use CPU 1, with naut on CPU 0 (`naut.cpu`

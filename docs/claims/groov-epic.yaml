@@ -341,11 +341,25 @@ claims:
   - id: EPIC-027
     claim: >-
       A replica that started as a standby commands every output on its
-      first takeover: the first value handed over for each output is
-      written.
+      first takeover: a standby has no start-up baseline, so the first value
+      handed over for each output is written, equal to the unit's or not.
     source: "#redundancy"
     tests:
       - go ./optommp TestStandbyFirstTakeoverCommands
+      - go ./optommp TestStartupBaselineIsNotArmedForAStandby
+  - id: EPIC-040
+    claim: >-
+      An unchanged output since start is not a command: the first scan's
+      values (computed before anything was read) are never sent, and the
+      first push computed from a scan that read the unit decides each output
+      against what the unit holds: equal is recorded, different is written
+      once. A REAL compares as its 32 bits. A driver swapped in is disarmed
+      (commands) or held (records).
+    source: "#what-a-scan-does"
+    tests:
+      - go ./optommp TestStartupNeverDrivesTheInitDerivedValue
+      - go ./optommp TestStartupComparesInTheUnitsEncoding
+      - go ./optommp TestSwappedDriverBaseline
   - id: EPIC-028
     claim: >-
       The driver sees the gate change only by looking at it: on every push
@@ -500,3 +514,61 @@ claims:
       A 10 ms wait against a 150 ms dial: the scans before the unit is
       read run on DI03 seeded FALSE, and the first DO00 command is still
       on. A sibling driver's outputs are not held past the wait.
+  - id: EPIC-037
+    claim: >-
+      `naut optommp import --scratch-bits-in/-ints-in/-floats-in N` binds N
+      read-only Scratch Pad elements after the writable ones of their kind,
+      as input tags; a writable element that another client has written
+      over reads bad until it holds the program's command again, and a
+      read-only one reads good whatever it holds.
+    source: "#sharing-values-with-optos-software"
+    tests:
+      - go ./optommp TestManifestReadOnlyScratchpad
+      - go ./optommp TestDriverScratchpadSecondWriterIsBad
+    partial: true
+    note: >-
+      Against the in-process fake. That a value written through groov
+      Manage's REST API reaches the tag, and one nautilus writes reads back
+      through it, is the env-gated TestLiveScratchpadSharedWithGroovManage
+      (NAUT_OPTOMMP_LIVE + NAUT_GROOV_API_KEY), not yet run on the bench.
+  - id: EPIC-038
+    claim: >-
+      When the manifest's host is this machine (127.0.0.1, localhost or one
+      of its own addresses) the driver redials every second at most, so it
+      follows the I/O server within a second of it answering again; to any
+      other host the backoff grows to 30 s.
+    source: "#from-power-on-to-the-first-write"
+    tests:
+      - go ./optommp TestDriverLocalProcessorRetriesFast
+    note: >-
+      The table and the watchdog behaviour above it are bench measurements
+      (2026-11-17, three reboots, three I/O server restarts; the first restart
+      ran before this retry, reconnecting 4.2 s after the server), written up
+      on issue #767. Not repeatable in CI.
+  - id: EPIC-039
+    claim: >-
+      Without `redundancy:`, the driver takes naut run's liveness gate. With
+      `watchdog:` set, a closed gate (a hung or starved scan) means no
+      session, so nothing the driver sends feeds the unit's watchdog and
+      outputs with a watchdog value go to it; without `watchdog:` the
+      driver keeps reading and sends no output writes (a reconnect still
+      writes its configuration). When the scans resume it reconnects, counts the
+      trip in __WatchdogTrips and commands every output again; a clean stop
+      restores its configuration even while the gate is closed. A gate
+      installed for redundancy keeps the replica behaviour.
+    source: "#the-communication-watchdog"
+    tests:
+      - go ./optommp TestPlainGateWithWatchdogGoesSilentSoTheUnitTrips
+      - go ./optommp TestPlainGateWithoutWatchdogReadsOnAndWritesNothing
+      - go ./optommp TestPlainGateStopRestoresWhileClosed
+      - go ./optommp TestSetWriteGateAloneIsStillARedundancyLease
+    note: >-
+      The tests run against the in-process fake, which trips its watchdog
+      when no request arrives for the watchdog time. On the bench unit
+      (2026-11-18, issue #865) a 30 s hang in a normal-priority task, with
+      `watchdog: 1s`, closed the gate about 5 s in, and an observer reading
+      the unit every 3 s saw the outputs at their watchdog values from the
+      first sample after it until the scans resumed, both polling and
+      streaming. While held, the unit kept streaming (about 50 datagrams a
+      second at 20 ms), so the stream does not feed its watchdog. Not
+      repeatable in CI.

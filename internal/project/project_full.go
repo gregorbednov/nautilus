@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ import (
 	opcuaserver "github.com/joyautomation/nautilus/opcua/server"
 	"github.com/joyautomation/nautilus/optommp"
 	"github.com/joyautomation/nautilus/plcnext"
+	"github.com/joyautomation/nautilus/profinet"
 	"github.com/joyautomation/nautilus/prom"
 	"github.com/joyautomation/nautilus/redfish"
 	"github.com/joyautomation/nautilus/replay"
@@ -39,6 +41,26 @@ import (
 // checkNetworkSections validates the server sections that open sockets,
 // offline, so naut check reports them before anything listens.
 func checkNetworkSections(m Manifest) error {
+	// A replica set's standby is silent on the PROFINET network (#790), but
+	// on takeover the PLC re-assigns the station address, which the new
+	// leader must already hold: the floating address has to be in place
+	// first. Until `redundancy:` can name it and check it (#787 step 6),
+	// the combination is refused.
+	//
+	// The plcnext driver has a write gate (#863), but what a standby's
+	// gated driver does to its own controller (on shm the shim's watchdog
+	// zeroes its outputs) and how BusConductor hands over are not designed
+	// or tested. Refused until PLCnext under redundancy is (#710).
+	if m.Redundancy != nil {
+		for _, d := range append([]DriverConfig{m.Driver}, m.Drivers...) {
+			switch t := strings.ToLower(d.Type); {
+			case strings.HasPrefix(t, "profinet"):
+				return fmt.Errorf("driver %s with redundancy: is not supported yet: a takeover needs the station's floating IP address on the new leader, and redundancy: cannot name and check one yet (#787 step 6)", d.Type)
+			case t == "plcnext":
+				return fmt.Errorf("driver plcnext with redundancy: is not supported yet: a standby's driver and the Axioline bus hand-over are not designed or tested yet; PLCnext under redundancy is #710")
+			}
+		}
+	}
 	if m.OPCUA != nil && m.OPCUA.Endpoint != "" {
 		if _, _, err := opcuaserver.ParseEndpoint(m.OPCUA.Endpoint); err != nil {
 			return err
@@ -74,6 +96,8 @@ func (p *Project) Sparkplug(rt *runtime.Runtime) (*sparkplug.Node, error) {
 		PrimaryHostID:   c.PrimaryHost,
 		PublishInterval: time.Duration(c.PublishInterval),
 		BdSeqFile:       c.BdSeqFile,
+
+		DeviceDeathDelay: time.Duration(c.DeviceDeathDelay),
 	}
 	if c.PrimaryHostOffline == "disconnect" { // Load refused anything but buffer/disconnect
 		cfg.PrimaryHostOffline = sparkplug.HostOfflineDisconnect
@@ -105,7 +129,7 @@ func (p *Project) Sparkplug(rt *runtime.Runtime) (*sparkplug.Node, error) {
 	for class, patterns := range c.MetricClasses {
 		opts = append(opts, sparkplug.WithMetricClass(class, patterns...))
 	}
-	devices, err := sparkplugDevices(p.drivers)
+	devices, err := sparkplugDevicesLive(p.drivers, p.currentDriver)
 	if err != nil {
 		return nil, err
 	}
@@ -113,6 +137,13 @@ func (p *Project) Sparkplug(rt *runtime.Runtime) (*sparkplug.Node, error) {
 		opts = append(opts, sparkplug.WithDevice(d))
 	}
 	opts = append(opts, sparkplug.WithWritable(c.Writable...))
+	if p.Auth != nil {
+		// Under an auth: block a command writes only what auth.sparkplug
+		// allows, and naut run hands the node that policy (SetIdentity):
+		// until it does, every command write is refused, never let
+		// through on the write gate alone (#708 PR 8b).
+		opts = append(opts, sparkplug.WithIdentityRequired())
+	}
 	return sparkplug.New(rt, cfg, opts...)
 }
 
@@ -125,6 +156,13 @@ func (p *Project) Sparkplug(rt *runtime.Runtime) (*sparkplug.Node, error) {
 // is no connection and makes no device; its tags, like every tag no
 // connection delivers (program state, outputs), publish at node level.
 func sparkplugDevices(drivers []nio.NamedDriver) ([]sparkplug.Device, error) {
+	return sparkplugDevicesLive(drivers, nil)
+}
+
+// sparkplugDevicesLive is sparkplugDevices with each device's health asked
+// of the driver that runs now (current, by driver name), not the one Load
+// built: an I/O configuration applied live (#706) replaces a driver.
+func sparkplugDevicesLive(drivers []nio.NamedDriver, current func(name string) nio.Driver) ([]sparkplug.Device, error) {
 	var out []sparkplug.Device
 	from := map[string]string{} // device id → where it came from, for a collision
 	add := func(d sparkplug.Device, origin string) error {
@@ -136,24 +174,46 @@ func sparkplugDevices(drivers []nio.NamedDriver) ([]sparkplug.Device, error) {
 		return nil
 	}
 	for _, nd := range drivers {
+		name := nd.Name
 		switch drv := nd.Driver.(type) {
 		case nio.ConnectionReporter:
 			for _, c := range drv.Connections() {
 				id := c.ID
+				health := func() bool { return drv.ConnectionUp(id) }
+				if current != nil {
+					health = func() bool {
+						if cur, ok := current(name).(nio.ConnectionReporter); ok {
+							return cur.ConnectionUp(id)
+						}
+						return drv.ConnectionUp(id)
+					}
+				}
 				err := add(sparkplug.Device{
 					ID:     id,
 					Tags:   c.Inputs,
-					Health: func() bool { return drv.ConnectionUp(id) },
+					Health: health,
 				}, fmt.Sprintf("source %q of driver %q", id, nd.Name))
 				if err != nil {
 					return nil, err
 				}
 			}
 		case interface{ InputNames() []string }:
+			health := driverHealth(nd.Driver)
+			if health != nil && current != nil {
+				built := health
+				health = func() bool {
+					if cur := current(name); cur != nil && !sameDriver(cur, nd.Driver) {
+						if h := driverHealth(cur); h != nil {
+							return h()
+						}
+					}
+					return built()
+				}
+			}
 			err := add(sparkplug.Device{
 				ID:     nd.Name,
 				Tags:   drv.InputNames(),
-				Health: driverHealth(nd.Driver),
+				Health: health,
 			}, fmt.Sprintf("driver %q", nd.Name))
 			if err != nil {
 				return nil, err
@@ -207,6 +267,10 @@ func declaredOnly(devs []sparkplug.Device, declared map[string]bool) []sparkplug
 // roots refused, read member by member) a DBIRTH sent as soon as the link
 // came up carried only the tags read so far, and the rest rebirthed the node.
 func driverHealth(d nio.Driver) func() bool {
+	if u, ok := d.(interface{ Unwrap() nio.Driver }); ok {
+		// a driver carrying devices (devbind) is as healthy as the driver it is
+		return driverHealth(u.Unwrap())
+	}
 	switch drv := d.(type) {
 	case *eip.Driver:
 		return func() bool { h := drv.Health(); return h.Connected && h.Primed }
@@ -214,11 +278,93 @@ func driverHealth(d nio.Driver) func() bool {
 		return func() bool { return drv.Status().Connected }
 	case *opcua.Driver:
 		return drv.Online
+	case *profinet.DeviceDriver:
+		return func() bool { h := drv.Health(); return h.AR == "data" }
+	case *optommp.Driver:
+		// What <id>__Online delivers: a session is up and, when
+		// streaming, the stream is not late (#861 G2).
+		return func() bool { return drv.Health().Online }
+	case *plcnext.Driver:
+		return func() bool { return drv.Health().Online }
 	}
 	return nil
 }
 
+// buildChannel builds a checked channels: entry's transport.
+func buildChannel(c ChannelConfig) (runtime.ChannelIO, error) {
+	slot := 0
+	if c.Slot != nil {
+		slot = *c.Slot
+	}
+	return eip.NewChannel(c.Host, slot, c.Port, nil), nil
+}
+
+// opcuaManifest is what an opcua-client driver binds: an OPC UA devices:
+// row's manifest, derived from its vendored profile (device-library.md
+// §3), else the manifest file the entry names. A live I/O apply
+// (ioconfig.go) hashes and diffs it, so a profile edit is a change.
+func opcuaManifest(fsys fs.FS, d DriverConfig) (opcua.Manifest, error) {
+	if d.opcuaDevice != "" {
+		for _, od := range d.devices.OPCUADevices() {
+			if od.Name == d.opcuaDevice {
+				return od.Manifest, nil
+			}
+		}
+		return opcua.Manifest{}, fmt.Errorf("driver opcua-client: no OPC UA device %s", d.opcuaDevice)
+	}
+	if d.Manifest == "" {
+		return opcua.Manifest{}, fmt.Errorf("driver opcua-client: manifest (the opcua_manifest.yaml `naut opcua import` writes) is required")
+	}
+	raw, err := fs.ReadFile(fsys, path.Clean(d.Manifest))
+	if err != nil {
+		return opcua.Manifest{}, fmt.Errorf("driver opcua-client: %w", err)
+	}
+	om, err := opcua.ParseManifest(raw)
+	if err != nil {
+		return opcua.Manifest{}, fmt.Errorf("driver opcua-client: %s: %w", d.Manifest, err)
+	}
+	return om, nil
+}
+
+// modbusManifest is what a modbus driver: entry polls: its manifest file,
+// with the project's devices: merged in. A live I/O apply (ioconfig.go)
+// diffs it source by source.
+func modbusManifest(fsys fs.FS, d DriverConfig) (modbus.Manifest, error) {
+	if d.Manifest == "" && d.devices == nil {
+		return modbus.Manifest{}, fmt.Errorf("driver modbus: manifest (the imported modbus_manifest.yaml) is required")
+	}
+	var mm modbus.Manifest
+	if d.Manifest != "" {
+		raw, err := fs.ReadFile(fsys, path.Clean(d.Manifest))
+		if err != nil {
+			return mm, fmt.Errorf("driver modbus: %w", err)
+		}
+		// ParseManifest decodes with KnownFields semantics, so a typo is an
+		// error rather than a silently dropped binding.
+		if mm, err = modbus.ParseManifest(raw); err != nil {
+			return mm, fmt.Errorf("driver modbus: %s: %w", d.Manifest, err)
+		}
+	}
+	if d.devices != nil {
+		// The project's devices: (device-library.md §3.1), merged into
+		// the same driver so they share its scan and its status row.
+		var err error
+		if mm, err = d.devices.MergeModbus(mm); err != nil {
+			return mm, fmt.Errorf("driver modbus: %w", err)
+		}
+	}
+	return mm, nil
+}
+
 func buildDriver(fsys fs.FS, d DriverConfig) (nio.Driver, error) {
+	if err := statusTagsOnlyOnRuntime(d); err != nil {
+		return nil, err
+	}
+	switch d.Validate {
+	case "", "live", "static":
+	default:
+		return nil, fmt.Errorf("driver %s: validate: %q is not live or static", d.Type, d.Validate)
+	}
 	switch strings.ToLower(d.Type) {
 	case "", "memory":
 		// Loopback for bring-up: inputs read back whatever was written,
@@ -332,18 +478,9 @@ func buildDriver(fsys fs.FS, d DriverConfig) (nio.Driver, error) {
 		// check` and `build` pass with no device in sight, the same split
 		// eip and sparkplug-host make. The config keys are eip's, reused
 		// wholesale: manifest, scan-rate, scan-classes, tag-classes.
-		if d.Manifest == "" {
-			return nil, fmt.Errorf("driver modbus: manifest (the imported modbus_manifest.yaml) is required")
-		}
-		raw, err := fs.ReadFile(fsys, path.Clean(d.Manifest))
+		mm, err := modbusManifest(fsys, d)
 		if err != nil {
-			return nil, fmt.Errorf("driver modbus: %w", err)
-		}
-		// ParseManifest decodes with KnownFields semantics, so a typo is an
-		// error rather than a silently dropped binding.
-		mm, err := modbus.ParseManifest(raw)
-		if err != nil {
-			return nil, fmt.Errorf("driver modbus: %s: %w", d.Manifest, err)
+			return nil, err
 		}
 		opts := []modbus.Option{modbus.WithLogger(slog.Default().With("driver", "modbus"))}
 		if d.ScanRate != 0 {
@@ -355,7 +492,11 @@ func buildDriver(fsys fs.FS, d DriverConfig) (nio.Driver, error) {
 		for class, patterns := range d.TagClasses {
 			opts = append(opts, modbus.WithTagClass(class, patterns...))
 		}
-		return modbus.New(mm, opts...)
+		md, err := modbus.New(mm, opts...)
+		if err != nil || d.devices == nil {
+			return md, err
+		}
+		return d.devices.WrapModbus(md), nil
 	case "snmp", "redfish", "prometheus":
 		// The IT-hardware drivers (brief docs/design/it-drivers.md): a
 		// switch, a PDU or a UPS over SNMP, a server BMC over Redfish, a
@@ -466,23 +607,16 @@ func buildDriver(fsys fs.FS, d DriverConfig) (nio.Driver, error) {
 		}
 		return optommp.New(m, opts...)
 	case "opcua-client":
-		// The OPC UA client: one server, polled per scan class (brief
+		// The OPC UA client: one server, polled or subscribed per scan class (brief
 		// docs/design/opcua-client.md). opcua.New NEVER dials — it
 		// validates the manifest and parses every node id offline, the same
 		// split eip, modbus and sparkplug-host make.
 		if d.Endpoint == "" {
 			return nil, fmt.Errorf("driver opcua-client: endpoint is required (opc.tcp://host:4840)")
 		}
-		if d.Manifest == "" {
-			return nil, fmt.Errorf("driver opcua-client: manifest (the opcua_manifest.yaml `naut opcua import` writes) is required")
-		}
-		raw, err := fs.ReadFile(fsys, path.Clean(d.Manifest))
+		om, err := opcuaManifest(fsys, d)
 		if err != nil {
-			return nil, fmt.Errorf("driver opcua-client: %w", err)
-		}
-		om, err := opcua.ParseManifest(raw)
-		if err != nil {
-			return nil, fmt.Errorf("driver opcua-client: %s: %w", d.Manifest, err)
+			return nil, err
 		}
 		// The session's status, as a BOOL input the logic checks before
 		// trusting its values: "<driver name>__Online" — opcua_client__Online for
@@ -497,6 +631,10 @@ func buildDriver(fsys fs.FS, d DriverConfig) (nio.Driver, error) {
 			opcua.WithOnlineTag(onlineTagFor(d.Name, "opcua-client")),
 			opcua.WithSecurity(d.Security, d.SecurityMode),
 			opcua.WithPKIDir(d.PKIDir),
+			opcua.WithReadMode(d.ReadMode),
+		}
+		if d.ReassertOnReconnect != nil {
+			opts = append(opts, opcua.WithReassertOnReconnect(*d.ReassertOnReconnect))
 		}
 		if d.Username != "" {
 			opts = append(opts, opcua.WithAuth(d.Username, os.Getenv("NAUTILUS_OPCUA_PASSWORD")))
@@ -510,7 +648,35 @@ func buildDriver(fsys fs.FS, d DriverConfig) (nio.Driver, error) {
 		for class, patterns := range d.TagClasses {
 			opts = append(opts, opcua.WithTagClass(class, patterns...))
 		}
-		return opcua.New(d.Endpoint, om, opts...)
+		od, err := opcua.New(d.Endpoint, om, opts...)
+		if err != nil || d.opcuaDevice == "" {
+			return od, err
+		}
+		return d.devices.WrapOPCUA(d.opcuaDevice, od, d.Security, d.SecurityMode)
+	case "profinet-device":
+		// nautilus as a PROFINET IO device to a PLC (brief
+		// docs/design/profinet.md). New never opens a socket, so check and
+		// build pass anywhere; Start needs CAP_NET_RAW on the interface.
+		if d.Manifest == "" {
+			return nil, fmt.Errorf("driver profinet-device: manifest (the profinet_device.yaml) is required")
+		}
+		raw, err := fs.ReadFile(fsys, path.Clean(d.Manifest))
+		if err != nil {
+			return nil, fmt.Errorf("driver profinet-device: %w", err)
+		}
+		m, err := profinet.ParseDeviceManifest(raw)
+		if err != nil {
+			return nil, fmt.Errorf("driver profinet-device: %s: %w", d.Manifest, err)
+		}
+		name := d.Name
+		if name == "" {
+			name = "profinet-device"
+		}
+		return profinet.NewDevice(m,
+			profinet.WithDeviceLogger(slog.Default().With("driver", name)),
+			profinet.WithDeviceOnlineTag(onlineTagFor(d.Name, "profinet-device")))
+	case "runtime":
+		return newRuntimeStatus(d)
 	case "replay":
 		// A recording played back as live tags at a steerable clock: the
 		// baseline of a plant simulation. The recording itself is read on
@@ -528,7 +694,7 @@ func buildDriver(fsys fs.FS, d DriverConfig) (nio.Driver, error) {
 		}
 		return replay.New(m, fsys, replay.WithLogger(slog.Default().With("driver", "replay")))
 	default:
-		return nil, fmt.Errorf("driver type %q: manifest projects support memory, eip, sparkplug-host, modbus, opcua-client, snmp, redfish, prometheus, plcnext, optommp and replay — custom buses are the Go tier (io.Driver)", d.Type)
+		return nil, fmt.Errorf("driver type %q: manifest projects support memory, eip, sparkplug-host, modbus, opcua-client, snmp, redfish, prometheus, plcnext, optommp, profinet-device, replay and runtime — custom buses are the Go tier (io.Driver)", d.Type)
 	}
 }
 
@@ -544,7 +710,7 @@ func (p *Project) OPCUAServer(rt *runtime.Runtime) (*opcuaserver.Server, error) 
 	if pki == "" {
 		pki = opcuaserver.DefaultPKI
 	}
-	srv, err := opcuaserver.New(rt, opcuaserver.Options{Endpoint: c.Endpoint, Name: p.Name, ApplicationURI: c.ApplicationURI, PKI: pki, Writable: c.Writable, AnonymousWrites: c.AnonymousWrites})
+	srv, err := opcuaserver.New(rt, opcuaserver.Options{Endpoint: c.Endpoint, Name: p.Name, ApplicationURI: p.OPCUAApplicationURI(p.Member), PKI: pki, Writable: c.Writable, AnonymousWrites: c.AnonymousWrites})
 	if err != nil {
 		return nil, err
 	}
@@ -554,8 +720,107 @@ func (p *Project) OPCUAServer(rt *runtime.Runtime) (*opcuaserver.Server, error) 
 	return srv, nil
 }
 
+// OPCUAApplicationURI is the ApplicationUri of the OPC UA server run by
+// pair member `member`: the configured (or default) one, and for a pair the
+// member name appended, so the two controllers are two servers with their
+// own certificates and a client can tell them apart (OPC UA Part 4 §7.1:
+// an ApplicationUri names one server instance). Outside a pair, or with no
+// member, it is the configured one unchanged ("" means the default).
+func (p *Project) OPCUAApplicationURI(member string) string {
+	var base string
+	if p.OPCUA != nil {
+		base = p.OPCUA.ApplicationURI
+	}
+	if member == "" || !p.Redundancy.Pair() {
+		return base
+	}
+	if base == "" {
+		base = opcuaserver.ApplicationURI(p.Name)
+	}
+	// The member goes at the end of the path, before any query or fragment.
+	cut := len(base)
+	if i := strings.IndexAny(base, "?#"); i >= 0 {
+		cut = i
+	}
+	return base[:cut] + "-" + member + base[cut:]
+}
+
+// OPCUAMemberURIs are both pair members' ApplicationUris (a, then b): the
+// ServerUriArray each reports. Nil outside a pair.
+func (p *Project) OPCUAMemberURIs() []string {
+	if p.OPCUA == nil || !p.Redundancy.Pair() {
+		return nil
+	}
+	names := make([]string, 0, len(p.Redundancy.Peers))
+	for n := range p.Redundancy.Peers {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = p.OPCUAApplicationURI(n)
+	}
+	return out
+}
+
 // simulateDrivers and platformNotices are the browser playground's
 // (project_js.go); a real controller runs the drivers it was given.
 func simulateDrivers([]runtime.TagDef, nio.Driver) {}
 
 func platformNotices(Manifest) []string { return nil }
+
+// checkDriverOutputs refuses a profinet-device whose manifest binds data
+// to the PLC under a tag the project does not declare as an output.
+// Nothing would ever write it, and once the program's first push makes
+// the device's data valid, the PLC would read its zero bytes as a good
+// value. Other drivers bind catalogs freely; this one's bindings ARE the
+// PLC's input image.
+// markReplicas tells the drivers that read the write gate as leadership
+// that they are one replica of a redundant set. A PROFINET device must
+// then go silent as a standby, not just mark its data invalid: two
+// replicas cannot both answer for one station name.
+func markReplicas(d nio.Driver, redundant bool) {
+	if !redundant {
+		return
+	}
+	switch drv := d.(type) {
+	case *nio.Multi:
+		for _, c := range drv.Children() {
+			markReplicas(c.Driver, redundant)
+		}
+	case *profinet.DeviceDriver:
+		drv.Apply(profinet.WithDeviceReplica())
+	}
+}
+
+func checkDriverOutputs(defs []runtime.TagDef, d nio.Driver) error {
+	declared := map[string]bool{}
+	for _, t := range defs {
+		if t.Role == runtime.RoleOutput {
+			declared[t.Name] = true
+		}
+	}
+	var check func(nio.Driver) error
+	check = func(d nio.Driver) error {
+		switch drv := d.(type) {
+		case *nio.Multi:
+			for _, c := range drv.Children() {
+				if err := check(c.Driver); err != nil {
+					return err
+				}
+			}
+		case *profinet.DeviceDriver:
+			var missing []string
+			for _, n := range drv.OutputNames() {
+				if !declared[n] {
+					missing = append(missing, n)
+				}
+			}
+			if len(missing) > 0 {
+				return fmt.Errorf("driver profinet-device: %s bound to the PLC but not declared as output tags; the PLC would read them as valid zeros (declare them, e.g. with `naut profinet tags`)", strings.Join(missing, ", "))
+			}
+		}
+		return nil
+	}
+	return check(d)
+}

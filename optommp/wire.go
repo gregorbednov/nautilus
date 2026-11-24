@@ -25,6 +25,8 @@ import (
 	"io"
 	"net"
 	"time"
+
+	"github.com/joyautomation/nautilus/internal/fence"
 )
 
 // DefaultPort is the OptoMMP TCP port.
@@ -70,6 +72,9 @@ type Client struct {
 	hdr     [16]byte
 	sent    time.Time     // when the last request went out (zero: none yet)
 	gap     time.Duration // the longest send-to-next-answer span since quiet
+
+	// Device names this client in the writes-cut counter (fence.Cut).
+	Device string
 }
 
 // Dial connects to host:port (port 0 means 2001).
@@ -128,14 +133,40 @@ func (c *Client) ReadUint32(addr uint32) (uint32, error) {
 }
 
 // Write writes data at addr in one block (callers keep data ≤ MaxBlock).
-func (c *Client) Write(addr uint32, data []byte) error {
+func (c *Client) Write(addr uint32, data []byte) error { return c.WriteBy(addr, data, time.Time{}) }
+
+// WriteBy is Write with a send deadline (design §3.4; zero: none): a write
+// whose deadline has passed is not started, the request runs no later than
+// it, and one still unanswered then is reset (SO_LINGER 0), by a timer AT
+// the deadline and again on its failure, so nothing the kernel still holds
+// of it leaves after the lease.
+func (c *Client) WriteBy(addr uint32, data []byte, deadline time.Time) (err error) {
 	if len(data) == 0 || len(data) > MaxBlock {
 		return fmt.Errorf("optommp: write of %d bytes (want 1..%d)", len(data), MaxBlock)
+	}
+	if !fence.Started(deadline, time.Now()) {
+		return fmt.Errorf("optommp: write at 0x%08X not started: its send deadline has passed", addr)
 	}
 	pkt := make([]byte, 16+len(data))
 	header(pkt[:16], tcodeWriteBlockRequest, addr, len(data))
 	copy(pkt[16:], data)
 	prev := c.send()
+	if !deadline.IsZero() {
+		if dl := c.sent.Add(c.timeout); deadline.Before(dl) || c.timeout <= 0 {
+			c.conn.SetDeadline(deadline)
+		}
+		stop := fence.Arm(c.conn, deadline)
+		defer func() {
+			fired := stop()
+			if err != nil {
+				fence.Reset(c.conn)
+				if fired || !time.Now().Before(deadline) {
+					fence.Cut(c.Device) // began, and its deadline passed: one write cut
+				}
+			}
+		}()
+	}
+	fence.BeforeSend()
 	if _, err := c.conn.Write(pkt); err != nil {
 		return fmt.Errorf("optommp: %w", err)
 	}

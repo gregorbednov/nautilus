@@ -64,25 +64,44 @@ where marked `…`.
   {"error":"no such API endpoint: GET /api/tags"}
   ```
 
-- **CORS is open.** Every response carries
-  `Access-Control-Allow-Origin: *`. An `OPTIONS` preflight answers `204`
-  and allows the methods `GET, POST, PUT, DELETE, OPTIONS` and the headers
-  `Content-Type, Authorization, X-Nautilus-Token`. A browser page on
-  another origin can read freely. Whether it can write is decided by the
-  next section.
+- **CORS is for this machine and the controller's own names.** A browser
+  page on another origin can read the API only when it cannot be someone
+  else's site: a page on this machine (`http://localhost:5173`, any
+  loopback address, any port), the controller's own address on another
+  port (`http://192.168.1.10:3000` calling `192.168.1.10:8080`), a name in
+  `NAUTILUS_ALLOWED_HOSTS`, or, with a token configured, a request that
+  carries the token. For those the response echoes the page's origin in
+  `Access-Control-Allow-Origin` (with `Vary: Origin`); every other site
+  gets no CORS header, so its page cannot read the tags, the alarms, the
+  history or the program source. An `OPTIONS` preflight answers `204` and,
+  for the same origins (any origin when a token is configured), allows the
+  methods `GET, POST, PUT, DELETE, OPTIONS` and the headers `Content-Type,
+  Authorization, X-Nautilus-Token`. Whether a page can write is decided by
+  the next section. A screen served by the controller itself, the HMI dev
+  servers (their proxy presents the controller's origin), scripts and the
+  VS Code extension need none of this. A screen served from another host
+  must be at a name in `NAUTILUS_ALLOWED_HOSTS` to show live values: the
+  live stream (`GET /api/stream`) is an `EventSource`, which cannot send a
+  header, so the token cannot open it across origins. A token lets that
+  screen's own `fetch` reads and writes through, not its stream. (There is
+  deliberately no token in the query string: URLs end up in logs.)
 
 ## Authentication
 
-Reads are never gated: every `GET` answers without credentials. Every
-endpoint that changes something is a **write**:
+Every request, read or write, is answered only when it is addressed to a
+host no other site can take over, or, with a token configured, when it
+carries the token (below). Every endpoint that changes something is a
+**write**:
 
 | Write endpoints |
 | --- |
 | `POST /api/tags` |
 | `POST /api/forces`, `DELETE /api/forces/{name}`, `POST /api/forces/clear` |
+| `POST /api/substitutes`, `DELETE /api/substitutes/{id}`, `POST /api/substitutes/ack` |
 | `POST /api/sfc/step`, `POST /api/sfc/transition` |
-| `POST /api/alarms/ack`, `POST /api/alarms/shelve`, `POST /api/alarms/unshelve` |
+| `POST /api/alarms/ack`, `POST /api/alarms/shelve`, `POST /api/alarms/unshelve`, `POST /api/alarms/out-of-service`, `POST /api/alarms/in-service` |
 | `PUT /api/program`, `POST /api/program/rollback`, `POST /api/program/activate` |
+| `POST /api/io/staged`, `POST /api/io/staged/{id}/validate`, `POST /api/io/staged/{id}/apply` |
 
 A write is checked before its body is read, in one of two modes.
 
@@ -102,6 +121,38 @@ cross-origin writes require an auth token (start nautilus with one, e.g. NAUTILU
 
 That is a `403`.
 
+**Every request must be addressed to a host no other site can take
+over:** a read, a write, the live stream, the dashboard and the HMI alike,
+token or not. A page on an attacker's domain can point that name at your
+controller (DNS rebinding); it is then same-origin with your controller,
+its `Host` and `Origin` are both the attacker's name, and no CORS rule
+applies. So nautilus answers only a request addressed to `localhost` (or
+a `*.localhost` name), to an IP address (`127.0.0.1`, `192.168.1.20`), or
+to a name you list in `NAUTILUS_ALLOWED_HOSTS` (comma-separated, no port),
+unless a token is configured and the request carries it:
+
+```sh
+NAUTILUS_ALLOWED_HOSTS=epic1.plant.lan naut run .
+```
+
+Any other name without the token is a `403` that says what to set, for
+browsers, scripts and the CLI alike. That includes a controller reached
+by its DNS or mDNS name (`epic1.local`), a Kubernetes Service name, and a
+reverse proxy that passes the browser's host through: `tailscale serve`
+keeps the `*.ts.net` name, nginx with `proxy_set_header Host $host` keeps
+its public name. List the name, or send the token. A script can send it,
+and so do `naut historian`, `naut pull --host` and the SNMP and Redfish
+agents' `serve --from` (each from `NAUTILUS_TOKEN` in its environment), and
+the VS Code extension (`nautilus.token`, only to `nautilus.runtimeUrl`; see
+its setting); a browser loading the dashboard or an HMI
+screen, and a live stream (`EventSource`), cannot send a header, so a
+screen reached by a name needs that name listed, token or not. A CORS
+preflight (`OPTIONS` with `Access-Control-Request-Method`) carries no
+token, so on a token controller it is answered (`204`, no data); the
+request it precedes still needs the token. When `naut run` listens beyond this machine
+(`server.addr: ":8080"` or `0.0.0.0`) with no token, it starts and prints
+a warning: anything that reaches the port can write.
+
 **With a token.** Start the controller with `NAUTILUS_TOKEN` set. The
 token is never written in `nautilus.yaml`. Every write must then carry it
 in one of two headers:
@@ -115,7 +166,9 @@ curl -X POST localhost:8080/api/tags -H 'X-Nautilus-Token: s3cret' \
   -d '{"name": "StartLevel", "value": 72}'
 ```
 
-Both answer `204`. A missing or wrong token is a `401`:
+Both answer `204`. A missing or wrong token is a `401` when the request
+is addressed to a trusted host, and a `403` by any other name (the Host
+rule above):
 
 ```text
 missing or invalid auth token
@@ -124,8 +177,21 @@ missing or invalid auth token
 With a valid token, a write is allowed from any origin. That is how an HMI
 served from another host writes.
 
-**Program endpoints need one more switch.** `PUT /api/program`,
-`POST /api/program/rollback` and `POST /api/program/activate` are refused
+**With an `auth:` block** in the manifest, roles decide instead, reads
+included: every `GET` under `/api/` (the live stream too) needs the `read`
+permission, and each write its own. No credential is a `401`, a principal
+without the permission a `403`. A signed-in browser whose password is older
+than `auth.elevation` gets a `401` with `"elevate": true` for a force, an
+edit, an activation, a download or a configuration change: it enters the
+password again ([Elevation](/guides/auth/#elevation)) and sends the request
+again. Only `GET /api/me`, the sign-in routes,
+`/healthz` and `/readyz` answer without one, unless the block sets
+`anonymous: viewer`. A browser signs in instead of sending a token. See
+[Users, roles & sign-in](/guides/auth/).
+
+**Program and I/O configuration endpoints need one more switch.**
+`PUT /api/program`, `POST /api/program/rollback`,
+`POST /api/program/activate` and the `POST /api/io/…` routes are refused
 with `403` unless the manifest sets `server.online-edits: true`. That
 check comes before the token check. See [Online edits](/guides/online-edits/).
 
@@ -136,6 +202,9 @@ check comes before the token check. See [Online edits](/guides/online-edits/).
 | `GET` | [`/api/state`](#get-apistate) | One snapshot: every tag, the scan diagnostics, quality, forces, alarm counts |
 | `GET` | [`/api/stream`](#get-apistream) | The same snapshot as Server-Sent Events, every 250 ms |
 | `GET` | [`/api/meta`](#get-apimeta) | Tag types, units and descriptions, the I/O lists, capability flags |
+| `GET` | [`/api/parameters`](#get-apiparameters) | The setpoint parameters: value, manifest `init:`, range, whether the plant and the repo agree, who edited |
+| `GET` | [`/api/parameters/patch`](#get-apiparameterspatch) | The plant-ahead values as a patch to the manifest (needs `parameters.writeBack`) |
+| `POST` | [`/api/parameters/import`](#post-apiparametersimport) | Apply a parameter set to the live setpoints, all or nothing (needs `config`) |
 | `GET` | [`/api/drivers`](#get-apidrivers) | Field driver and publisher status |
 | `GET` | [`/api/cluster`](#get-apicluster) | This replica's redundancy status |
 | `POST` | [`/api/tags`](#post-apitags) | Write one tag or one member |
@@ -143,6 +212,10 @@ check comes before the token check. See [Online edits](/guides/online-edits/).
 | `POST` | [`/api/forces`](#forces) | Force a tag or member, or change a force |
 | `DELETE` | [`/api/forces/{name}`](#forces) | Remove one force |
 | `POST` | [`/api/forces/clear`](#forces) | Remove every force |
+| `GET` | [`/api/substitutes`](#substitute-values) | The active substitutes, and the rules that say what may be |
+| `POST` | [`/api/substitutes`](#substitute-values) | Start a substitute value on an input |
+| `DELETE` | [`/api/substitutes/{id}`](#substitute-values) | End one |
+| `POST` | [`/api/substitutes/ack`](#substitute-values) | Acknowledge the ones that wait for it |
 | `GET` | [`/api/sfc`](#sfc-commands) | Running SFC charts |
 | `POST` | [`/api/sfc/step`](#sfc-commands) | Jump a chart to a step |
 | `POST` | [`/api/sfc/transition`](#sfc-commands) | Fire a transition once |
@@ -151,12 +224,32 @@ check comes before the token check. See [Online edits](/guides/online-edits/).
 | `POST` | [`/api/alarms/ack`](#alarms) | Acknowledge |
 | `POST` | [`/api/alarms/shelve`](#alarms) | Shelve until a time |
 | `POST` | [`/api/alarms/unshelve`](#alarms) | Unshelve |
+| `GET` | [`/api/alarms/out-of-service`](#alarms) | Equipment out of service, soonest to end first |
+| `POST` | [`/api/alarms/out-of-service`](#alarms) | Take a piece of equipment's alarms out of service |
+| `POST` | [`/api/alarms/in-service`](#alarms) | Put it back |
+| `GET`, `POST` | [`/alarm-ack/{token}`](#alarms) | An ack link from a page: confirm, then acknowledge |
+| `POST` | [`/alarm-inbound/sms`, `/alarm-inbound/voice/{token}`](#alarms) | The SMS and voice provider's reply or keypress, signed |
 | `GET` | [`/api/program`](#programs) | The running program source and status |
 | `PUT` | [`/api/program`](#programs) | Warm-swap a new program source |
 | `POST` | [`/api/program/rollback`](#programs) | Back to the previous source |
 | `GET` | [`/api/program/history`](#programs) | The project's commit history |
 | `POST` | [`/api/program/activate`](#programs) | Warm-swap to a commit's sources |
+| `GET` | [`/api/io`](#live-io-configuration) | What I/O configuration runs, against the manifest |
+| `POST` | [`/api/io/staged`](#live-io-configuration) | Stage a candidate I/O configuration |
+| `POST` | [`/api/io/staged/{id}/validate`](#live-io-configuration) | Check it against what runs |
+| `POST` | [`/api/io/staged/{id}/apply`](#live-io-configuration) | Apply it while the scan runs |
+| `GET` | [`/api/io/staged/{id}`](#live-io-configuration) | One candidate's state |
+| `GET` | [`/api/io/files`](#live-io-configuration) | The project files the running I/O configuration differs in (`naut pull --io`; needs the write permission) |
+| `GET` | [`/api/config/schema`](#configuration-screens) | The manifest's JSON Schema, one section at a time (`?section=drivers`), or the list of sections |
+| `GET` | [`/api/config/files`](#configuration-screens) | The manifest and the files its drivers name, as what runs (needs the edit permission) |
+| `POST` | [`/api/config/commit`](#saving-a-change) | Save an applied candidate as a git commit (only where the controller runs from a git checkout) |
+| `GET` | [`/api/config/patch`](#saving-a-change) | The applied change as a patch for `git apply` (needs the edit permission) |
 | `GET` | [`/api/history`, `/api/history/…`](#historian-proxy) | Forwarded to the historian |
+| `GET` | [`/api/audit`](#audit-journal) | Who changed what: the audit journal's recent entries |
+| `GET` | [`/api/me`](/guides/auth/#browser-sign-in) | Who the request acts as, and what it may do |
+| `POST` | [`/api/elevate`](/guides/auth/#elevation) | A signed-in browser enters its password again, for the elevated permissions |
+| `GET` | [`/healthz`](#healthz-and-readyz) | Liveness: `200 ok` |
+| `GET` | [`/readyz`](#healthz-and-readyz) | Readiness: `200 ok` on the controller that runs the process, `503` on a standby |
 
 Outside `/api/`, `GET /` is the built-in dashboard and `/assets/…` its logo
 and fonts. With `server.hmi` set, your HMI build takes `/` and the
@@ -195,9 +288,10 @@ curl -s 'localhost:8080/api/state?tags=P101,Level'
 | `locals` | when the program has `VAR` state | Program locals, read-only. Not narrowed by `tags=` |
 | `scan` | always | Scan timing and error counters. See [Scan timing and real-time](/guides/real-time/) |
 | `drivers` | when a driver reports status | The same list as [`/api/drivers`](#get-apidrivers) |
-| `quality` | when any tag is not good | Tag name → `stale`, `bad` or `notConnected`. Absent means every tag is good. See [quality](/guides/tag-model/#what-a-value-is-worth-quality) |
+| `quality` | when any tag is not good | Tag name → `stale`, `bad`, `notConnected` or `substituted`. Absent means every tag is good. See [quality](/guides/tag-model/#what-a-value-is-worth-quality) |
 | `alarms` | when the project has `alarms:` | Counts only. See [Alarms](/guides/alarms/#the-api) |
 | `forces` | while anything is forced | Forced address → forced value |
+| `config` | on `naut run` and built controllers | What I/O configuration runs: `source` is `manifest`, or `applied` with the drivers and devices that differ listed under `differs`; `notKept` when it would not survive a restart; `discarded` for a kept change the last restart or takeover did not bring back. See [Live I/O configuration](#live-io-configuration) |
 
 | Status | When |
 | --- | --- |
@@ -218,7 +312,6 @@ curl -sN 'localhost:8080/api/stream?tags=Level,PumpRun'
 ```
 ```text
 HTTP/1.1 200 OK
-Access-Control-Allow-Origin: *
 Cache-Control: no-cache
 Connection: keep-alive
 Content-Type: text/event-stream
@@ -305,6 +398,136 @@ whether this controller accepts member writes, runs an alarm engine,
 reports quality, understands `delta=1` and `blocks=delta`, and holds a
 force table. `shelveTimes` is in **seconds**. Always `200`.
 
+### `GET /api/parameters`
+
+A **parameter** is a scalar `setpoint` with an `init:` in the manifest: the
+operator-tuned numbers of a plant. A retained value wins over `init:` on a
+restart, a failover and a redeploy, so what the repo says and what the plant
+runs can differ. This route says where, and changes nothing.
+
+```json
+{"parameters": [
+  {"name": "StartLevel", "value": 70, "init": 65, "base": 65,
+   "unit": "%", "min": 10, "max": 90, "state": "plant-ahead"}
+]}
+```
+
+`state` is `in-step` (the value is the `init:`), `plant-ahead` (an operator
+edit the repo does not have), `repo-ahead` (a redeploy brought a new `init:`
+and the plant still holds the value the old one gave) or `conflict` (both
+moved, to different values). `base` is the `init:` the plant and the repo
+last agreed on. A store written before parameters has no base, and the plant
+is then taken to have started at the current `init:`. `outOfRange: true`
+marks a value outside `min`/`max`. An external write cannot cause it; the
+program's own write can, and so can a redeploy that narrows the range under
+a retained value (see below). Only numeric and boolean setpoints that are
+retained are listed: a text init (a TIME written `T#5s`) is not compared, and
+a setpoint outside the `retain:` list returns to its `init:` on a restart.
+
+`min:` and `max:` on a setpoint refuse **external** writes only: an HMI, the
+API, Sparkplug and OPC UA all go through one write path, and a number outside
+the range is refused there with a `400` that names the range. The program's
+own writes are never refused or clamped (that would change what the logic
+does); a value it puts outside the range shows as `outOfRange`. The manifest
+refuses an `init:` outside its own range, `min` above `max`, and a range on
+anything but a setpoint.
+
+Each row also carries `editedBy` and `editedAtMs` (who last wrote the value
+from outside the logic: `user:…`, `token:…`, `sparkplug`, `opcua`, or
+`external`; `program` when the logic changed the value after an edit), `committed: true` for a plant-ahead value a write-back commit has
+already put in the repo (it waits for a redeploy), and `unwritable` when the
+write-back cannot edit its `init:`. The answer's `writeBack` is the manifest's
+mode.
+
+### Writing tuned values back to Git
+
+```yaml
+parameters:
+  writeBack: commit   # off (default) | patch | commit
+```
+
+`off` only reports. With `patch`, `GET /api/parameters/patch` returns the
+plant-ahead values as a patch for `git apply`. With `commit`, a controller
+that runs from a git checkout (`naut run` on the project directory) commits
+them itself, 30 seconds after the last edit, or at once from 50 pending: one
+commit per editor, authored as that editor (the committer is the controller),
+each changing only that tag's `init:` in place: comments and layout stay. A
+controller built into a binary has no repo, and answers as `patch`.
+
+There is no queue. What would be written is the set of plant-ahead
+parameters, so a restart or a standby takeover finds the same set. A
+`repo-ahead` or `conflict` value is never written: a person decides. A value
+that cannot be edited in place (its tag comes from a device profile, or its
+`init:` is quoted or not a plain number or boolean, or the file's `init:` is
+no longer what runs) stays drift and `unwritable` says why. A commit is
+refused (and retried a minute later) on a detached HEAD or over uncommitted
+changes in the files it would touch. Each commit is journalled as
+`param.commit`, by `system`, naming the editor and the commit.
+
+### `GET /api/parameters/patch`
+
+The patch, `text/x-diff`, needs the edit permission. `409` when `writeBack` is
+`off`, when this controller is a standby, or when nothing differs.
+
+### Exporting and comparing a parameter set
+
+Two read-only commands read `GET /api/parameters` and change nothing on the
+controller:
+
+```sh
+naut params export --host plc1 -o set.yaml     # the live values, as a file
+naut params diff   --host plc1                 # live vs the manifest's init
+naut params diff   --host plc1 --file set.yaml --check
+```
+
+The file is `version: 1` and a `parameters:` map of tag name to value (the unit
+and the drift state ride along as comments; `--drift` keeps only parameters
+whose live value is not the manifest's `init:`). `diff --file` shows what
+applying a set would change, and marks a line `REFUSED` for a name the
+controller does not know, a value of another kind, or one outside the tag's
+`min`/`max`. `--check` exits 1 on a difference or a refusal, 2 when the
+controller cannot be reached or the file cannot be read.
+
+### `POST /api/parameters/import`
+
+Applies a parameter set (the file `naut params export` writes) to the live
+setpoints, all or nothing:
+
+```sh
+naut params import --host plc1 --file set.yaml --dry-run
+naut params import --host plc1 --file set.yaml
+```
+
+The body is `{"version": 1, "parameters": {"Tank.SP": 42.5}, "dryRun": false}`,
+plus an optional `"expectFrom": {"Tank.SP": 40}`: the value you last saw for a
+tag. If any tag holds something else when the set is applied (someone edited it
+after your dry run), the whole set is refused with `409`, nothing is written,
+and the result for that tag says `moved` with what it holds now. The check is
+made in the same step as the write. The HMI kit always sends it; the `naut
+params import` command does not (it applies a file you chose). A set with a
+moved value and another refusal answers `422`.
+It needs the `config` permission (a browser sign-in with a password older than
+`auth.elevation` is asked again; a token is not) **and**, for every tag in the
+set, the write permission `POST /api/tags` would ask for (by area, when `auth:`
+has areas). A tag you may not write refuses the whole set: `403` naming the
+tags, nothing written. Every value goes through the
+same front door as `POST /api/tags`: a `min`/`max`, a forced tag or a read-only
+tag refuses it exactly as it refuses a single write, and nothing here goes past
+them. A name that is not a parameter, a value of another kind, and a name that
+repeats another (tag names ignore case) are refused too. **One refusal stops the
+whole set**: the answer is `422` with every result and nothing was written.
+`dryRun` answers `200` or `422` the same way and writes nothing. The check and
+the write are one step under the store's lock, including the conversion to the
+tag's declared type (an `INT` refuses `70000` and `7.5`), so a set is never
+half in: it is all written or none is. Each result's `from` and `to` are the
+values the store held and holds. A set is at most 500 names (one journal entry
+holds every old and new value); split a bigger one. A server that mirrors a
+controller it does not run answers `501`. Each value
+lands attributed to the principal that imported it, so `parameters.writeBack`
+commits it as theirs. One `param.import` journal entry records every name with
+its old and new value. A standby forwards the request to the leader and a
+controller that is not leading refuses it (`503`).
+
 ### `GET /api/drivers`
 
 Each field driver's and publisher's status. `[]` when the project has none
@@ -362,8 +585,24 @@ curl -s localhost:8080/api/cluster
 {"mode":"standalone","pod":"","leader":"","isLeader":true,"transitions":0}
 ```
 
-Always `200`, and always answered by the replica you asked, never
-forwarded to the leader.
+Always answered by the replica you asked, never forwarded to the leader.
+With an `auth:` block it needs `read`, like every read. A load balancer or
+probe that only wants to find the leader asks `/readyz` instead.
+
+### `/healthz` and `/readyz`
+
+Two probes for a load balancer, Kubernetes or a floating address. They
+need no credential, are answered by any `Host`, and say one word and
+nothing else: no role, version or tag.
+
+| | `200 ok` | `503 not ready` |
+| --- | --- | --- |
+| `GET /healthz` | whenever the controller serves HTTP, on every replica | never |
+| `GET /readyz` | a controller without redundancy, or the leader | a standby, no leader known, or a leader whose scans have stopped |
+
+Use `/healthz` as a liveness probe: a standby answers it too, so it is
+never restarted for standing by. Use `/readyz` to send traffic only to the
+leader.
 
 ## `POST /api/tags`
 
@@ -464,9 +703,12 @@ That check comes first, so a forced input answers "forced", not "input".
 | `400` | The tag is an input (whole, or a member of it) | see above |
 | `400` | A member path names no member | `tag P101: unknown member Sped (did you mean Speed?)` |
 | `400` | An integer outside its declared width | `tag Starts: 70000 is outside INT (-32768..32767)` |
+| `400` | A number outside the setpoint's `min:`/`max:` | `tag StartLevel: 95 is outside its range [10, 90] — write a value inside it (the range is the tag's min:/max: in the manifest)` |
 | `400` | The wrong kind of value for a **member**, or for an enumerated tag | `tag P101.Enable: want BOOL, got a number` |
 | `401` | A token is set and the request has none, or the wrong one | `missing or invalid auth token` |
 | `403` | No token is set and a browser page on another origin wrote | `cross-origin writes require an auth token (start nautilus with one, e.g. NAUTILUS_TOKEN)` |
+| `403` | No token is set and a browser page wrote by a host name that is not localhost, an IP address or in `NAUTILUS_ALLOWED_HOSTS` | `a browser write addressed to "plc.lan:8080" is refused without an auth token: …` |
+| `403` | Any request (read or write) by a host name that is not localhost, an IP address or in `NAUTILUS_ALLOWED_HOSTS`, without the token | `this controller answers "plc.lan:8080" only with an auth token: …` |
 | `409` | The address, a member of it, or the tag that contains it is forced | `tag Level is forced — change the force value or remove the force first` |
 | `422` | The wrong kind of value for a **whole** tag: a boolean to a `REAL`, a fraction to an `INT`, a string to anything but a `STRING`, an enumeration or a `TIME`, a malformed `TIME` literal, `null` | `tag StartLevel: want REAL, got a boolean` |
 
@@ -569,6 +811,67 @@ curl -s -X POST localhost:8080/api/forces/clear
 `200`, with `{"removed":0}` when nothing was forced; `401` or `403` on
 authorization.
 
+## Substitute values
+
+A substitute runs the program on a value the project chose while a sensor
+is bad or wrong, flagged everywhere as quality `substituted`, for a
+bounded time. Which inputs may be substituted, on what value, for how
+long at most, is the manifest's `substitutes:` block. See
+[Substitute values](/guides/substitutes/) for the rules, the companion
+tags, restarts and takeovers. The three write calls go through the
+`substitute` permission, whose policy today is that of `POST /api/tags`:
+`401` when unauthenticated, `403` when refused, and `501` on a server that
+mirrors a controller it does not run.
+
+```sh
+curl -s localhost:8080/api/substitutes | jq -c '.rules'
+curl -s -X POST localhost:8080/api/substitutes \
+  -d '{"name": "LS_High", "requestId": "0b1c…"}'
+curl -s -X POST localhost:8080/api/substitutes/ack -d '{"ids": [1]}'
+curl -s -X DELETE localhost:8080/api/substitutes/1
+```
+
+- **`GET`** answers `{"substitutes": […], "rules": […]}`: each active entry
+  with its `id` (a number), `name`, `value`, the `live` value and
+  `liveQuality` under it, who started it (`by`), `startMs`, `untilMs`,
+  `grantedMs`, `remainingMs`, `ackOnStart`, `acked`, `fault` (when it needs
+  a person), its `requestId` and its rule's `role`, `maxMs` and
+  `operatorValue`. Each rule is `{tag, value, maxMs, role, ackOnStart,
+  operatorValue, rule}`.
+- **`POST`** `{"name", "value"?, "seconds"?, "requestId"?}` starts one. The
+  value is the rule's unless the rule has `operator-value: true` (`403`
+  otherwise); `seconds` defaults to the rule's maximum, may not exceed it,
+  and is at least 1 (`400` otherwise). Starting an address that already has
+  one replaces it with a new entry and a new `id`: a substitute is never
+  extended. `400` for a tag no rule names. The answer carries the new entry
+  as `started`.
+- **`DELETE /api/substitutes/{id}`** ends that entry (`404` when it is
+  not active: it expired, ended, or a newer one replaced it).
+- **`POST /api/substitutes/ack`** `{"ids": […]}` acknowledges the entries
+  that wait for it; `409` when none did.
+
+**Send a fresh `requestId` with every start, one per user action, and reuse
+it on every retry.** A start retried with the same id is answered with the
+entry the first one began, never a second; the same id for a different
+request is `409`. Ids are remembered for 8 days.
+
+**Only an answer with the header `X-Nautilus-Outcome: refused` is certain**:
+nothing changed. Everything else, including any 500, 502, 504, a 503 without
+that header, the header `X-Nautilus-Outcome: unknown`, and a dropped
+connection, is **unknown**: the change may have been applied.
+
+| Answer | Meaning |
+| --- | --- |
+| `200` with `kept: true` | applied and saved |
+| `200` with `kept: false` and a `warning` | **took effect but was not saved** (a stop or an acknowledge; a start that cannot be saved is refused). It may not survive a restart, or may still be active on the next leader. Show the warning |
+| `400`, `403`, `404`, `409`, `501`, `503` with `refused` | nothing happened. `409`: the `requestId` was used for a different request, a newer change won, or nothing was waiting for an acknowledgement; re-read and decide, do not retry blind. `503`: `no leader` (a standby) or not saved (the retain store refused a start) |
+| anything else | unknown. Re-read `GET /api/substitutes`. Retry a **start** only with the same `requestId`. A stop or an acknowledgement has no `requestId`: re-read and decide |
+
+Starting and acknowledging are refused while the audit
+journal cannot be written; ending one is a way back to normal and is
+allowed. Each is journalled (`substitute.start`, `.stop`, `.ack`); an
+expiry has no request and is journalled as `substitute.expire` by `system`.
+
 ## SFC commands
 
 Jump a running chart to a step, or fire a transition once. See
@@ -641,12 +944,56 @@ curl -s -X POST localhost:8080/api/alarms/ack -d '{"ids": ["HighLevel"], "by": "
 
 `{"all": true, "by": "operator1"}` acknowledges everything. `by` is
 recorded in the journal as given; the server does not authenticate it.
+`"occurrences": {"HighLevel": "5f2c09d1e7a4b366"}` (optional) names the
+occurrence the person saw (`occurrence` on the alarm's row): an alarm on
+another occurrence now is refused and nothing is acknowledged.
 
 | Status | When | Example body |
 | --- | --- | --- |
 | `200` | `{"acked": n}`, the number acknowledged (`0` is not an error) | |
 | `400` | Not JSON, or neither `ids` nor `"all": true` | `ack needs "ids" or "all": true — an empty ids list would silently ack nothing` |
 | `404` | An id is not an alarm | `no alarm "NoSuch"` |
+| `409` | An id in `occurrences` is on another occurrence now | `alarm "HighLevel": a new occurrence since; open the HMI to see it` |
+
+### `GET` and `POST /alarm-ack/{token}`
+
+The link an email or SMS page carries (`alarms.oncall.ack-url`, see
+[alarms](/guides/alarms/#acknowledging-from-the-page)). It is a page for a
+person, not an API: GET answers HTML showing the alarm and an
+Acknowledge button and changes nothing; POST (the button) acknowledges
+that one occurrence as the person the link was sent to, and answers
+HTML. The token is the credential, so neither needs `NAUTILUS_TOKEN` or
+a sign-in (unless `ack-from-notification: sign-in`). The audit entry is
+`alarm.ack` with `detail.via: "link"`, the occurrence, the level, the
+channel and the link's ID; never the token.
+
+| Status | When |
+| --- | --- |
+| `200` | Acknowledged (POST), or the page (GET) |
+| `401` | `ack-from-notification: sign-in` and the browser is not signed in as the person |
+| `403` | The person is not an enabled user here, or does not hold `ack` for the alarm |
+| `404` | Not a link this controller signed, or it sends no links |
+| `409` | Already used, a new occurrence since, or the alarm waits on nobody |
+| `410` | Expired |
+
+### `POST /alarm-inbound/sms` and `/alarm-inbound/voice/{token}`
+
+The SMS and voice provider's callbacks (`alarms.oncall.inbound`, see
+[alarms](/guides/alarms/#replying-to-an-sms-pressing-1-on-a-call)): an
+SMS reply `ACK <code>`, a call's keypress. Not an API: the body is the
+provider's form (`application/x-www-form-urlencoded`, at most 16 KiB),
+and the credential is the provider's `X-Twilio-Signature` over the
+configured URL, then the code or the call's token. The audit entry is
+`alarm.ack` with `detail.via: "sms"` or `"voice"`, the occurrence, the
+channel and the code's or link's ID; never the number, the text, the
+code or the token.
+
+| Status | When |
+| --- | --- |
+| `200` | Always, for a signed request: TwiML, saying whether it acknowledged (nothing to a number nobody has). The audit entry keeps the refusal's own status. |
+| `400` | Not a form |
+| `403` | The signature does not check |
+| `404` | This controller takes no replies of that kind |
 
 ### `POST /api/alarms/shelve` and `/unshelve`
 
@@ -681,6 +1028,34 @@ Both answer the alarm's record.
 | `400` | Unshelve of an alarm that is not shelved | `alarm "HighLevel" is not shelved` |
 | `404` | The id is not an alarm | `no alarm "NoSuch"` |
 
+### `POST /api/alarms/out-of-service` and `/in-service`
+
+```sh
+curl -s -X POST localhost:8080/api/alarms/out-of-service \
+  -d '{"equipment": "P101", "seconds": 28800, "reason": "seal change, WO 4471"}'
+```
+```json
+{"equipment":"P101","outOfService":true,"untilMs":1793715288774,"by":"operator1","reason":"seal change, WO 4471","alarms":["P101.Fault","P101.Overload"]}
+```
+
+Every alarm of the equipment is suppressed until the window ends
+(`seconds`, or `until` as epoch milliseconds or RFC 3339; a week at most;
+never permanent), with the reason on each row. It needs `out-of-service`
+over every alarm it hides and a fresh password (`401` with `"elevate"`
+past it). `POST /api/alarms/in-service {"equipment": "P101"}` ends it
+early and needs only `ack`, over any one of its alarms; it answers with `"outOfService": false`.
+`GET /api/alarms/out-of-service` lists every window (`equipment`, `by`,
+`reason`, `startMs`, `untilMs`, `alarms`), the soonest to end first. See
+[Suppression by state](/guides/alarms/#suppression-by-state).
+
+| Status | When |
+| --- | --- |
+| `200` | The equipment's window now, and its alarms |
+| `400` | No `equipment`; neither `until` nor `seconds`; not in the future, or over a week; no reason, or more than one line or 200 characters; equipment holding one of the controller's own alarms; in service of equipment that is not out |
+| `401` | Out of service past the password's window (`"elevate": true`) |
+| `403` | The principal lacks the permission over one of the alarms |
+| `404` | No alarm belongs to the equipment |
+
 ### `GET /api/alarms/journal`
 
 ```sh
@@ -711,7 +1086,8 @@ or `kind`), and a `limit` above 100,000 returns at most 100,000 events.
 ## Programs
 
 The running program source, warm edits and rollbacks, and the project's
-commit history. Reading is always open. The three writes need
+commit history. Reading needs only the Host rule (or the token) of
+[Authentication](#authentication). The three writes need
 `server.online-edits: true` and the write authorization. See
 [Online edits](/guides/online-edits/) and
 [Program history](/guides/program-history/).
@@ -827,6 +1203,576 @@ curl -s -X POST localhost:8080/api/program/activate -d '{"sha":"e230fc4"}'
 | `503` | The server cannot rebuild sources from history. `naut run` and built controllers always can; an embedded Go server may not | |
 | `401`, `403` | Authorization | |
 
+## Live I/O configuration
+
+A changed device address, unit id, register address, OPC UA endpoint or
+node id applies while the scan runs: no restart, and only the changed
+device's tags read anything but good during the swap. A candidate goes
+through four visible steps: **pending** (staged), **valid** or **invalid**
+(checked against what runs), then **applied** or **failed**. A refused
+apply changes nothing. A failed one puts back what it had changed, so what
+runs is as it was; only if putting it back fails too does the apply answer
+`500`, with `config.fault` naming what is left in an unknown state until
+an apply re-establishes it.
+
+```sh
+# stage: from a commit in the controller's history, or uploaded files
+curl -s -X POST localhost:8080/api/io/staged -d '{"sha":"e230fc4"}'
+curl -s -X POST localhost:8080/api/io/staged \
+  -d '{"driver":"modbus","files":{"modbus_manifest.yaml":"sources: …"}}'
+# → {"id":"1","state":"pending","from":"upload",…}
+
+curl -s -X POST localhost:8080/api/io/staged/1/validate
+# → {"id":"1","state":"valid","validation":{"valid":true,"checks":[…],
+#    "changes":[{"driver":"modbus","device":"DEV_A",…}],
+#    "willCommand":[{"tag":"A_Cmd","value":7}],"notes":[…]}}
+
+curl -s -X POST localhost:8080/api/io/staged/1/apply
+# → {"id":"1","state":"applied","result":{"changes":[…],
+#    "commanded":[{"tag":"A_Cmd","value":7}],"notes":[…]}}
+```
+
+- **A commit** needs the controller's file snapshot of it (a controller
+  built with `naut build` in a git repo, or `naut run` from one).
+  **Uploaded files** replace the project's files of the same path; with
+  `driver`, the candidate may change only that driver.
+- **What may change** is addressing:
+  - a Modbus device's `host`, `port` and `unitid`;
+  - a binding's `table`, `address` and scan class;
+  - an OPC UA client's `endpoint` and a binding's `nodeid` and
+    `namespace`;
+  - a driver's scan rate and classes;
+  - a `devices:` row's `endpoint` and `unit-id`.
+  
+  Anything else is refused by name, with "restart to apply the rest":
+  the tag set, the drivers and devices, a device's profile or points,
+  word order, timeouts, keep-alives, scaling, security.
+- **The unit applied** is one Modbus device (a `devices:` row is one),
+  inside the driver that runs. Anything else swaps the whole driver; that
+  works for `modbus` and `opcua-client` drivers, in a project with two or
+  more drivers. A Modbus device applied on its own disconnects before it
+  reconnects at its new address. A whole-driver swap starts the new driver
+  before it stops the old one, so for a moment both are connected: a
+  device that allows a single connection may refuse the new one until the
+  old has gone.
+- **`willCommand`** lists the outputs the first scan after the apply will
+  send to what changes, with their values now (they can change before the
+  apply). The apply's `commanded` is what that scan actually queued for
+  the device: nothing while the write gate is closed (a standby, or scans
+  not live), and a device parked by its enable tag holds its commands
+  until it is enabled.
+- **Live check.** Once a candidate passes every static check, each
+  changed device is probed before the apply: a driver for that device
+  alone, built as the apply would build it, is started on a connection of
+  its own until every tag has read once (at most 5 s). It never writes.
+  A device that refuses the connection, or a tag that does not read (a
+  wrong unit id, a register or node the device does not have), makes the
+  candidate invalid, named under `validation.probes` and the `live` check.
+- **Live or static.** A device that allows few connections cannot spare
+  one for the check, so how it is checked is, in order: its `devices:`
+  row's `validate:`, its driver's `validate:`, then its profile's default
+  (`static` when the profile documents Modbus `max-connections` of 2 or
+  fewer, `live` otherwise). A static check reads nothing from the device.
+  Each probe says which mode it ran and why. A failed connection says so,
+  and suggests `validate: static`: the device may allow only one
+  connection.
+- **After the apply** the response comes at once: `answered` lists the
+  changed devices that had read by then, `pending` the rest, and `watch`
+  follows them from there, off the apply (another apply is not held up):
+  `GET /api/io` shows it, and the frame's `config.watch` while it is
+  still watching. A device still silent at the deadline (5 s) stays
+  applied, reads bad quality and alarms, and the operator decides
+  (`watch.state` `silent`). To have it put back instead, ask for it:
+  `POST /api/io/staged/{id}/apply` with `{"revertIfSilent": "10s"}` (up
+  to 5 min) reverts the whole apply if a changed device has not read by
+  then (`reverted`, with `watch.reason` naming it), unless a newer apply
+  has landed meanwhile (`superseded`) or the revert was cancelled:
+  `POST /api/io/revert/cancel` (`cancelled`). A client that goes away
+  changes nothing: the watch is the controller's. Off by default: a
+  reversion on a running plant can be its own surprise.
+- **Kept across a restart and a takeover.** With a `retain:` block, an
+  applied configuration is saved in the retain store before the apply
+  answers (`kept: true`). A restart, or a standby taking over, re-applies
+  it before the first scan, so no logic runs and no output goes out
+  on the old addresses. The outputs then go out as they would without
+  the apply: a restart's first scan is the start-up baseline, and a
+  takeover sends the full set. A standby follows what the leader applied
+  while it stands by, so its takeover re-applies nothing and takes no
+  longer than before. The rules:
+  - **A deploy wins.** A kept change comes back only while the deployed
+    manifest still says what it was applied over. A deploy that changed
+    that driver or device replaces it. The dropped change is listed under
+    `config.discarded` (and kept in the store for recovery by hand). A
+    deploy that contains the change clears it.
+  - **A pending revert is not carried.** An apply with `revertIfSilent`
+    is kept only once its devices answer, or its revert is cancelled. A
+    restart or takeover before that comes back on the configuration
+    before it, and `config.discarded` says so.
+  - **A change that cannot be re-applied is held.** The device (or
+    driver) is not polled, its tags read Bad, and it is sent nothing,
+    until an apply re-establishes what runs. `config.fault` says why. An
+    apply is refused while a restart or takeover is still re-applying.
+  - **A save that fails.** On a project with `redundancy:` the apply is
+    put back (`503`); a takeover would otherwise undo it. Standalone, it
+    stays applied with `kept: false` and `keptWhy`, and the save is
+    retried.
+  - **No `retain:` block.** Nothing is kept, and a restart runs the
+    manifest again. The apply answers `kept: false`. An apply on a
+    project with `redundancy:` and no `retain:` block is refused (check
+    `kept`).
+  - **Not while a pair runs mixed versions.** A controller built before
+    this ignores what is kept: if it takes over, it runs the manifest's
+    addresses and its next save clears what was kept. During a rolling
+    upgrade of a redundant pair, make no live I/O apply until both
+    replicas run the new build.
+
+  While what runs differs from the manifest, `config` on every frame
+  says so (and `config.notKept` says if it would not survive a restart),
+  and the built-in dashboard shows it, as does each driver's row on
+  `/api/drivers` (`differs: true`). Commit the change to make it
+  permanent.
+- **Pulling it back.** `GET /api/io/files` returns, for every unit that
+  differs, where it came from (`units`) and the project files it was read
+  from that differ from the ones the controller booted from: per file its
+  `path`, the bytes that `running`, and the sha-256 of the `booted` file
+  (absent when the change added the file). `leading` is false on a standby.
+  `conflicts` lists a path held with two different contents. `nonIO` is
+  true when the applied manifest also changes sections an apply does not
+  apply, which never ran. `naut pull --host <controller> --io` writes
+  those files into `--dir`. It refuses and names a file you edited locally
+  since the build unless `--force`, and it writes nothing at all if it
+  refuses one. `--dry-run` prints a unified diff and writes nothing;
+  `--check` writes nothing and exits non-zero while anything differs. A
+  standby is refused: ask the leader, or the service address. `naut pull`
+writes only `.yaml`/`.yml` files that the project's own manifest names as
+I/O files (the manifest, the `manifest:` files of `drivers:`,
+`profiles/<id>.yaml` of `devices:`). A file only the controller's manifest
+names (a driver an apply added) is listed and written only with `--new`;
+review the listed paths first, because any YAML file the controller's
+manifest names (a `docker-compose.yml`, say) is written as it sends it.
+It never writes a hidden path, `.git` or a program source, and never
+through a symlink out of the project; it does not trust the controller's
+list of paths. `--force` skips the check that your copy is the booted one
+and replaces your edits without a diff; the paths are printed. **`GET
+/api/io/files` returns whole file bodies, so it needs the edit permission,
+like `/api/config/files`: the write token or a principal that may write
+(not the online-edits switch, so changes applied while edits were on can
+still be pulled into git after they are turned off). A plain read gets `GET /api/io`, which carries no
+file text. Change since v0.22.0: reading staged or differing I/O files now
+needs the edit permission; `naut pull --io` sends `NAUTILUS_TOKEN`, so it
+keeps working where that token is set.**
+
+### Configuration screens
+
+The routes the configuration screens read (#711); they write nothing, and
+what they edit is applied through the staged routes above.
+
+- `GET /api/config/schema` lists the manifest sections the schema describes
+  (`{"sections": [...]}`). `?section=drivers` returns that one section as a
+  self-contained JSON Schema (`application/schema+json`): the section under
+  `properties` and only the `definitions` it reaches. It is a slice of the
+  schema the editor uses. An unknown section is `404` and names the ones
+  there are. The `devices` slice also carries option lists, as suggestions rather
+  than an enum: `x-options-builtin` on `profile` (the device library's ids,
+  usable after `naut devices add`) for everyone, and, **for a caller who
+  holds the write permission** (the rule `GET /api/io/files` has; anyone
+  else gets the schema without them, silently), `x-options` on `profile`
+  (the ids vendored in `profiles/`, usable now) and on a port's `iodd` (the
+  files in `iodd/`). Only names are listed, never contents; hidden files
+  and symbolic links are left out. The form renders the `profile` list; a
+  port's `iodd` list is served for clients that render `ports`.
+- `GET /api/config/files` returns `manifest` (its file name), `files` (that
+  file and the file each driver names, path to text) and `leading`, as what
+  runs now: an I/O apply's files laid over the ones the controller booted
+  from. `differs` lists the paths whose text is an apply's.
+
+`/api/config/schema` is a plain read (the schema; the file names above only for a caller who may write). **`/api/config/files` is
+the whole manifest (users, grants, hosts), so it needs the permission to
+edit it, and online edits on:** online edits on,
+and the write token or a principal that may write. It serves only YAML
+files inside the project with no hidden path component (never `.env`, a
+program source, a path outside the project, or anything reached through a
+symbolic link), and the text as written: secrets are environment or file
+references in the manifest, but a comment is served too.
+
+### Saving a change
+
+An applied change lives on the controller until it is in git. Two routes
+get it there; which one you can use depends on where the controller runs
+from.
+
+- **`POST /api/config/commit`** with `{"id": "<applied candidate>", "message": "<subject, optional>"}`
+  writes what runs (where it differs from the project: what `naut pull --io`
+  writes) into the checkout the controller runs from and commits exactly
+  those files. It exists **only where the controller sees a git worktree**
+  (`naut run` on a project directory). A controller built with `naut build`,
+  which is what most deployed boxes are, has no repository: it answers
+  `409` and names the patch route.
+- **`GET /api/config/patch`** returns the same change as a unified patch
+  (`text/x-diff`) against the project the controller was built from.
+  Apply it in your repo: `curl … /api/config/patch | git apply`, review,
+  commit. It works everywhere and needs the edit permission.
+
+The commit is the principal's: **author** `<principal>` with the address
+`<name>@<controller host>` (the controller knows no mailbox), **committer**
+`nautilus`, and the message ends in a `Nautilus-Staged: <id>` trailer naming
+the candidate. It lands on the checked-out branch and is never pushed. It
+needs the config permission and, for a browser sign-in, a fresh password
+(it is elevated, like an apply); the journal records `config.commit` under
+the principal, with the commit, branch and files. The journal being down
+refuses it, like an apply.
+
+A commit saves what runs, so only the candidate whose apply is in force can
+be committed: after a later apply, or an automatic revert, the earlier id is
+refused (`409`). A commit is also refused, with the fix in the answer, when the
+controller is a standby; the files it would write are not ones this
+project's manifest names (never program sources, hidden paths or `.git`);
+the applied manifest names files the project's does not (use
+`naut pull --io --new`); a file was edited since the controller booted (git is asked what it held
+at start, and what the controller last committed counts as booted), or
+has uncommitted changes in the worktree; or HEAD is detached. Nothing else
+in the worktree, staged or not, goes into the commit; if git refuses it (a
+hook), the files are put back as they were.
+
+**Who is recorded.** Every stage, validate, apply and revert cancel is
+journalled (`config.stage`, `config.validate`, `config.apply`,
+`config.revert.cancel`) under the request's principal: `user:<name>` for a
+signed-in user or a personal access token, `token:<name>` for a named
+service token, `token` for the bare `NAUTILUS_TOKEN`, `anonymous` with no
+credentials. The same name is kept as the candidate's `by` and in the
+retained record of what runs, and a name the client types in a body is never
+taken for it. The apply's entry says what changed: `from` (a commit, or
+`upload`), each changed unit's `before` and `after` hash, whether it is kept
+across a restart and whether it asked to revert if silent.
+
+A `revertIfSilent` that fires is not a request, so it is journalled as
+`config.revert` by `system` (source `system`), never under the name of whoever
+applied. Its target is the apply's id and its detail says `revert of <id>
+applied by <principal>`, with the reason and whether putting it back worked
+(`result: error` when it did not).
+
+A `revertIfSilent` apply that a restart or a takeover interrupts is not
+carried: the controller that comes up brings back the configuration from
+before it, lists the dropped apply under `config.discarded`, and journals a
+`config.revert` by `system` for it (state `dropped`, the apply's id and
+`applied by <principal>` in the note), so the journal does not say ok while
+the old configuration runs.
+
+**What the hashes cover.** A hash is the first 8 bytes (16 hex characters) of
+the SHA-256 of the unit's resolved configuration marshalled as compact JSON
+(Go field names in declaration order, durations as integer nanoseconds,
+nothing omitted). Those bytes are nautilus's resolved internal form, not the
+project files, and can change between releases. To check a hash, stage the
+same files on a controller of the same nautilus version and compare it with
+the one in `GET /api/io` or the `config.differs` rows (`manifestHash`,
+`runningHash`). What each covers:
+
+- a Modbus device (`devices:` row): every source and tag-binding setting, as
+  resolved (the device library's profile included);
+- a Modbus driver on its own (the `<driver>` unit): its scan rate, scan
+  classes and tag classes;
+- an OPC UA client: its `drivers:` entry (without `validate`), its device's
+  name and the manifest derived from it, a profile node id included;
+- any other driver: its `drivers:` entry and the text of the manifest file it
+  names.
+
+Hashes identify a configuration; they are not a secret, and two controllers
+on the same nautilus version with the same files report the same hashes.
+
+| Status | When |
+| --- | --- |
+| `201` | Staged |
+| `200` | Validated (valid or invalid: see `state`), applied, or read |
+| `400` | A body with neither or both of `sha` and `files`; a `revertIfSilent` that is not a duration up to 5 min |
+| `403` | `online-edits` is off |
+| `404` | No such candidate |
+| `409` | No snapshot of the commit; applying a candidate that is not valid; another apply is in progress, or what runs changed since it was validated (validate again) |
+| `422` | The candidate does not load, or an apply failed and was put back: nothing changed |
+| `500` | An apply failed and putting it back failed too; `config.fault` names what is left |
+| `503` | No live I/O configuration on this server (an embedded Go server); or, on a project with `redundancy:`, the retain store could not keep the apply, so it was put back |
+| `401`, `403` | Authorization |
+
+## Web Push
+
+A signed-in person subscribes a phone to the controller's pager, and
+`via: push` in an escalation level pages it (see
+[alarms](/guides/alarms/)). Everything here needs `alarms.channels.push`
+in the manifest; without it each route answers 404 and says so.
+
+| Route | Does |
+|---|---|
+| `GET /api/push/key` | `{"publicKey": "…"}`: the VAPID key a browser subscribes with (`applicationServerKey`) |
+| `POST /api/push/subscribe` | `{"endpoint": "https://…", "keys": {"p256dh": "…", "auth": "…"}}` (a browser's `PushSubscription.toJSON()`): 201 `{id, host, at}` |
+| `DELETE /api/push/subscribe` | `{"id": "…"}` or `{"endpoint": "…"}`: 204 |
+| `GET /api/push/subscriptions` | your own: `{"subscriptions": [{id, host, at}]}` |
+| `POST /api/push/confirm-revocations` | the config permission, journalled `push.confirm-revocations` with the count: ends the subscriptions a mass revocation is holding that still do not stand (`{ended, stillHeld}`); `naut alarms push confirm-revocations` |
+| `GET /api/push/health` | the config permission: `{keyFingerprint, subscriptions, people, sealed, held}` (`held`: rows a mass revocation is holding, see the alarms guide) |
+
+A subscription belongs to the person the signed-in browser session names,
+never one in the body, and only a person (a local user or OIDC) may hold
+one: a service token, `NAUTILUS_TOKEN` or a personal access token (a
+credential for scripts, which has no phone) is refused with the fix. The endpoint must be an
+`https` URL on port 443 of a public host (and on `allow-hosts` when that is set; a host that list names may also be private and use another port); an
+endpoint a person re-subscribes is replaced, one another person
+subscribes is taken by the newest, and a ninth device ends the oldest.
+Each of these is journalled (`push.subscribe`, `push.unsubscribe`, by the
+person, or by `system` for a takeover, an eviction, a push service that
+says the subscription is gone and a person who no longer stands). The
+journal names the subscription by its `id` (a hash of the endpoint) and
+the push service's host, never the endpoint or the keys, and no route
+returns them. A subscribe answers only once the retain store holds the
+row; on a standby it is refused (use the leader's address).
+
+## Operator notes
+
+Notes about an asset, a tag, an alarm, an area or the plant, and the shift
+log: see [Operator notes and the shift log](/guides/notes/). Writes need the
+`note` permission and are journalled (`note.add`, `note.revise`,
+`note.retract`, with the text); reads need `read`.
+
+| Route | Does |
+|---|---|
+| `POST /api/notes` | `{target:{kind,id,occurrence?,activeMs?}, text, kind?, re?}`: 201 with the note |
+| `POST /api/notes/{id}/revise` | `{text}`: its author, within an hour |
+| `POST /api/notes/{id}/retract` | `{reason}`: its author within the hour, or a holder of `audit` any time |
+| `GET /api/notes` | `?target=&id=&occurrence=&kind=&author=&since=&until=&limit=&retracted=1` |
+| `GET /api/notes/{id}` | the note, with `history` (every revision) |
+
+A pair refuses a write when it cannot count a majority (503, `X-Nautilus-Outcome:
+refused`, the log's reason) and says `unknown` (503, with the note's id) when a
+proposal is not confirmed; a lost race is 409.
+
+## Audit journal
+
+Every request to a route above that changes something (`POST /api/tags`,
+the force, SFC, alarm, program and live I/O routes) leaves **exactly one** audit
+entry, accepted or refused, and is answered only after the entry is
+recorded. `naut run` writes the entries to a hash-chained journal on disk
+(the manifest's `audit:` section, default `./audit`), which
+`naut audit verify` checks.
+
+Each entry has:
+- `user`: `token` when the request carried the auth token, else `anonymous`.
+- `source`: `X-Nautilus-Client` (`hmi`, `ide`, `cli` or `api`) when the client sends it, else `hmi` for a browser and `api` for anything else.
+- `action` (`tag.write`, `force.set`, `alarm.ack`, `program.edit`, …), `target`, and `before` and `after` values.
+- `result`: `ok`, `refused` (with `detail.reason`) or `error`.
+- `from`: the client's IP address.
+
+An online edit is journalled as program hashes, never the source. A
+request refused for want of the token (or from a cross-origin page) is
+journalled without reading its body: who, from where and which action,
+with no target or values. A signed-in user or a token refused by role,
+or for want of a fresh password, is journalled with what it tried to
+change, read from the request alone: the target and the value asked for
+(tag writes, forces, substitutes, alarm and SFC commands, IO-Link
+parameters), never a `before`. A body over 8 KiB, slower than 5 s, or
+one of too many refused at once is not read: the entry names only what
+the path does and says `detail.body: "unread"`. Otherwise the target is capped at 1 KiB, and
+`before` and `after` at 64 KiB of JSON (4 KiB on a refusal); a larger
+value is journalled as `{"truncated": true, "bytes": …, "sha256": …}`.
+Refusals and errors from one address are coalesced: five a minute in full
+per action and principal, then one entry counting the rest (`detail.coalesced`). A write
+body over 16 MiB is refused with `413`. On a redundant pair, a write is
+journalled by the leader that applies it; one a standby answers itself
+(`503` while it holds the lease with its scans stalled, `502` when the
+leader cannot be reached) is journalled by the standby.
+
+### When the journal cannot be written
+
+Setting a force or changing the program must never happen unrecorded, so
+while the journal cannot be written, or `naut run` could not open it (an
+unwritable `audit.path`, or another `naut run` already using it):
+
+- **Actions that need the journal are refused** with `503`: setting a force, a program
+  edit or activation, staging, validating or applying a live I/O
+  configuration, starting or acknowledging a substitute value, and any
+  action not listed below. The refusal is
+  journalled, in memory. (This set is the journal's. It is not the same as
+  the [elevated permissions](/guides/auth/#elevation), which need a fresh
+  password: clearing a force needs one, but not the journal.)
+- **Operator actions are allowed**: tag writes, alarm acknowledgement and
+  shelving, SFC commands.
+- **The ways back to normal are allowed**: clearing a force or all of
+  them, ending a substitute value, and rolling a program edit back.
+- An allowed action's response carries `X-Nautilus-Audit-Journal: down`,
+  and its entry is kept in memory (up to 10,000; past that the oldest are
+  counted in an `audit.dropped` entry) and written, with its id, once the
+  journal recovers. A journal that could not be opened keeps only the last
+  1000, lost on restart.
+- **It is shown:** an error is logged, an `audit` card with state `error`
+  appears on the drivers block (`GET /api/drivers`, `/api/state`, the live
+  stream), and, when the project has alarms, the system alarm
+  `nautilus.audit-journal` (high priority, not shelvable) is raised. Both
+  clear when the journal recovers; one that could not be opened needs a
+  restart.
+
+The action that first finds the journal broken has already been carried
+out (see the limits below); the actions that need the journal are refused from the next one.
+
+
+Known limits:
+
+- The action takes effect before its entry is written: a crash
+  between the two leaves an applied action without an entry, and a write
+  that fails leaves one entry in memory only until the journal recovers.
+- A write a standby forwarded, which the leader applied before the
+  connection failed, has two entries: `ok` on the leader and a `502` on the
+  standby.
+- A pair's substitute or alarm change answered "outcome unknown" is
+  journalled `unknown`. If the controller that answered later sees it in
+  the log, it adds an `oplog.resolved` entry with `detail.resolves` set
+  to the unknown entry's `id` and `detail.outcome` `committed` or
+  `lapsed`. `committed` doesn't prove the change took effect. These
+  entries are added only on evidence and never coalesced (see
+  [redundancy](/guides/redundancy/)).
+- `GET /api/audit` is open when no auth token is set, as every read is
+  without an `auth:` block. With one it needs a principal (a signed-in
+  user, or a token) with the `audit` permission.
+- The program routes `naut logix serve` answers itself (`PUT /api/program`,
+  which edits the Logix project, and `POST /api/logix/deploy`) are not
+  journalled yet, nor are the refusals of the program routes on a Siemens
+  facade.
+
+### A copy in Postgres
+
+The journal's files are the record. For queries, screens and export,
+`naut run` can also keep a copy in Postgres:
+
+```yaml
+audit:
+  sink: postgres
+  # dsn-env: SITE_AUDIT_DB   # default NAUTILUS_AUDIT_DB_URL, then DATABASE_URL
+  # anchor-every: 5m         # how often the head is anchored (below)
+```
+
+The connection string comes from an environment variable, never the
+manifest, by default the historian's `DATABASE_URL`. A sink with that
+variable empty stops `naut run` at start, naming the variable.
+
+- **It tails the files.** Each line is copied, byte for byte, into the
+  `audit_entries` table (one row per entry: `seq`, `id`, `ts`, `user`,
+  `source`, `action`, `target`, `result`, `before`, `after`, `detail` as
+  `jsonb`, `from`, `session`, and `line`, the exact line). Only lines that
+  are already on disk are copied, about once a second.
+- **It catches up.** While Postgres is down the controller runs as
+  before. The copy resumes from its newest row when Postgres is back.
+  Nothing is lost unless the journal prunes files the copy hasn't read
+  (`audit.keep-days`); such a gap is recorded in `audit_gaps`.
+- **Several controllers share one database.** Rows carry a `controller`
+  column: the project's name, plus `NAUTILUS_NODE` on a redundant pair or
+  `POD_NAME` in a cluster (run it as a StatefulSet, so the name and the
+  journal's volume stay with the replica).
+- **It never writes over itself.** The copy is only ever added to. If the
+  journal no longer matches what the copy holds (a copied line changed,
+  lines cut off the end, or a line that doesn't chain on from the copy's
+  newest), the copy stops and is left as it is. Run `naut audit verify`
+  and compare the two before restarting.
+- **It needs SELECT, and INSERT on some columns.** The sink creates its
+  tables when they are missing, but then its role owns them and could
+  rewrite them (below). Have a database administrator create them instead:
+  `naut audit pg-schema --role <the controller's role>` prints the
+  statements, run as another role.
+- **It anchors the journal's head.** The copy writes its newest line's
+  `seq` and hash to `audit_anchors`: at start, every `anchor-every`
+  (default 5 minutes) when it has moved, at once after it copies a prune,
+  and at a clean stop. The time (`at`) and the role that wrote it
+  (`writer`) are the database's, as is each row's `copied_at`.
+- **It is shown:** an `audit copy` card on the drivers block: `connected`
+  when the copy holds every entry, `connecting` while it catches up,
+  `degraded` with the error while Postgres is unreachable (or an anchor
+  could not be written, or the anchors are not protected), `error` when it
+  stopped. The card shows the copied and anchored `seq` against the
+  journal's, and any gaps.
+
+#### Checking the journal against the copy
+
+```sh
+naut audit verify --anchor postgres
+```
+
+Run it in the project's directory: the controller's name and the
+connection string come from `nautilus.yaml`, as `naut run` names them
+(`--controller` and `--dsn-env` override; on a pair, give
+`--controller <project>/<node>`). With `--dsn-env`, name the controller's
+database role with `--controller-role`. It prints when the anchors began
+and how many entries are dated before that, and warns when other
+controllers have anchors in the same database. Besides the journal's own
+chain, it checks:
+
+- every anchor's line hashes as anchored, and the journal reaches the
+  newest anchor (lines cut off the end are found);
+- every line both hold is the same line, the copy's own rows chain, and
+  the copy holds nothing past the journal's head (a journal rewritten with
+  its chain recomputed is found);
+- every gap in the copy is explained by the `audit.prune` of the line
+  before it (otherwise `UNEXPLAINED GAP`);
+- every prune is one `naut run` would have written. Its `keep` is the
+  retention `naut run` journalled (`audit.retention`, at every start) and
+  at least one day. Its time is within `--clock-skew` (default 5m) of the
+  line before it and of the database's clock. Every file it removed is
+  older than that `keep` (otherwise `PRUNED EARLY`).
+
+The verdict is `verified` (exit 0), `BROKEN` (exit 1, each failure on its
+own line) or `UNPROTECTED` (exit 3). `UNPROTECTED` means every check
+passed, but a role that wrote an anchor, or the controller's own role,
+could have rewritten the copy or the anchors: it is a superuser, owns or
+can become the owner of a table, holds `CREATEROLE`, or holds `UPDATE`
+(on any column), `DELETE`, `TRUNCATE` or `TRIGGER`, or may set
+`copied_at`, `at` or `writer`. The anchors then prove nothing against
+someone holding that role. Run `naut audit pg-schema --role <role>`. A
+controller role verify does not know (with `--dsn-env` and no
+`--controller-role`) is `UNPROTECTED` too.
+
+Run `verify` where the controller's service user cannot change it: not
+with a connection string, a `nautilus.yaml` or a copy of the journal that
+user can edit. On the controller's own box, that user can point `verify`
+at a database of its own.
+
+**A lowered retention is the thing to look at.** Every lowering is
+printed as a `WARNING` whatever the verdict, with when and who started
+`naut run`. A lower `keep` prunes sooner, and a lowering is how someone
+would make a prune look honest. When `keep-days` is lowered, `naut run`
+holds each prune until Postgres anchors the new retention (and while
+Postgres is down, since it then cannot say which retention it anchored
+last: through a long outage, files outlive `keep-days` until it is back
+or the disk fills). A prune whose lowering was journalled and pruned under the same
+anchor is `BROKEN`. If Postgres stays down and the journal's disk passes
+90% full, the prune goes ahead, marked unanchored, and `verify` names it
+as an `UNANCHORED LOWERING` warning. That mark is written by the
+controller, so it proves nothing: it only says why the prune did not
+wait. The check stops a naive forger, not a
+careful one: the controller's role can write an anchor itself, so a
+forger with its connection string can anchor a lowering at once and then
+prune. The warning still names that lowering, and the copy still holds
+every entry the prune removed. Prunes journalled before this check
+existed (before the first `audit.retention`) are listed as not checked.
+
+On its own the copy is a convenience, not proof: whoever can write the
+journal's files can rewrite them before the copy reads them. With the
+anchors under a role the controller's service user does not hold, and
+`verify --anchor` run elsewhere, what happened before the newest anchor
+no longer rests on the controller's word.
+
+### `GET /api/audit`
+
+The last 1000 entries, newest first:
+
+```json
+{"entries": [{"id": "01J…", "seq": 42, "ts": "2026-11-18T14:02:11.204Z",
+  "user": "token", "source": "hmi", "action": "tag.write", "target": "SP",
+  "before": 65, "after": 70, "result": "ok", "from": "192.0.2.22",
+  "prev": "sha256:…"}], "truncated": false}
+```
+
+Query parameters filter it: `from` and `to` (epoch ms or RFC 3339),
+`user`, `action`, `target` and `result` (exact, ignoring case), and
+`limit` (default 100). `truncated` is true when more entries matched.
+
+| Status | When |
+| --- | --- |
+| `401` | An auth token is set and the request does not carry it: the entries say who did what from where. With no token set it is open, like every read, until users and roles (#708) |
+| `400` | A bad `from`, `to` or `limit` |
+
 ## Historian proxy
 
 `GET /api/history` and everything under `/api/history/` are forwarded to
@@ -845,7 +1791,10 @@ own status codes come back unchanged.
 
 With [redundancy](/guides/redundancy/#redundancy), a standby forwards every
 `/api/` request to the leader, except `GET /api/cluster` and
-`/api/history*`, which it answers itself. Writes, forces and the stream
+`/api/history*`, which it answers itself. Under an `auth:` block it never
+forwards a browser's sign-in cookie: sessions live on the leader, so it
+answers `503` with the leader's address (see
+[A redundant pair](/guides/auth/#a-redundant-pair)). Writes, forces and the stream
 therefore always reach the controller that is scanning. When the leader
 refuses the connection during a failover, the standby waits up to 10 s for
 a new leader and sends the request there. Any other failure to reach the

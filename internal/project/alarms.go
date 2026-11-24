@@ -19,10 +19,15 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/joyautomation/nautilus/alarm"
+	"github.com/joyautomation/nautilus/alarm/channel"
+	"github.com/joyautomation/nautilus/alarm/escalate"
+	"github.com/joyautomation/nautilus/devbind"
 	"github.com/joyautomation/nautilus/lang/ir"
 	"github.com/joyautomation/nautilus/runtime"
 )
@@ -46,6 +51,33 @@ type AlarmsConfig struct {
 	// Notify is the notification pipeline: log lines, webhooks. Notifiers
 	// run off the scan goroutine on a bounded queue.
 	Notify []AlarmNotifyConfig `yaml:"notify"`
+
+	// Oncall and Escalation page people about alarms nobody has
+	// acknowledged (#715): rosters of who is on call, and policies of
+	// levels (who, by which channel, how long after the alarm began
+	// waiting). Addresses never live here: a level names people (a user
+	// name, oidc:<name>) or roster:<id>.
+	Oncall     escalate.Oncall   `yaml:"oncall"`
+	Escalation []escalate.Policy `yaml:"escalation"`
+	// Channels configures the ways a level's `via:` pages a person beyond
+	// the log (#715 PR 3): email, sms, voice and webhook. Nothing secret:
+	// credentials sit in the secrets file and addresses in the contacts
+	// file, both on the box (`naut alarms secrets|contacts`).
+	Channels *channel.Config `yaml:"channels"`
+
+	// Chatter and Flood tune live detection (#1249): an alarm chatters at
+	// count activations within window (default 3 in 60 s), the plant is
+	// in a flood at MORE than threshold activations of all alarms within
+	// window (default 10 in 10 min). Detection marks and journals only:
+	// it shelves, suppresses and pages nothing by itself.
+	Chatter alarm.ChatterConfig `yaml:"chatter"`
+	Flood   alarm.FloodConfig   `yaml:"flood"`
+
+	// Tuning names the overlay file of delays a chattering alarm should run
+	// with (alarmtuning.go), applied at start. TuningRows are its rows, read
+	// at load.
+	Tuning     string        `yaml:"tuning"`
+	TuningRows []AlarmTuning `yaml:"-"`
 
 	Rules []alarm.Rule `yaml:"rules"`
 	Defs  []alarm.Def  `yaml:"defs"`
@@ -148,6 +180,12 @@ func (c *AlarmsConfig) validate() error {
 	if strings.EqualFold(c.Journal.Sink, "file") && c.Journal.Path == "" {
 		return errors.New("alarms.journal: sink: file needs path: (where the JSONL goes)")
 	}
+	if err := c.Channels.Validate(); err != nil {
+		return err
+	}
+	if _, err := c.escalation(); err != nil {
+		return err
+	}
 	for i, n := range c.Notify {
 		if !n.Log && n.Webhook == "" {
 			return fmt.Errorf("alarms.notify[%d]: an entry is either `log: true` or `webhook: <url>`", i)
@@ -157,6 +195,39 @@ func (c *AlarmsConfig) validate() error {
 		}
 	}
 	return nil
+}
+
+// EscalationAlarmID is the system alarm raised while a notification
+// channel keeps failing (#715): sends to it fail FailAfter times in a row.
+const EscalationAlarmID = "nautilus.alarm-notify"
+
+// EscalationChannels are the channel kinds a level's `via:` may name:
+// log always, and each kind alarms.channels configures (email, sms, voice,
+// webhook).
+func (c *AlarmsConfig) EscalationChannels() []string {
+	return append([]string{"log"}, c.Channels.Kinds()...)
+}
+
+// EscalationConfig is the section's escalation config (#715), validated and
+// prepared: what `naut alarms oncall` and `naut alarms escalation` read.
+// Nil, nil when it declares no policies.
+func (c *AlarmsConfig) EscalationConfig() (*escalate.Config, error) { return c.escalation() }
+
+// escalation is the section's escalation config, validated and prepared;
+// nil when it declares no policies.
+func (c *AlarmsConfig) escalation() (*escalate.Config, error) {
+	if len(c.Escalation) == 0 && len(c.Oncall.Rosters) == 0 && c.Oncall.Timezone == "" {
+		return nil, nil
+	}
+	ec := &escalate.Config{Oncall: c.Oncall, Policies: slices.Clone(c.Escalation)}
+	ec.Oncall.Rosters = slices.Clone(c.Oncall.Rosters)
+	if err := ec.Prepare(c.EscalationChannels()); err != nil {
+		return nil, err
+	}
+	if len(ec.Policies) == 0 {
+		return nil, nil
+	}
+	return ec, nil
 }
 
 // composeAlarms folds alarm-files into the manifest's own `alarms:`
@@ -220,7 +291,46 @@ func (p *Project) AlarmDefs(rt *runtime.Runtime) ([]alarm.Def, error) {
 	if p.Alarms == nil {
 		return nil, nil
 	}
-	return p.Alarms.alarmConfig().Compose(nil, p.alarmTagInfo(rt))
+	defs, _, _, err := p.alarmDefsTuned(rt)
+	return defs, err
+}
+
+// alarmDefsTuned is AlarmDefs with the overlay's account: the rows applied
+// and the ids no alarm has (CheckAlarms refuses those; a start logs them).
+func (p *Project) alarmDefsTuned(rt *runtime.Runtime) (defs []alarm.Def, applied []AlarmTuning, missing []string, err error) {
+	if p.Alarms == nil {
+		return nil, nil, nil, nil
+	}
+	defs, err = p.Alarms.alarmConfig().Compose(p.deviceAlarmFiles(), p.alarmTagInfo(rt))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defs, applied, missing = p.Alarms.tuneDefs(defs)
+	return defs, applied, missing, nil
+}
+
+// deviceAlarmFiles are the alarms the project's devices raise by default
+// (alarms still have to be on: an `alarms:` section). Today: an IO-Link
+// port device's identity fault, high priority, qualified by its master
+// answering so a master that is down does not hold it in alarm. A manifest
+// definition with the same id is a duplicate-id error, as for any two files.
+func (p *Project) deviceAlarmFiles() []alarm.File {
+	var defs []alarm.Def
+	for _, port := range p.devices.Ports() {
+		defs = append(defs, alarm.Def{
+			ID:       devbind.IdentityFaultTag(port.Name),
+			Tag:      devbind.IdentityFaultTag(port.Name),
+			Name:     fmt.Sprintf("%s: wrong, missing or unconfirmed device on %s port %d", port.Name, port.Master, port.Num),
+			Priority: alarm.High,
+			Class:    "iolink",
+			Enable:   port.Master + "__Online",
+			Notes:    "The IO-Link identity check: the device on the port is not the one its IODD describes, or the port has not been re-armed since the controller started or the device went wrong (docs/design/iolink.md §6.2). Its process data out is held back; pulse the port's __Rearm once the device is confirmed.",
+		})
+	}
+	if len(defs) == 0 {
+		return nil
+	}
+	return []alarm.File{{Path: "devices:", Defs: defs}}
 }
 
 // alarmTagInfo describes every declared tag to the rule expander: its
@@ -302,8 +412,48 @@ func (p *Project) CheckAlarms(rt *runtime.Runtime) (defs []alarm.Def, errs, warn
 		return nil, nil, nil, nil
 	}
 	tags := p.alarmTagInfo(rt)
-	if defs, err = p.Alarms.alarmConfig().Compose(nil, tags); err != nil {
+	if defs, err = p.Alarms.alarmConfig().Compose(p.deviceAlarmFiles(), tags); err != nil {
 		return nil, nil, nil, err
+	}
+	// The overlay: every row's id must be an alarm of the project (a renamed
+	// alarm leaves a dead row that tunes nothing), and a delay shorter than
+	// the alarm's own is said, because shortening one can fire pending
+	// alarms on the first scan.
+	byIDDef := make(map[string]alarm.Def, len(defs))
+	for _, d := range defs {
+		byIDDef[d.ID] = d
+	}
+	for _, t := range p.Alarms.TuningRows {
+		d, ok := byIDDef[t.ID]
+		if !ok {
+			errs = append(errs, fmt.Sprintf("alarms.tuning %s: no alarm has the id %q", p.Alarms.Tuning, t.ID))
+			continue
+		}
+		on, off := t.delays()
+		if on >= 0 && on < d.OnDelay {
+			warns = append(warns, fmt.Sprintf("alarms.tuning %s: %s's on-delay %s is shorter than the alarm's own %s: shortening can fire pending alarms on the first scan", p.Alarms.Tuning, t.ID, on, d.OnDelay))
+		}
+		if off >= 0 && off < d.OffDelay {
+			warns = append(warns, fmt.Sprintf("alarms.tuning %s: %s's off-delay %s is shorter than the alarm's own %s: shortening can fire pending alarms on the first scan", p.Alarms.Tuning, t.ID, off, d.OffDelay))
+		}
+	}
+	for _, err := range []error{p.Alarms.Chatter.Validate(), p.Alarms.Flood.Validate()} {
+		if err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	// A class named to page individually in a flood that no alarm has is
+	// a typo that would let the alarms it meant to name be grouped.
+	if in := p.Alarms.Flood.Individual; in != nil {
+		used := map[string]bool{}
+		for _, d := range defs {
+			used[strings.ToLower(d.Class)] = true
+		}
+		for i, c := range in.Classes {
+			if c != "" && !used[strings.ToLower(c)] && !strings.EqualFold(c, alarm.SafetyClass) {
+				errs = append(errs, fmt.Sprintf("alarms.flood.individual.classes[%d]: no alarm has class %q", i, c))
+			}
+		}
 	}
 
 	byName := make(map[string]alarm.TagInfo, len(tags))
@@ -313,6 +463,9 @@ func (p *Project) CheckAlarms(rt *runtime.Runtime) (defs []alarm.Def, errs, warn
 	check := func(what, path string) {
 		root, member, dotted := strings.Cut(path, ".")
 		info, declared := byName[ir.NameKey(root)]
+		if !declared && p.substituteCompanion(root) {
+			return // runtime-owned BOOL of a project that has substitutes: (#707)
+		}
 		if !declared {
 			warns = append(warns, fmt.Sprintf("%s watches %q, which %s declares no tag for — "+
 				"correct if the tag arrives from the field, dead otherwise", what, path, ManifestName))
@@ -342,6 +495,19 @@ func (p *Project) CheckAlarms(rt *runtime.Runtime) (defs []alarm.Def, errs, warn
 		if d.Enable != "" {
 			check("alarm "+d.ID+"'s enable", d.Enable)
 		}
+		if d.SuppressWhen != "" {
+			// Refused here rather than left to fail toward showing at run
+			// time: a typo would mean the suppression never happens.
+			check("alarm "+d.ID+"'s suppress-when", d.SuppressWhen)
+			// A flat tag too: a condition may be a number (nonzero is in
+			// alarm), a suppress-when may not (a speed named by mistake
+			// would hide the alarm whenever it is nonzero).
+			if !strings.ContainsAny(d.SuppressWhen, ".[") {
+				if v, err := rt.Tags().ReadGlobal(d.SuppressWhen); err == nil && v.Kind != ir.TypeBool {
+					errs = append(errs, fmt.Sprintf("alarm %s's suppress-when %q is not a BOOL: only a BOOL's TRUE suppresses", d.ID, d.SuppressWhen))
+				}
+			}
+		}
 	}
 
 	// A rule claiming nothing: count what each one produced by re-running
@@ -356,7 +522,46 @@ func (p *Project) CheckAlarms(rt *runtime.Runtime) (defs []alarm.Def, errs, warn
 		warns = append(warns, fmt.Sprintf("alarms.rules[%d] (%s) matches no tag in this project — "+
 			"dead, or a generator moved out from under it", i, ruleLabel(r)))
 	}
+	warns = append(warns, p.uncoveredAlarmWarnings(defs)...)
 	return defs, errs, warns, nil
+}
+
+// maxUncoveredWarnings caps the one-line-per-alarm warnings of an alarm no
+// escalation policy covers; the rest are counted.
+const maxUncoveredWarnings = 20
+
+// uncoveredAlarmWarnings warns of each alarm no escalation policy's match
+// covers at any time of day: with escalation configured, such an alarm
+// pages nobody. Silent when there are no policies (no escalation at all).
+func (p *Project) uncoveredAlarmWarnings(defs []alarm.Def) []string {
+	ec, err := p.Alarms.escalation()
+	if err != nil || ec == nil || len(ec.Policies) == 0 {
+		return nil
+	}
+	var warns []string
+	missed := 0
+	for _, d := range defs {
+		covered := false
+		for i := range ec.Policies {
+			if ec.Policies[i].Match.Covers(d) {
+				covered = true
+				break
+			}
+		}
+		if covered {
+			continue
+		}
+		if len(warns) >= maxUncoveredWarnings {
+			missed++
+			continue
+		}
+		warns = append(warns, fmt.Sprintf("alarm %s: no escalation policy covers it (class %q, priority %s, area %q), so it pages nobody",
+			d.ID, d.Class, d.Priority, d.Area))
+	}
+	if missed > 0 {
+		warns = append(warns, fmt.Sprintf("...and %d more alarms no escalation policy covers", missed))
+	}
+	return warns
 }
 
 func ruleLabel(r alarm.Rule) string {
@@ -388,6 +593,10 @@ type Alarms struct {
 	Defs        []alarm.Def
 	ShelveTimes []time.Duration
 
+	// Escalation runs the escalation policies; nil without any, and
+	// always nil off `naut run` (a test never pages anyone).
+	Escalation *escalate.Dispatcher
+
 	cancel  func()
 	closers []io.Closer
 }
@@ -401,6 +610,9 @@ func (a *Alarms) Close() error {
 		a.cancel()
 		a.cancel = nil
 	}
+	if a.Escalation != nil {
+		a.Escalation.Close()
+	}
 	var errs []error
 	if a.Engine != nil {
 		errs = append(errs, a.Engine.Close())
@@ -412,17 +624,27 @@ func (a *Alarms) Close() error {
 	return errors.Join(errs...)
 }
 
+// SystemAlarm is an alarm nautilus raises itself, beside the manifest's:
+// Def describes it, and Active, read on every evaluation in place of a
+// tag, says whether it is in alarm. Def.Tag names the condition and is
+// never a tag in the store.
+type SystemAlarm struct {
+	Def    alarm.Def
+	Active func() bool
+}
+
 // NewAlarms builds the manifest's alarm engine over a compiled runtime,
 // opens the configured journal sink and notifiers, and registers
 // evaluation on the runtime's post-scan hook. It returns (nil, nil) when
 // the manifest declares no alarms — a project without them behaves
-// exactly as it did before this existed.
+// exactly as it did before this existed. sys are added to the
+// manifest's alarms, when it declares any.
 //
 // This is `naut run`'s call. It opens files and databases, so
 // check/build/LSP use AlarmDefs instead, and the acceptance harness uses
 // AlarmEngine.
-func (p *Project) NewAlarms(rt *runtime.Runtime) (*Alarms, error) {
-	return p.alarms(rt, true, nil)
+func (p *Project) NewAlarms(rt *runtime.Runtime, sys ...SystemAlarm) (*Alarms, error) {
+	return p.alarms(rt, true, nil, sys...)
 }
 
 // AlarmEngine is NewAlarms with nothing durable behind it: the in-memory
@@ -437,13 +659,63 @@ func (p *Project) AlarmEngine(rt *runtime.Runtime) (*alarm.Engine, error) {
 	return a.Engine, nil
 }
 
-func (p *Project) alarms(rt *runtime.Runtime, durable bool, log *slog.Logger) (*Alarms, error) {
+func (p *Project) alarms(rt *runtime.Runtime, durable bool, log *slog.Logger, sys ...SystemAlarm) (*Alarms, error) {
 	if p.Alarms == nil {
 		return nil, nil
 	}
-	defs, err := p.AlarmDefs(rt)
+	defs, applied, missing, err := p.alarmDefsTuned(rt)
 	if err != nil {
 		return nil, err
+	}
+	if log == nil {
+		log = slog.Default()
+	}
+	for _, id := range missing {
+		log.Warn("alarm tuning: no alarm has this id; its row is skipped (naut check refuses it)", "id", id)
+	}
+	tuned := make([]alarm.Tuned, 0, len(applied))
+	for _, t := range applied {
+		tuned = append(tuned, alarm.Tuned{ID: t.ID, Why: t.Why})
+	}
+	tags := rt.Tags()
+	read := tags.ReadPath
+	if len(sys) > 0 {
+		conds := make(map[string]func() bool, len(sys))
+		for _, a := range sys {
+			defs = append(defs, a.Def)
+			conds[a.Def.Tag] = a.Active
+		}
+		read = func(path string) (any, bool) {
+			if f, ok := conds[path]; ok {
+				return f(), true
+			}
+			return tags.ReadPath(path)
+		}
+	}
+	// Escalation pages people, so only `naut run` builds it: the
+	// acceptance harness and `nautilus test` (durable false) never send.
+	var esc *escalate.Config
+	var disp atomic.Pointer[escalate.Dispatcher]
+	if durable {
+		if esc, err = p.Alarms.escalation(); err != nil {
+			return nil, err
+		}
+	}
+	if esc != nil {
+		failing := alarm.Def{
+			ID: EscalationAlarmID, Tag: "__nautilus.alarm-notify-failing",
+			Name:     "Alarm notifications are failing: people may not be paged (see the alarm journal's notify rows)",
+			Priority: alarm.High, Class: "system", AckRequired: true, AutoClear: true,
+		}
+		defs = append(defs, failing)
+		inner := read
+		read = func(path string) (any, bool) {
+			if path == failing.Tag {
+				d := disp.Load()
+				return d != nil && d.AnyFailing(), true
+			}
+			return inner(path)
+		}
 	}
 	out := &Alarms{Defs: defs, ShelveTimes: p.Alarms.ShelveDurations()}
 
@@ -466,10 +738,12 @@ func (p *Project) alarms(rt *runtime.Runtime, durable bool, log *slog.Logger) (*
 		}
 	}
 
-	tags := rt.Tags()
+	if durable {
+		notify = append(notify, p.AlarmNotifiers...)
+	}
 	eng, err := alarm.New(alarm.Options{
 		Defs: defs,
-		Read: tags.ReadPath,
+		Read: read,
 		// The runtime's clock, not time.Now: NowMs follows an injected
 		// VirtualClock, so an acceptance test's `advance: 5m` walks an
 		// on-delay exactly rather than never.
@@ -478,17 +752,89 @@ func (p *Project) alarms(rt *runtime.Runtime, durable bool, log *slog.Logger) (*
 		Keep:    p.Alarms.Journal.Keep,
 		Notify:  notify,
 		Log:     log,
+		// An occurrence carried across a restart (#715) continues if the
+		// field re-asserts its condition. A takeover waits for live inputs
+		// first, so its first false reading ends one; a standalone start
+		// does not, and may read a driver's defaults for its first scans.
+		CarryGrace: carryGrace(p.WriteGate == nil),
+		// An alarm on a substituted signal is suppressed (#715 PR 5, #707).
+		Substituted: substitutedCache(tags),
+		Chatter:     p.Alarms.Chatter,
+		Flood:       p.Alarms.Flood,
+		Tuned:       tuned,
 	})
 	if err != nil {
 		out.Close()
 		return nil, err
 	}
 	out.Engine = eng
+	if esc != nil {
+		chans := map[string]escalate.Channel{"log": escalate.LogChannel{Log: log}}
+		if kinds := p.Alarms.Channels.Kinds(); len(kinds) > 0 {
+			if p.AlarmDirectory == nil {
+				out.Close()
+				return nil, fmt.Errorf("alarms.channels: %s need the contacts and secrets files in the controller's state directory, "+
+					"and this controller has none: set auth.state-dir, or run under systemd with StateDirectory=", strings.Join(kinds, ", "))
+			}
+			if alarmSenders == nil {
+				out.Close()
+				return nil, fmt.Errorf("alarms.channels: %s cannot send from this build of nautilus (the playground pages nobody); "+
+					"run the controller (naut run) to page people", strings.Join(kinds, ", "))
+			}
+			built, err := alarmSenders(p.Alarms.Channels, p.AlarmDirectory, p.PushSend)
+			if err != nil {
+				out.Close()
+				return nil, err
+			}
+			for k, ch := range built {
+				chans[k] = ch
+			}
+		}
+		o := escalate.Options{Config: esc, Engine: eng, Log: log, Channels: chans, AckLink: p.AckLink, AckCode: p.AckCode,
+			Home: p.Alarms.Oncall.AckURL}
+		o.Chatter, o.Flood = p.Alarms.paging()
+		// The write gate itself (leader.Election.IsLeader on a pair or a
+		// Kubernetes lease), asked by the sender before every send: never
+		// a cached role, so a standby whose role is stale pages nobody.
+		if p.WriteGate != nil {
+			t, ok := p.Runtime.Coordinator.(runtime.Termed)
+			if !ok {
+				out.Close()
+				return nil, errors.New("alarms.escalation: this controller's elector names no leadership term, " +
+					"so a page queued under one leader could leave under the next; escalation needs a termed elector")
+			}
+			o.Gate, o.Term = p.WriteGate, t.Term
+		}
+		d, err := escalate.New(o)
+		if err != nil {
+			out.Close()
+			return nil, err
+		}
+		disp.Store(d)
+		out.Escalation = d
+	}
 	// Evaluate after each main scan, not on a ticker: the store is
 	// consistent there, and a wall-clock ticker inside the engine would
-	// never fire against a stopped virtual clock.
-	out.cancel = rt.OnScan(func(*runtime.Tags) { eng.Evaluate() })
+	// never fire against a stopped virtual clock. Escalation looks after
+	// the evaluation, on the same clock.
+	d := out.Escalation
+	out.cancel = rt.OnScan(func(*runtime.Tags) {
+		eng.Evaluate()
+		if d != nil {
+			d.Tick(time.UnixMilli(tags.NowMs()))
+		}
+	})
 	return out, nil
+}
+
+// paging is how chattering and floods change escalation (#1249): a
+// chattering alarm pages once per level per episode, and a flood's pages
+// are grouped, unless the project turns them off. Critical and safety
+// always page on their own; alarms.flood.individual adds to them.
+func (c *AlarmsConfig) paging() (chatter bool, flood escalate.FloodPaging) {
+	flood.Group = c.Flood.Groups()
+	flood.Priorities, flood.Classes = c.Flood.IndividualSet()
+	return c.Chatter.Pages(), flood
 }
 
 // alarmSink opens the configured durable journal, or (nil, nil, nil) for
@@ -521,36 +867,55 @@ func (p *Project) alarmSink() (alarm.Journal, io.Closer, error) {
 			return nil, nil, fmt.Errorf("alarms.journal: sink: postgres, but %s is empty — "+
 				"the connection string is an environment variable, never the manifest", env)
 		}
-		pg, err := alarm.NewPostgres(dsn)
+		if alarmPostgres == nil {
+			return nil, nil, errors.New("alarms.journal: sink: postgres is not in this build of nautilus (the playground keeps " +
+				"the journal in memory); use sink: ring, or run the controller (naut run)")
+		}
+		pg, closer, err := alarmPostgres(dsn)
 		if err != nil {
 			return nil, nil, fmt.Errorf("alarms.journal: %w", err)
 		}
-		return pg, pg, nil
+		return pg, closer, nil
 	}
 	return nil, nil, fmt.Errorf("alarms.journal.sink %q is not one of file, postgres", j.Sink)
 }
 
-func (p *Project) alarmNotifiers(log *slog.Logger) ([]alarm.Notifier, error) {
-	var out []alarm.Notifier
-	for i, n := range p.Alarms.Notify {
-		switch {
-		case n.Log:
-			out = append(out, alarm.NewLogNotifier(log))
-		case n.Webhook != "":
-			o := alarm.WebhookOptions{}
-			if n.HeaderEnv != "" {
-				name := n.Header
-				if name == "" {
-					name = "Authorization"
-				}
-				v := os.Getenv(n.HeaderEnv)
-				if v == "" {
-					return nil, fmt.Errorf("alarms.notify[%d]: header-env %s is empty", i, n.HeaderEnv)
-				}
-				o.Headers = map[string]string{name: v}
-			}
-			out = append(out, alarm.NewWebhook(n.Webhook, o))
-		}
+// StandaloneCarryGrace is how long a standalone controller's engine waits
+// past a false reading for a restored occurrence's condition (alarm.
+// Options.CarryGrace): its first scans may read inputs no driver has read
+// yet. Never an acknowledgement through it.
+const StandaloneCarryGrace = time.Minute
+
+func carryGrace(standalone bool) time.Duration {
+	if standalone {
+		return StandaloneCarryGrace
 	}
-	return out, nil
+	return 0
+}
+
+// substitutedCache is alarm.Options.Substituted over the tag store: the
+// answer for each condition path, kept until the substitute table changes
+// (Tags.SubstituteRevision), so a scan allocates nothing while it does
+// not. Called only from Evaluate, under the scan: no lock of its own.
+func substitutedCache(tags *runtime.Tags) func(string) (string, bool) {
+	type answer struct {
+		addr string
+		ok   bool
+	}
+	var (
+		rev   uint64
+		cache = map[string]answer{}
+	)
+	return func(path string) (string, bool) {
+		if r := tags.SubstituteRevision(); r != rev {
+			rev = r
+			clear(cache)
+		}
+		if a, ok := cache[path]; ok {
+			return a.addr, a.ok
+		}
+		addr, ok := tags.SubstituteCovering(path)
+		cache[path] = answer{addr, ok}
+		return addr, ok
+	}
 }

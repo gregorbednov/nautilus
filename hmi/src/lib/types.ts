@@ -2,6 +2,7 @@
 // generic over the frame shape, so nothing here is tied to any specific
 // runtime snapshot — only the primitives the visual components consume.
 import type { AlarmSummary } from './alarms.svelte.js';
+import type { CheckoutForce } from './checkout.js';
 
 /** A single timestamped sample. `t` is epoch milliseconds, `v` the value. */
 export interface TrendPoint {
@@ -76,7 +77,7 @@ export interface TrendThreshold {
  *   at all. A Sparkplug node that never birthed, an address that never
  *   answered.
  */
-export type Quality = 'good' | 'stale' | 'bad' | 'notConnected';
+export type Quality = 'good' | 'stale' | 'bad' | 'notConnected' | 'substituted';
 
 /** Reserved status roles used by StatusPill and other indicators. */
 export type StatusKind = 'good' | 'warning' | 'serious' | 'critical' | 'off';
@@ -139,8 +140,12 @@ export interface SchedStats {
 	/** SCHED_FIFO priority (Linux), 1–99; absent = normal. */
 	priority?: number;
 	applied: boolean;
-	/** The OS's refusal, when a request was not granted. */
+	/** The OS's refusal, or why a granted priority was withdrawn. */
 	error?: string;
+	/** Granted, then withdrawn (the priority guard, or the kernel's CPU limit). */
+	demoted?: boolean;
+	/** The priority guard's bounds, for a task at a priority. */
+	guard?: { overruns: number; scanMultiple: number };
 }
 
 /**
@@ -185,6 +190,12 @@ export interface NautilusFrame {
 	 * way `mergeDelta` does rather than assume every frame is complete.
 	 */
 	scan: ScanStats;
+	/**
+	 * A standing I/O checkout force (#719): present on every frame while one
+	 * stands, absent otherwise. `remainingMs` is the controller's own figure at
+	 * the moment it built the frame; read it through `countdown()`.
+	 */
+	checkoutForce?: CheckoutForce;
 	/**
 	 * Tags whose value is NOT to be trusted — only the non-good ones, so a
 	 * healthy controller omits the field entirely and an absent name means
@@ -250,6 +261,8 @@ export interface DriverStatus {
 	/** Epoch ms the current state began (0/absent = unknown). */
 	sinceMs?: number;
 	lastError?: string;
+	/** This driver runs an I/O configuration applied live that is not the manifest's. */
+	differs?: boolean;
 	metrics?: DriverMetric[];
 	devices?: DriverDevice[];
 	/** Protocol-specific structured fields (born, primaryHost, …). */

@@ -85,6 +85,45 @@ func TestRetainedValueLoadsBeforeFirstScan(t *testing.T) {
 	}
 }
 
+// A standalone controller restores the store before its API answers
+// (nautilus#531's startup half): LoadRetained puts the retained value in
+// before any scan, and a write made between it and the first scan is not
+// undone by the first takeover loading the store a second time.
+func TestLoadRetainedBeforeRunKeepsAnEarlyWrite(t *testing.T) {
+	store := &fakeStore{state: retain.State{Tags: map[string]any{"SP": 72.5}}}
+	rt := newRetained(t, store, nil)
+	rt.LoadRetained()
+	if got := rt.Tags().Real("SP"); got != 72.5 {
+		t.Fatalf("SP = %v before the first scan, want the retained 72.5 over the 65.0 seed", got)
+	}
+	rt.Tags().Set("SP", 80.0)
+	rt.Scan()
+	if got := rt.Tags().Real("SP"); got != 80.0 {
+		t.Fatalf("SP = %v after the first scan, want the 80.0 written before it (the takeover reloaded the store over it)", got)
+	}
+	if n := rt.Stats().RetainErrors; n != 0 {
+		t.Fatalf("RetainErrors = %d, want 0", n)
+	}
+}
+
+// A replica's takeover must re-read the store (another replica may have
+// led and saved since), so LoadRetained leaves a coordinated runtime alone.
+func TestLoadRetainedIsTheTakeoversJobUnderACoordinator(t *testing.T) {
+	store := &fakeStore{state: retain.State{Tags: map[string]any{"SP": 72.5}}}
+	coord := &flag{}
+	rt := newRetained(t, store, coord)
+	rt.LoadRetained()
+	if got := rt.Tags().Real("SP"); got != 65.0 {
+		t.Fatalf("SP = %v on a standby, want the 65.0 seed until takeover", got)
+	}
+	store.state.Tags["SP"] = 70.0 // the leader saved again meanwhile
+	coord.lead = true
+	rt.Scan()
+	if got := rt.Tags().Real("SP"); got != 70.0 {
+		t.Fatalf("SP = %v after takeover, want the store's latest 70.0", got)
+	}
+}
+
 // The store is not a back door: a tag outside the retained set is ignored
 // even if a state file (or a tampered ConfigMap) names it. The program
 // here never writes Count, so a value the load let through would still be
@@ -875,4 +914,40 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.w.Write(p)
+}
+
+// floodAlarms is a fakeAlarms whose flood in progress rides the store
+// (retain.AlarmFloodRetainer), as a standalone engine's does.
+type floodAlarms struct {
+	fakeAlarms
+	flood    *retain.AlarmFlood
+	restores []*retain.AlarmFlood
+}
+
+func (f *floodAlarms) RetainedFlood() *retain.AlarmFlood { return f.flood }
+func (f *floodAlarms) RestoreFlood(fl *retain.AlarmFlood) {
+	f.restores = append(f.restores, fl)
+}
+
+// A standalone controller's flood in progress (#1249) is saved beside
+// the alarms and handed back at the takeover that starts the next run,
+// after the alarms; a project in no flood writes no flood slot.
+func TestAlarmFloodRoundTripsThroughRetain(t *testing.T) {
+	carried := &retain.AlarmFlood{ID: "flood-1", SinceMs: 1700000000000, OverMs: 1700000060000, Total: 12, Peak: 11,
+		FirstOut: []retain.AlarmFloodAct{{ID: "HiTemp", Ms: 1700000000000}}}
+	store := &fakeStore{state: retain.State{AlarmFlood: carried}}
+	rt := newRetained(t, store, nil)
+	eng := &floodAlarms{flood: &retain.AlarmFlood{ID: "flood-2", SinceMs: 1700000100000, OverMs: 1700000200000}}
+	rt.SetAlarms(eng)
+	rt.Scan()
+	if len(eng.restores) != 1 || eng.restores[0] == nil || eng.restores[0].ID != "flood-1" || eng.restores[0].FirstOut[0].ID != "HiTemp" {
+		t.Fatalf("RestoreFlood got %+v, want the stored flood once", eng.restores)
+	}
+	if got := rt.retainState().AlarmFlood; got == nil || got.ID != "flood-2" {
+		t.Fatalf("saved flood = %+v, want the engine's", got)
+	}
+	eng.flood = nil
+	if got := rt.retainState().AlarmFlood; got != nil {
+		t.Fatalf("no flood, saved %+v", got)
+	}
 }

@@ -114,8 +114,8 @@ detects a tag's *absence* but a published-yet-stale value looked exactly like a
 live one:
 
 ```ts
-rt.isGood('RTU9_ZONE15_LIT_001'); // false when stale / bad / never-connected
-rt.quality('AI_001.LVL.HSP'); // 'good' | 'stale' | 'bad' | 'notConnected'
+rt.isGood('RTU9_ZONE15_LIT_001'); // false when stale / bad / never-connected / substituted
+rt.quality('AI_001.LVL.HSP'); // 'good' | 'stale' | 'bad' | 'notConnected' | 'substituted'
 ```
 
 `quality()` resolves a dotted member path to its root tag — a UDT arrives from
@@ -201,7 +201,20 @@ high triangle, medium diamond, low circle, diagnostic square), same convention a
 `AlarmJournal` takes a `from`/`to` (epoch ms) range plus an `onrange` callback so the host re-fetches
 via `alarms.journal(...)` and hands back fresh `events`; its CSV export is a client-side
 `Blob`/`URL.createObjectURL` download — this is an ordinary web app, not a sandboxed artifact, so
-`<a download>` works fine here.
+`<a download>` works fine here. Paging (notify) rows are their own row kind, hidden until the Paging
+box is ticked or Paged is the event filter; fetch them with
+`alarms.journal(from, to, { kinds: journalKinds(true) })` (the controller leaves them out of an unnamed query).
+
+Equipment out of service (#715): `<OutOfServicePanel alarms windows={alarms.outOfService} ontake onreturn/>` lists the
+windows (soonest to end first) and takes equipment out of service (a reason, a week at most; the controller
+asks for the password) or returns it. Suppressed rows in `<AlarmTable/>` show `<OutOfServiceBadge/>`. The
+client calls are `alarms.takeOutOfService(equipment, seconds, reason, by)` and `alarms.returnToService(equipment, by)`.
+
+Asset page (#714): `<AssetPage {asset} {tags} {write} alarms={alarms}/>` draws one piece of equipment from an
+`AssetDescriptor` (its `MimicPanel` plus `trend`, `equipment`, `camera`, `notes`): live values with a trend, role-gated
+settings and commands, its alarms and their history, notes, the audit of writes to it. `naut hmi build` writes one
+page per mimic equipment with a `panel` and per `devices:` row, under `/assets/<id>`; a screen named `assets` of your
+own replaces them.
 
 ## Porting a legacy HMI
 
@@ -264,6 +277,61 @@ For a network view you lay out yourself, the four glyph primitives — `TankGlyp
 `FlowLink` draws its marching dashes **only** when `flowing` is true, so a still line means still
 water; drive it from a meter with a deadband, never from "the pump is commanded on".
 
+## Sign-in and elevation
+
+Against a controller with an `auth:` block (see the nautilus guide, "Users, roles & sign-in"),
+mount `createAuth()` once in the root layout, beside `<ConfirmDialog/>`:
+
+```svelte
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { createAuth, ConfirmDialog } from '@joyautomation/nautilus-hmi';
+	const auth = createAuth();
+	onMount(() => {
+		void auth.start();
+		return () => auth.stop();
+	});
+</script>
+
+<ConfirmDialog />
+```
+
+`start()` installs its fetch as the one every kit client uses (`writeTag`, `AlarmClient`,
+`SubstituteClient`, `PortParamClient`, `fetchHistory`), unless a client was handed a `fetch` of
+its own, and listens to the live stream's errors. Then:
+
+- a `401` with `elevate: true` asks for the password in `<ConfirmDialog/>` (`askPassword`), proves
+  it (`POST /api/elevate`), and repeats the request once, byte for byte, so a substitute's
+  `requestId` is the same one. Concurrent refusals share one prompt; cancel returns the original
+  refusal. Only requests to the page's own origin are prompted for;
+- any other `401`, or a stream that drops, is judged by a fresh `GET /api/me`: a browser that had
+  a session and now has none goes to `/signin?next=<this page>`;
+- a standby's `503` (`standby: true`) sends the page to the `leader` URL in its body, only when it
+  is `http(s)`, never `http` from an `https` page, not again within 30 s, and never without
+  `sessionStorage` to keep that guard in (`auth.referral` holds a referral it did not follow,
+  with the leader's link, for a banner). The `Location` header is never used;
+- `auth.me` is `GET /api/me` as a rune; `auth.holds(perm)` and `auth.needsPassword(perm)` (judged
+  by the controller's clock, `me.now`) let a control say ahead of time what will happen.
+
+**Controls follow the role.** `WriteNumber`, `WriteToggle`, `CommandButton` (write), `AckButton`
+and `AlarmTable` (ack, shelve; Ack All needs ack on the whole controller), `SubstitutesPanel`
+(substitute), `PortParameters` (config) and `NumberField` (given its `tag`) grey themselves out, with the reason as their title,
+when the signed-in role does not hold that permission for that tag. Areas are matched with
+`/api/me`'s `areas` exactly as the controller matches them (`can`, `areaMatch`; one shared test
+table). `PortParameters` shows a lock while a write would ask for the password first. Signed in,
+the acknowledge and shelve dialogs record the user instead of asking for a name.
+
+```svelte
+<ReferralBanner />          <!-- a standby's referral the kit did not follow, with the leader's link -->
+<AccountChip />             <!-- who, the password window, Sign out / Sign in -->
+<AuditTable />              <!-- GET /api/audit, for a role that holds audit -->
+<ParameterList />           <!-- GET /api/parameters: plant vs manifest init:, drift badge -->
+```
+
+Without `auth:`, or against a controller without `/api/me`, nothing changes. **Nothing in the kit
+grants anything:** a control it greys out for a role is a convenience, and the controller checks
+every request regardless.
+
 ## Writing back
 
 `RealtimeClient.writeTag(name, value)` resolves to `null` on success or the controller's refusal
@@ -278,6 +346,78 @@ reason. Three controls take exactly that function, so they work against any tran
 Each renders the refusal on the control rather than swallowing it, and each takes `readonly` +
 `readonlyReason` (or `disabled` + `disabledReason`) for a point the runtime will not accept — a
 faceplate that silently fails to command is worse than one that says it cannot.
+
+## IO-Link device parameters
+
+`PortParameters` is the screen for the parameters of the device on an IO-Link
+port (`/api/iolink/{port}/params`, [the IO-Link
+guide](https://nautilus.joyautomation.com/guides/io-link/)): what its IODD says
+each parameter is (access, allowed range, named values), what it holds, and a
+confirmed write.
+
+```svelte
+<ConfirmDialog />
+<PortParameters port="LEVEL1" client={new PortParamClient({ token })} />
+```
+
+It is thin on purpose: `PortParamClient` carries the contract, and you can use
+it without the panel.
+
+- A **read says which device answered**: the answer carries the port's
+  identity, and a value from a device that is not the one expected (or from a
+  master that has not reported its ids) is marked, never shown as the device's.
+- A **refused write changed nothing**: a 409 (the device on the port is not
+  the one expected) or a 422 (the IODD forbids the value) says why, in
+  `failureText`.
+- A write whose **outcome is uncertain** — the controller says so (the device
+  on the port changed during it), any 5xx, or the connection lost after the
+  request was sent — is neither a failure nor a success. `PortParamClient`
+  answers `kind: 'uncertain'`, `failureText` says the outcome is not known and
+  to read the parameter back, and the panel reads it back itself. It is never
+  retried for you.
+- A second call while one is in flight for the port is a 429 (`kind: 'busy'`:
+  nothing was sent, try again); a write needs the controller's write credential.
+
+## Substitute values
+
+A substituted value is one an operator holds in place of a sensor's, for a
+bounded time, while the logic keeps running on it (`quality: 'substituted'`,
+the `SUBST` badge; it stays commandable, because the equipment still runs).
+`SubstitutesPanel` is the whole screen for it: what is held, the live value
+and its quality beside it, who holds it, the time left, Stop, an
+acknowledge bar for rules with `ack-on-start`, and a start form built from the
+manifest's `substitutes:` rules (the operator-value field only where a rule
+allows one, seconds capped at the rule's `max`).
+
+```svelte
+<ConfirmDialog />
+<SubstitutesPanel client={new SubstituteClient({ token })} />
+```
+
+The panel is thin on purpose: `SubstituteClient` carries the contract, and
+you can use it without the panel.
+
+- Every user action gets **one `requestId`**, made before the first send and
+  reused on every retry (`start(name, value, seconds, requestId)`), so a lost
+  answer can never start a second substitute.
+- Only an answer carrying `X-Nautilus-Outcome: refused` is **certain** (nothing
+  was started: 400, 403, 404, 409, 503 "no leader", 503 "not saved"). Every
+  other failure is `kind: 'unknown'`, `maybeApplied: true`: the
+  `X-Nautilus-Outcome: unknown` 503, but also a 500, 502, 504 or a 503 from a
+  proxy, and a dropped connection, because any of them can come after the
+  leader applied the change. The panel re-reads and says "not confirmed";
+  "Retry same request" resends under the same id, and a new start of that
+  tag is **blocked** until the pending one is resolved, retried, dismissed or
+  seen in the list. Stop and acknowledge carry no id: after an unknown
+  outcome, re-read and decide.
+- **409** (`conflict`) means another change got there first (or the id was
+  reused for a different request): re-read and decide again, never retry blind.
+- **`kept: false`** on a success means it took effect but was not saved (the
+  `warning` says what that costs, e.g. it may still be active on the next
+  leader): it is shown, not swallowed.
+
+`SubstituteSession` is that start state machine without the DOM (what the panel
+uses, and what is tested).
 
 ## Faceplates, cards and confirmation
 
@@ -359,9 +499,10 @@ the kit that renders a number an operator reads, and the one place that qualifie
 | status | precedence | what is drawn |
 | --- | --- | --- |
 | not published (`present={false}`) | 1st | `—` in `--q-notpublished`, badge `NO DATA` |
-| `bad` / `notConnected` | 2nd | the value in `--q-bad`, badge `BAD` |
-| `simulated` | 3rd | the value in `--q-simulated`, badge `SIM` |
-| `stale` | 4th | the value in `--q-stale`, badge `STALE 12m` (from `ageMs`) |
+| `bad` / `notConnected` / a quality the kit does not know | 2nd | the value in `--q-bad`, badge `BAD` |
+| `substituted` | 3rd | the value in `--q-substituted`, badge `SUBST`: an operator replaced a bad sensor's value |
+| `simulated` | 4th | the value in `--q-simulated`, badge `SIM` |
+| `stale` | 5th | the value in `--q-stale`, badge `STALE 12m` (from `ageMs`) |
 | `good` | — | the value in `--ink`, no badge at all |
 
 The value is **never blanked** for stale or bad: it is what the plant last was, and an operator

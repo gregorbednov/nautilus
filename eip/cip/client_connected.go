@@ -5,8 +5,15 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"time"
+
+	"github.com/joyautomation/nautilus/internal/fence"
 )
+
+// ErrNotStarted wraps a request refused before anything was sent (its
+// fence: the send deadline passed, or the pair's gate closed): the
+// connection is untouched, and a caller keeps it rather than dialling
+// again (#1048 review).
+var ErrNotStarted = fence.ErrNotStarted
 
 // SendUnitData sends a connected explicit (Class 3) message on an established
 // connection and returns the inner MessageRouterResponse. The caller owns the
@@ -38,19 +45,28 @@ func (c *Client) SendUnitData(ctx context.Context, connID uint32, seq uint16, se
 	if c.tcp == nil {
 		return MessageRouterResponse{}, errors.New("cip client: not connected")
 	}
+	if err := fence.Check(ctx); err != nil {
+		// Not started: past its deadline, or the gate closed since the
+		// send began (a fragment). Nothing went out, so the session is
+		// as good as before (ErrNotStarted: the caller keeps it).
+		return MessageRouterResponse{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
+	}
 	hdr := EncapHeader{Command: CmdSendUnitData, SessionHandle: c.sessHdl}
-	deadline := time.Now().Add(10 * time.Second)
-	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
-		deadline = d
+	defer arm(ctx, c.tcp)()
+	if dl, ok := ctx.Deadline(); ok && fence.Fenced(ctx) {
+		// A timer resets the socket AT the send deadline (design §3.4,
+		// rule 3), whether or not this goroutine is awake then.
+		defer fence.Arm(c.tcp, dl)()
 	}
-	_ = c.tcp.SetWriteDeadline(deadline)
+	fence.BeforeSend()
 	if _, err := c.tcp.Write(EncodeFrame(hdr, body)); err != nil {
-		return MessageRouterResponse{}, err
+		c.resetIfFenced(ctx)
+		return MessageRouterResponse{}, cancelled(ctx, err)
 	}
-	_ = c.tcp.SetReadDeadline(deadline)
 	rhdr, payload, err := c.readFrame()
 	if err != nil {
-		return MessageRouterResponse{}, err
+		c.resetIfFenced(ctx)
+		return MessageRouterResponse{}, cancelled(ctx, err)
 	}
 	if rhdr.Status != EncapStatusSuccess {
 		return MessageRouterResponse{}, fmt.Errorf("encap status 0x%x", rhdr.Status)
@@ -66,4 +82,17 @@ func (c *Client) SendUnitData(ctx context.Context, connID uint32, seq uint16, se
 		return MessageRouterResponse{}, fmt.Errorf("connected reply sequence mismatch: sent %d, got %d", seq, echo)
 	}
 	return decodeMRResponse(ritems[1].Data[2:])
+}
+
+// resetIfFenced resets the session's socket (SO_LINGER 0) after a fenced
+// send failed (design §3.4): what the kernel still holds of it is
+// discarded, never delivered after the lease. The client is left
+// unconnected; the caller dials again. Under c.mu.
+func (c *Client) resetIfFenced(ctx context.Context) {
+	if c.tcp == nil || !fence.Fenced(ctx) {
+		return
+	}
+	_ = fence.Reset(c.tcp)
+	c.tcp = nil
+	fence.CutSend(ctx, false) // the send began and its deadline passed: one write cut
 }

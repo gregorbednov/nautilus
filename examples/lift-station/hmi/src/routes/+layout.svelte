@@ -15,18 +15,24 @@
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { theme, ConfirmDialog, AlarmBanner, AckButton, StatusPill, ThemeSwitch } from '@joyautomation/nautilus-hmi';
+	import { theme, createAuth, ConfirmDialog, AlarmBanner, AckButton, StatusPill, ThemeSwitch, AccountChip, ReferralBanner } from '@joyautomation/nautilus-hmi';
 	import AlarmsPanel from '$lib/AlarmsPanel.svelte';
 	import { rt, alarms } from '$lib/client.svelte';
 
 	let { children } = $props();
 	// The alarm banner opens the alarms panel, over whichever view is up.
 	let alarmsOpen = $state(false);
+	// Sign-in (an auth: block): asks for the password in the confirm dialog
+	// when an elevated action needs it, follows a sign-out and a standby's
+	// referral. Without auth: it does nothing.
+	const auth = createAuth();
 	onMount(() => {
 		theme.init();
+		void auth.start();
 		rt.start();
 		void alarms.start();
 		return () => {
+			auth.stop();
 			rt.stop();
 			alarms.stop();
 		};
@@ -48,7 +54,7 @@
 	<header class="bar">
 		<div class="title">
 			<b>Lift Station</b>
-			<span>WW-101 duplex sewage lift station, P-101 / P-102 duty/standby</span>
+			<span>Duplex sewage lift station, Pump 1 and Pump 2 sharing duty</span>
 		</div>
 		<nav class="views" aria-label="Views">
 			{#each VIEWS as v (v.id)}
@@ -57,11 +63,13 @@
 		</nav>
 		<div class="status">
 			<AlarmBanner summary={alarms.summary} compact onclick={() => (alarmsOpen = !alarmsOpen)} />
-			<AckButton alarms={alarms.active} ids={['*']} onack={(ids, by) => alarms.ack(ids, by)} />
+			<AckButton alarms={alarms.active} ids={['*']} size="md" onack={(ids, by) => alarms.ack(ids, by)} />
 			<StatusPill kind={rt.connected ? 'good' : 'critical'} label={rt.connected ? 'Connected' : 'Offline'} />
+			<AccountChip />
 			<ThemeSwitch />
 		</div>
 	</header>
+	<ReferralBanner />
 	<main class="view">
 		{@render children()}
 		<AlarmsPanel bind:open={alarmsOpen} />
@@ -81,6 +89,7 @@
 		gap: 12px 20px;
 		flex-wrap: wrap;
 		padding: 10px 16px;
+		font-size: 1rem;
 		border-bottom: 1px solid var(--border);
 		background: var(--surface);
 	}
@@ -95,13 +104,13 @@
 		min-width: 0;
 	}
 	.title b {
-		font-size: 1.05rem;
+		font-size: 1.125rem;
 		font-weight: 680;
 		white-space: nowrap;
 	}
 	.title span {
-		font-size: 0.8rem;
-		color: var(--muted);
+		font-size: 1rem;
+		color: var(--ink-2);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -118,7 +127,7 @@
 	.views a {
 		padding: 4px 12px;
 		border-radius: 6px;
-		font-size: 0.8rem;
+		font-size: 1rem;
 		font-weight: 600;
 		color: var(--ink-2);
 		text-decoration: none;
@@ -149,6 +158,30 @@
 	@media (max-width: 900px) {
 		.title span {
 			display: none;
+		}
+	}
+	/* A phone: the status row would be wider than the window (max-content),
+	   clipping the signed-in name and Sign out. Let it take a row of its own
+	   and wrap, the account chip's name truncating before Sign out does. */
+	@media (max-width: 600px) {
+		.bar {
+			padding: 8px 12px;
+		}
+		.title {
+			flex: 1 1 100%;
+		}
+		.views {
+			flex: 1 1 auto;
+		}
+		.views a {
+			flex: 1;
+			text-align: center;
+		}
+		.status {
+			flex: 1 1 100%;
+			min-width: 0;
+			flex-wrap: wrap;
+			justify-content: flex-start;
 		}
 	}
 </style>

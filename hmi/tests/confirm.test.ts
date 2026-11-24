@@ -2,7 +2,7 @@
 // a confirmation that silently never settles is a command an operator believes
 // they sent. Every case below is one of those.
 import { describe, it, expect } from './harness.js';
-import { createConfirmQueue, splitItems, type ConfirmRequest } from '../src/lib/confirm.js';
+import { createConfirmQueue, recordedAs, splitItems, type ConfirmRequest } from '../src/lib/confirm.js';
 
 /** A queue with a host attached, plus a log of what the host was told to show. */
 function mounted() {
@@ -153,5 +153,60 @@ describe('splitItems — enumerating what is being acted on', () => {
 	});
 	it('a cap of zero or less means no cap, not an empty list', () => {
 		expect(splitItems(['a', 'b'], 0)).toEqual({ shown: ['a', 'b'], more: 0 });
+	});
+});
+
+describe('confirm queue — the password (elevation prompt)', () => {
+	it('resolves to what was typed on confirm, null on cancel', async () => {
+		const { q } = mounted();
+		const typed = q.requestSecret({ title: 'Confirm your password' });
+		expect(q.current?.options.password).toBe(true);
+		q.settle(true, 'hunter2');
+		expect(await typed).toBe('hunter2');
+		const cancelled = q.requestSecret({ title: 'Confirm your password' });
+		q.settle(false, 'typed then cancelled');
+		expect(await cancelled).toBeNull();
+	});
+	it('with no dialog mounted it resolves null at once (never a plain-text browser prompt), and says so', async () => {
+		let told = 0;
+		let fellBack = 0;
+		const q = createConfirmQueue({ secretFallback: () => told++, fallback: () => (fellBack++, true) });
+		expect(await q.requestSecret({ title: 'Confirm your password' })).toBeNull();
+		expect(told).toBe(1);
+		expect(fellBack).toBe(0);
+		expect(q.current).toBeNull();
+	});
+	it('a plain confirm stays a boolean, and never shows a password field', async () => {
+		const { q } = mounted();
+		const p = q.request({ title: 'Stop P-101?', password: true });
+		expect(q.current?.options.password).toBe(false);
+		q.settle(true, 'ignored');
+		expect(await p).toBe(true);
+	});
+	it('queues behind a confirm already on screen, keeping its own answer', async () => {
+		const { q } = mounted();
+		const stop = q.request({ title: 'Stop P-101?' });
+		const pw = q.requestSecret({ title: 'Confirm your password' });
+		expect(q.waiting).toBe(1);
+		q.settle(true);
+		expect(await stop).toBe(true);
+		expect(q.current?.options.password).toBe(true);
+		q.settle(true, 'pw');
+		expect(await pw).toBe('pw');
+	});
+});
+
+describe('who an acknowledgement is recorded as (#708)', () => {
+	it('signed in: the user, with no name to type', () => {
+		const r = recordedAs('akhan');
+		expect(r.operator).toBe(false);
+		expect(r.note).toBe('Recorded as akhan, the signed-in user.');
+		expect(r.by('typed name')).toBe('akhan');
+	});
+	it('not signed in: the name typed, and the dialog says it is unauthenticated', () => {
+		const r = recordedAs(null);
+		expect(r.operator).toBe(true);
+		expect(r.note.includes('unauthenticated')).toBe(true);
+		expect(r.by('op1')).toBe('op1');
 	});
 });

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strings"
 	"time"
@@ -30,6 +31,8 @@ func hmiSource(proj *project.Project) string {
 		return proj.HMIApp + "/"
 	case proj.HMIScreens:
 		return "the project's mimics"
+	case proj.HMIPlant:
+		return "the plant model's pages"
 	}
 	return ""
 }
@@ -44,11 +47,34 @@ func buildHMI(proj *project.Project, dir string) (*hmibuild.Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	opts := hmibuild.Options{Project: abs, Title: proj.Name, Minify: true}
+	opts := hmibuild.Options{Project: abs, Title: proj.Name, Minify: true, Checkout: proj.Checkout != nil, Assets: append(plantAssets(proj), deviceAssets(proj)...)}
+	opts.Areas = plantAreas(proj, opts.Assets)
+	if proj.PWA != nil || proj.PWAIcon != nil {
+		opts.PWA = &hmibuild.PWA{Icon: proj.PWAIcon}
+		if c := proj.PWA; c != nil {
+			opts.PWA.Name, opts.PWA.ShortName, opts.PWA.ThemeColor = c.Name, c.ShortName, c.ThemeColor
+		}
+	}
 	if proj.HMIApp != "" {
 		opts.App = filepath.Join(abs, filepath.FromSlash(proj.HMIApp))
 	}
 	return hmibuild.Build(opts)
+}
+
+// hmiArch is the architecture naut is running on (a variable so a test can say another).
+var hmiArch = goruntime.GOARCH
+
+// slowBoxNotice is what `naut run` says before it builds the screens on a small ARM
+// board: the build is about four seconds on a desktop and was still going at full use
+// of both cores after 90 seconds on a two-core Cortex-A53 board, and nothing is served
+// until it ends. A controller built off the box (`naut build`, or `naut deploy`, which
+// builds and ships it) carries its screens already built and never builds them.
+func slowBoxNotice(goarch string) string {
+	if goarch != "arm" && goarch != "arm64" {
+		return ""
+	}
+	return "naut run: building the screens first; on a small ARM board this can take minutes of every core before anything is served. " +
+		"Build off the board instead: `naut build` (or `naut deploy`, which does it for you) ships the screens built and the controller never rebuilds them."
 }
 
 // buildHMIForRun builds the HMI `naut run` serves at "/", or says why it
@@ -59,6 +85,11 @@ func buildHMIForRun(proj *project.Project, dir string, stderr io.Writer) string 
 		return ""
 	}
 	src := hmiSource(proj)
+	if src != "" {
+		if n := slowBoxNotice(hmiArch); n != "" {
+			fmt.Fprintln(stderr, n)
+		}
+	}
 	res, err := buildHMI(proj, dir)
 	if err != nil {
 		fmt.Fprintf(stderr, "naut run: hmi: %s didn't build, so the built-in dashboard has \"/\":\n", src)
@@ -96,6 +127,7 @@ func printBuildWarnings(w io.Writer, prefix string, warnings []string) {
 }
 
 const hmiUsage = `usage: naut hmi build [-o dir] [project]
+       naut hmi scheme [-update] [-area id] [project]   (a process scheme from plant.yaml)
 
 Build the project's operator screen the way naut run serves it, with no
 Node and no npm, and say what's wrong with it: the app server.hmi names (a
@@ -108,6 +140,9 @@ carries: ` + "svelte, @joyautomation/nautilus-hmi, @joyautomation/nautilus-hmi-3
 
 // runHMI is `naut hmi`.
 func runHMI(args []string) int {
+	if len(args) > 0 && args[0] == "scheme" {
+		return runHMIScheme(args[1:])
+	}
 	if len(args) == 0 || args[0] != "build" {
 		fmt.Fprint(os.Stderr, hmiUsage)
 		return 2
@@ -134,7 +169,7 @@ func runHMI(args []string) int {
 		case proj.HMIDir != "":
 			fmt.Fprintf(os.Stderr, "naut hmi build: server.hmi (%s) is an HMI built elsewhere (no src/routes beside it); naut serves it as it is\n", proj.HMIDir)
 		default:
-			fmt.Fprintln(os.Stderr, "naut hmi build: nothing to build: no server.hmi app and no *.mimic.json in the project")
+			fmt.Fprintln(os.Stderr, "naut hmi build: nothing to build: no server.hmi app, no *.mimic.json and no plant model equipment in the project")
 		}
 		return 1
 	}

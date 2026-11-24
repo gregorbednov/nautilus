@@ -5,19 +5,22 @@ package server
 //
 //	GET  /api/alarms                    active + unack-RTN + shelved, plus the summary
 //	GET  /api/alarms/journal?from&to&…  the append-only event log
-//	POST /api/alarms/ack       {"ids":[…]|{"all":true}, "by":"operator1"}
+//	POST /api/alarms/ack       {"ids":[…]|{"all":true}, "by":"operator1", "occurrences":{id: occ}}
 //	POST /api/alarms/shelve    {"id":…, "until"|"seconds":…, "by":…}
 //	POST /api/alarms/unshelve  {"id":…, "by":…}
 //
-// Reads are ungated like every other read; writes go through authorizeWrite
+// Reads follow the Host rule of every other read (GuardHost); writes go through authorizeWrite
 // unchanged — same Bearer/X-Nautilus-Token rules, same same-origin base
 // layer, same proxyStandby forwarding as a tag write, because an ack made
 // against a standby has to reach the replica that is actually scanning.
 //
-// `by` is an AUDIT STRING the server does not authenticate: nautilus has
-// one token, not user accounts. The HMI supplies the operator's name and
-// the journal records what it was told. Saying that plainly beats implying
-// an identity the system does not have.
+// `by` is the name the alarm journal records. A request that acts as a
+// user (a browser sign-in, a personal access token) is recorded as that
+// user, whatever `by` it sends (recordBy, #708): that name is authenticated.
+// Under a token (NAUTILUS_TOKEN, a service token) or no auth: block, `by` is
+// what the client typed (an HMI kiosk on a service token names its
+// operator), an AUDIT STRING the server does not authenticate; the audit
+// journal names the principal beside it either way.
 //
 // With no engine configured every route answers 404, which is the answer
 // the HMI kit's AlarmClient is written against: it flips `supported` to
@@ -28,11 +31,17 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/joyautomation/nautilus/alarm"
+	"github.com/joyautomation/nautilus/auth"
+	"github.com/joyautomation/nautilus/lang/ir"
 )
 
 // noAlarms is the 404 body. It names the manifest key, because "404" on a
@@ -54,6 +63,13 @@ type alarmsResponse struct {
 	TS      int64          `json:"ts"`
 	Summary alarm.Summary  `json:"summary"`
 	Alarms  []alarm.Record `json:"alarms"`
+	// Equipment, with ?suppressed=1, names every piece of equipment the
+	// alarms belong to (not the controller's own), so an HMI can offer to
+	// take one out of service while all its alarms are quiet.
+	Equipment []string `json:"equipment,omitempty"`
+	// Flood is the alarm flood in progress, with its first alarms and
+	// the equipment they came from; absent when there is none (#1249).
+	Flood *alarm.Flood `json:"flood,omitempty"`
 }
 
 func (s *Server) handleAlarms(w http.ResponseWriter, r *http.Request) {
@@ -64,10 +80,35 @@ func (s *Server) handleAlarms(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []alarm.Record{}
 	}
+	// ?suppressed=1 adds the alarms that are suppressed, each with its kind,
+	// reason, who and until, so an HMI can show what is hidden and why
+	// (out of service, #715). Without it the list is as it always was.
+	var equipment []string
+	if r.URL.Query().Get("suppressed") == "1" {
+		// One snapshot of every alarm, so none is listed twice when its
+		// state changes between two reads.
+		listed := map[string]bool{}
+		for _, rec := range list {
+			listed[rec.ID] = true
+		}
+		seen := map[string]bool{}
+		for _, rec := range s.alarms.Records() {
+			if rec.State == alarm.Suppressed && !listed[rec.ID] {
+				list = append(list, rec)
+			}
+			if k := ir.NameKey(rec.Equipment); rec.Equipment != "" && !seen[k] && !strings.HasPrefix(rec.Tag, "__nautilus.") && !strings.HasPrefix(rec.ID, "nautilus.") {
+				seen[k] = true
+				equipment = append(equipment, rec.Equipment)
+			}
+		}
+		sort.Strings(equipment)
+	}
 	writeJSON(w, http.StatusOK, alarmsResponse{
-		TS:      time.Now().UnixMilli(),
-		Summary: s.alarms.Summary(),
-		Alarms:  list,
+		TS:        time.Now().UnixMilli(),
+		Summary:   s.alarms.Summary(),
+		Alarms:    list,
+		Equipment: equipment,
+		Flood:     s.alarms.Flood(),
 	})
 }
 
@@ -111,6 +152,15 @@ func (s *Server) handleAlarmJournal(w http.ResponseWriter, r *http.Request) {
 		Priorities: csv(q.Get("priority")),
 		IDs:        csv(q.Get("id")),
 		Kinds:      csv(q.Get("kind")),
+	}
+	if len(f.Kinds) == 0 {
+		// A notify row (#715) is not a state change, and an HMI that
+		// predates it keys its journal rows on ts:id:kind and labels them
+		// by kind: several notifications in one millisecond would collide.
+		// It is shown only to a client that asks for it (kind=notify), and
+		// so are the detection rows (#1249: chatter, flood), for the same
+		// reason.
+		f.ExceptKinds = []string{alarm.KindNotify, alarm.KindChatter, alarm.KindChatterEnd, alarm.KindFlood, alarm.KindFloodEnd, alarm.KindTuned}
 	}
 	if limit <= 0 {
 		limit = alarm.DefaultQueryLimit
@@ -168,7 +218,7 @@ func (s *Server) journalPage(from, to time.Time, f alarm.Filter, limit int, stat
 			return nil, false, err
 		}
 		got := len(raw)
-		events := filterEvents(raw, states, text)
+		events := filterEvents(raw, states, text, f.ExceptKinds)
 		if len(events) > limit {
 			return events[:limit], true, nil
 		}
@@ -187,13 +237,20 @@ func (s *Server) journalPage(from, to time.Time, f alarm.Filter, limit int, stat
 
 // filterEvents applies the two filters the Journal interface deliberately
 // does not carry.
-func filterEvents(events []alarm.Event, states []string, text string) []alarm.Event {
-	if len(states) == 0 && text == "" {
+//
+// except drops kinds again after the journal has: ExceptKinds is newer
+// than the Journal interface, and a journal written outside nautilus may
+// not honour it, which would hand an old HMI notify rows it cannot key.
+func filterEvents(events []alarm.Event, states []string, text string, except []string) []alarm.Event {
+	if len(states) == 0 && text == "" && len(except) == 0 {
 		return events
 	}
 	text = strings.ToLower(text)
 	out := events[:0]
 	for _, e := range events {
+		if slices.Contains(except, e.Kind) {
+			continue
+		}
 		if len(states) > 0 && !containsFold(states, e.State) {
 			continue
 		}
@@ -219,10 +276,35 @@ func containsFold(set []string, v string) bool {
 // ackRequest is POST /api/alarms/ack. Either a list of ids, or all: true —
 // the "acknowledge everything" button, which is a real thing operators do
 // and deserves to be one request rather than two thousand.
+//
+// Occurrences (#715, optional) names, for some of the ids, the occurrence
+// the person saw (Record.Occurrence): an alarm that is on another one now
+// (it returned to normal and activated again since) is refused, 409, and
+// nothing is acknowledged. An id it does not name is acked on whatever
+// occurrence it is on, as before. Ignored with all: true.
 type ackRequest struct {
-	IDs []string `json:"ids"`
-	All bool     `json:"all"`
-	By  string   `json:"by"`
+	IDs         []string          `json:"ids"`
+	All         bool              `json:"all"`
+	By          string            `json:"by"`
+	Occurrences map[string]string `json:"occurrences,omitempty"`
+}
+
+// everything reports an acknowledge-all: {"all": true}, or ids ["*"] (the
+// spelling Engine.Ack and the HMI's Ack All use).
+func (r ackRequest) everything() bool {
+	return r.All || (len(r.IDs) == 1 && r.IDs[0] == "*")
+}
+
+// ackAnswer is the answer to POST /api/alarms/ack: how many changed, and
+// which (the journal records them for an acknowledge-all).
+type ackAnswer struct {
+	Acked int      `json:"acked"`
+	IDs   []string `json:"ids"`
+	// Skipped names the unacknowledged alarms an acknowledge-all left alone
+	// because the person may not acknowledge them (another area's), and
+	// SkippedWhy says why in one line. Empty when nothing was skipped.
+	Skipped    []string `json:"skipped,omitempty"`
+	SkippedWhy string   `json:"skippedWhy,omitempty"`
 }
 
 func (s *Server) handleAlarmAck(w http.ResponseWriter, r *http.Request) {
@@ -239,19 +321,62 @@ func (s *Server) handleAlarmAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ids := req.IDs
-	if req.All {
+	// The HMI's Ack All sends ids ["*"]: the same request as {"all": true},
+	// needing ack on the whole controller, not on an alarm named "*".
+	var skipped []string
+	scoped := false
+	var skippedWhy string
+	if req.everything() {
 		ids = nil // nil means everything, per Engine.Ack
+		if code, msg := s.authorize(r, PermAck, auth.All); code != 0 {
+			// Not allowed on the whole controller. A person who may ack
+			// some areas acks the alarms of those and no others (Ack All
+			// is not refused outright); one who may ack none is refused.
+			if code != http.StatusForbidden {
+				http.Error(w, msg, code)
+				return
+			}
+			var may []string
+			for _, rec := range s.alarms.Records() {
+				if c, why := s.authorize(r, PermAck, rec.Tag); c == 0 {
+					may = append(may, rec.ID)
+				} else if rec.State == alarm.UnackActive || rec.State == alarm.UnackRTN {
+					skipped = append(skipped, rec.ID)
+					skippedWhy = why
+				}
+			}
+			if len(may) == 0 {
+				http.Error(w, msg, code)
+				return
+			}
+			ids, scoped = may, true
+		}
 	} else if len(ids) == 0 {
 		http.Error(w, `ack needs "ids" or "all": true — an empty ids list would silently ack nothing`,
 			http.StatusBadRequest)
 		return
 	}
-	n, err := s.alarms.Ack(ids, req.By)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+	for _, id := range ids {
+		if code, msg := s.authorize(r, PermAck, s.alarmTag(id)); code != 0 {
+			http.Error(w, msg, code)
+			return
+		}
+	}
+	if scoped {
+		// Every alarm named is one the person may ack; the occurrences a
+		// client named are for the explicit form, not this one.
+		req.Occurrences = nil
+	}
+	if s.alarmLog != nil {
+		s.alarmAckThroughLogAs(w, r, ids, req.Occurrences, s.recordBy(r, req.By), "", scoped, skipped, skippedWhy)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]int{"acked": n})
+	acked, err := s.alarms.AckIDsAt(ids, req.Occurrences, s.recordBy(r, req.By))
+	if err != nil {
+		http.Error(w, err.Error(), alarmErrStatus(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, ackAnswer{Acked: len(acked), IDs: acked, Skipped: skipped, SkippedWhy: skippedWhy})
 }
 
 // shelveRequest is POST /api/alarms/shelve. Until is an RFC3339 timestamp
@@ -262,6 +387,46 @@ type shelveRequest struct {
 	Until   string  `json:"until"`
 	Seconds float64 `json:"seconds"`
 	By      string  `json:"by"`
+	// Reason is one line saying why (on the journal's shelve row and in the
+	// audit entry, on a pair too). Via is how the shelve was reached (audit
+	// entry only): "chatter" is the one-click fix on a chattering alarm's
+	// badge (#1249), which must say why. Both are optional otherwise.
+	Reason string `json:"reason"`
+	Via    string `json:"via"`
+}
+
+// shelveReasonMax is the longest shelve reason, in characters.
+const shelveReasonMax = 200
+
+// checkShelveWhy says what is wrong with a shelve's reason and via, or "".
+func checkShelveWhy(req shelveRequest) string {
+	reason := strings.TrimSpace(req.Reason)
+	switch req.Via {
+	case "", "chatter":
+	default:
+		return `via: "` + capText(req.Via, byMax) + `" is not one of: chatter`
+	}
+	// One printable line: no breaks, controls (an escape sequence would ride
+	// into a terminal view of the audit log) or invisible-only text.
+	visible := false
+	for _, c := range reason {
+		if unicode.IsControl(c) || c == '\u2028' || c == '\u2029' {
+			return "reason: one line of text, no line breaks or control characters"
+		}
+		if !unicode.IsSpace(c) && !unicode.Is(unicode.Cf, c) {
+			visible = true
+		}
+	}
+	if reason != "" && !visible {
+		return "reason: say it in words, not invisible characters"
+	}
+	if utf8.RuneCountInString(reason) > shelveReasonMax {
+		return "reason: at most 200 characters"
+	}
+	if req.Via == "chatter" && reason == "" {
+		return `reason: shelving a chattering alarm needs a one-line reason (say what you saw or will do)`
+	}
+	return ""
 }
 
 func (s *Server) handleAlarmShelve(w http.ResponseWriter, r *http.Request) {
@@ -275,6 +440,14 @@ func (s *Server) handleAlarmShelve(w http.ResponseWriter, r *http.Request) {
 	var req shelveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
 		http.Error(w, `expected {"id": "...", "until"|"seconds": ..., "by": "..."}`, http.StatusBadRequest)
+		return
+	}
+	if code, msg := s.authorize(r, PermShelve, s.alarmTag(req.ID)); code != 0 {
+		http.Error(w, msg, code)
+		return
+	}
+	if why := checkShelveWhy(req); why != "" {
+		http.Error(w, why, http.StatusBadRequest)
 		return
 	}
 	var until time.Time
@@ -293,7 +466,11 @@ func (s *Server) handleAlarmShelve(w http.ResponseWriter, r *http.Request) {
 			http.StatusBadRequest)
 		return
 	}
-	if err := s.alarms.Shelve(req.ID, until, req.By); err != nil {
+	if s.alarmLog != nil {
+		s.shelveThroughLog(w, r, req.ID, until, s.recordBy(r, req.By), strings.TrimSpace(req.Reason))
+		return
+	}
+	if err := s.alarms.ShelveWith(req.ID, until, s.recordBy(r, req.By), strings.TrimSpace(req.Reason)); err != nil {
 		http.Error(w, err.Error(), alarmErrStatus(err))
 		return
 	}
@@ -318,19 +495,45 @@ func (s *Server) handleAlarmUnshelve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `expected {"id": "...", "by": "..."}`, http.StatusBadRequest)
 		return
 	}
-	if err := s.alarms.Unshelve(req.ID, req.By); err != nil {
+	if code, msg := s.authorize(r, PermShelve, s.alarmTag(req.ID)); code != 0 {
+		http.Error(w, msg, code)
+		return
+	}
+	if s.alarmLog != nil {
+		s.shelveThroughLog(w, r, req.ID, time.Time{}, s.recordBy(r, req.By), "")
+		return
+	}
+	if err := s.alarms.Unshelve(req.ID, s.recordBy(r, req.By)); err != nil {
 		http.Error(w, err.Error(), alarmErrStatus(err))
 		return
 	}
 	s.writeAlarmRecord(w, req.ID)
 }
 
+// alarmTag is the tag an alarm watches, the target areas scope its ack
+// and shelving by; an id that names no alarm is its own target (refused
+// to an area-limited principal; the engine says 404 to the rest). An
+// alarm with no tag of the project's, such as the audit journal's system
+// alarm, is in no area: only a grant over the whole controller acks it.
+func (s *Server) alarmTag(id string) string {
+	for _, rec := range s.alarms.Records() {
+		if rec.ID == id {
+			return rec.Tag
+		}
+	}
+	return id
+}
+
 // alarmErrStatus maps an engine refusal to a status: an id that names no
 // alarm is a 404, as it is on ack; anything else (not shelvable, a shelf
-// deadline in the past, not shelved) is a request the alarm refused, a 400.
+// deadline in the past, not shelved) is a request the alarm refused, a 400;
+// an ack of an occurrence that has ended is a 409.
 func alarmErrStatus(err error) int {
-	if errors.Is(err, alarm.ErrNoAlarm) {
+	if errors.Is(err, alarm.ErrNoAlarm) || errors.Is(err, alarm.ErrNoEquipment) {
 		return http.StatusNotFound
+	}
+	if errors.Is(err, alarm.ErrOtherOccurrence) {
+		return http.StatusConflict
 	}
 	return http.StatusBadRequest
 }
@@ -398,4 +601,22 @@ func csv(s string) []string {
 		}
 	}
 	return out
+}
+
+// recordBy is the name an acknowledgement or a shelve is recorded under in
+// the alarm journal: a request that acts as a user (a browser sign-in, a
+// personal access token) is that user, whatever name the client sent, so a
+// signed-in operator cannot record another's name (#708 PR 7b). A token
+// (NAUTILUS_TOKEN, a service token) or no credential at all keeps the name
+// the client typed, as before: an HMI behind a service token names its
+// operator that way. The audit journal names the principal either way, with
+// the typed name in detail.by.
+func (s *Server) recordBy(r *http.Request, typed string) string {
+	if a := s.actorOf(r); a.pr.Kind == auth.KindUser && a.pr.Name != "" {
+		return a.pr.Name
+	} else if a.pr.Kind == auth.KindOIDC && a.pr.Name != "" {
+		// oidc:<name>: never read as the local user of the same name.
+		return a.pr.String()
+	}
+	return typed
 }

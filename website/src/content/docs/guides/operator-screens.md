@@ -4,7 +4,8 @@ description: A *.mimic.json is an operator screen as data — equipment placed o
 ---
 
 An operator screen in nautilus is a file: `*.mimic.json`, anywhere in the
-project. It places equipment on a canvas, runs pipes between it, and binds
+project. (A *mimic* is a process diagram: the pump, tank and pipes drawn as
+the plant is laid out.) It places equipment on a canvas, runs pipes between it, and binds
 each piece to the tags it shows. The VS Code extension opens it in a
 graphical editor, and with a controller running (`naut run`, or the
 playground) the screen animates with the process and its controls write to
@@ -47,8 +48,37 @@ The same document renders in a SvelteKit HMI through the
   draws it under the pipes (a wet well with pumps inside it).
 - **`pipes`**: a polyline of `points`, or anchored at either end to an
   equipment's named port (`from`, `to`); `routing: "orthogonal"` draws
-  right angles. Bind `flowing` (and `rate`) to animate the flow.
-- **`labels`**: static text, or with `bind` a live readout.
+  right angles, and `routing: "auto"` routes the line for you. Bind
+  `flowing` (and `rate`) to animate the flow.
+- **`labels`**: static text, or with `bind` a live readout. naut's own
+  pages draw a readout with a trend of its last few minutes after the
+  number (`<Mimic trends>` in an app); `"trend": false` leaves it off,
+  `"min"` and `"max"` fix its scale. A STRING tag (a sequence's step)
+  shows as it is; `values` gives words for the values it takes
+  (`{"PostRun": "Post-run delay", "0": "Out of service"}`), a step's name
+  or a state code. A reading sits by what it measures: on its line
+  or vessel, or just under the equipment's name. `"at": [x, y]` is the
+  point the reading belongs to: a dashed sense line joins the label to
+  it, for a reading that can't sit by what it measures. With `state` instead of `bind`, the label
+  shows a state in words as a status chip: the first whose `when` tag is
+  true, else the one with no `when`, which comes last:
+  `"state": [{"when": "P101_Fault", "text": "Fault", "kind": "critical"},
+  {"when": "P101_Running", "text": "Running", "kind": "good"}, {"text":
+  "Stopped"}]` (`kind`: `off`, the default, `good`, `warning`, `serious`,
+  `critical`). Equipment an operator watches run says its state this way
+  beside its symbol, as well as on it. `"as"` picks how a label is drawn:
+  `chip` (the default), `text` (bare text outlined in the background
+  colour, legible over a liquid or a pipe) or `row` (the `ReadoutRow`: a
+  name cell, then the value, its trend and its state, so a row can carry
+  both `bind` and `state`). Rows stacked under a vessel take one `width`
+  and line up as a table. `"align": "center"` makes `x` the label's middle:
+  a pump's On/Off, speed and Lead/Lag stack over it as `text`, centred.
+  Name things as an operator says them (Pump 1, Level, High Switch); tag
+  numbers go in the panel a click opens.
+- **`panel`** on a piece of equipment: what a click on it opens (see
+  [Panels](#panels-what-a-click-opens)).
+- **`description`**: a line on what the screen shows; naut's bar puts the
+  first screen's beside the project's name.
 - **`look`**: `isa101` (the default: flat grey, colour only for a state or
   an abnormal condition) or `realistic`.
 
@@ -56,13 +86,13 @@ The same document renders in a SvelteKit HMI through the
 
 | Component | Props to bind | Ports |
 |---|---|---|
-| `Tank` | `levelPct` (`shape`: `vessel`, `open` or `pit`) | `top`, `left`, `right`, `bottom` |
+| `Tank` | `levelPct` (`shape`: `vessel`, `open` or `pit`; `hatchAt`: where a pit's access hatch sits across its slab, 0 to 1; `marks`: the levels that matter, `[{"label": "Lead on", "tag": "LeadOnSP"}, {"label": "High alarm", "value": 90, "alarm": true}]`, an arrow and its value at each on the vessel's left, or past its scale with `marksSide: "right"`; an `alarm` mark, `true`, `"high"` or `"low"`, is also a dotted line across the vessel and stays grey with a hollow arrow until the level reaches it; `ranges`: a pump's start and stop as one bracket beside the scale (right-hand marks stand beyond them), `[{"label": "Lead", "on": "LeadOnSP", "off": 30}]`, a number in % or a tag at each end, overlapping ranges in columns of their own; `alarm`: a condition that turns the liquid, otherwise a neutral grey, the alarm colour while it holds) | `top`, `left`, `right`, `bottom` |
 | `Pump` | `running`, `speedPct` | `in`, `out` |
 | `Valve` | `openPct` | `in`, `out` |
 | `Heater` | `powerPct` | |
 | `Gauge` | `value`, `setpoint` | |
 | `Sparkline` | `values` | |
-| `CommandButton` | `held`, `disabled`, `disabledReason`; the tag it writes is the `tag` prop | |
+| `CommandButton` | `held`, `disabled`, `disabledReason`; set in `props`: `tag` (the tag it writes), `label`, `kind` (`start`, `stop` or `neutral`: green, red, plain) and `pulseMs` | |
 | `WriteToggle` | `value`; the tag it writes is the `tag` prop | |
 | `SetpointGroup` | `title`, `items` (`[{"tag": "Kp", "label": "Gain", "unit": "", "decimals": 2}]`), `columns`: it reads and writes the items' tags itself; give it a width, never a height | |
 | `OffPage` | `label` (where the line goes on another screen: `TO FILTER GALLERY`), `dir` (the way it points: `right`, `left`, `up`, `down`) | `top`, `left`, `right`, `bottom` |
@@ -81,6 +111,26 @@ Anchor an end to a piece of equipment instead with `from` or `to`,
 equipment wherever it moves, and `points` holds only the bends in between
 (it may be empty: `[]`). `routing: "orthogonal"` turns each pair of points
 into a right-angled L; without it the segments are straight.
+
+With `routing: "auto"` the screen routes the pipe itself: give it its two
+ends and no points, and it draws the line square, clear of every piece of
+equipment and every label, with as few bends and crossings as it can, and
+never along another pipe. An end can also be another pipe, which it tees
+into wherever is best, so a drop runs to its header without you working
+out where:
+
+```json
+{ "id": "AIR_HDR", "routing": "auto",
+  "from": { "equip": "AIR_IN", "port": "right" }, "to": { "equip": "AIR_END", "port": "left" } },
+{ "id": "F1_AIR", "routing": "auto",
+  "from": { "equip": "XV104", "port": "top" }, "to": { "pipe": "AIR_HDR" } }
+```
+
+Points on a routed pipe are waypoints it passes through, to steer a line.
+Once routed, it is drawn like any other pipe: a drop routed to its header
+ends on the header's line and gets the tee's dot, and a crossing is broken
+as below. A routed pipe the screen can't get through draws straight
+across, and `naut check` says which.
 
 - **`flowing`** (a BOOL, or a number above zero) animates the flow in the
   direction the points run, so draw a pipe from where the water comes from.
@@ -126,6 +176,51 @@ on and a controller is running; otherwise, and when the controller refuses
 it (a forced tag, say), the control shows why beside itself. In the editor,
 a click on a control operates it while a controller is connected; with
 live values off, the whole piece is the editor's to select and drag again.
+
+## Panels: what a click opens
+
+The drawing shows the plant's state and values; an operator changes them
+in a panel. A piece of equipment's `panel` lists its live readings, its
+setpoints, its commands and its switches, and a click on it opens them in
+a panel beside the drawing, which moves over to make room. The plant
+keeps running behind it, and × or Escape closes it.
+
+```json
+{ "id": "P501", "component": "Pump", "x": 900, "y": 640,
+  "bind": { "running": "P501_Running" },
+  "panel": {
+    "title": "P-501 backwash pump",
+    "readings": [
+      { "tag": "P501_Running", "label": "State", "on": "Running", "off": "Stopped" },
+      { "tag": "FIT501_Flow", "label": "Flow", "unit": "gpm", "decimals": 0 }
+    ],
+    "setpoints": [{ "tag": "BW_FlowSP", "label": "Backwash flow", "unit": "gpm", "decimals": 0 }],
+    "commands": [
+      { "tag": "P501_Start", "label": "Start", "kind": "start" },
+      { "tag": "P501_Stop", "label": "Stop", "kind": "stop" }
+    ],
+    "toggles": [{ "tag": "P501_OOS", "label": "Out of service" }],
+    "links": ["FIT501"]
+  } }
+```
+
+- **`readings`**: a number shows with its `unit` and a trend of its last
+  few minutes (`min`, `max` fix the trend's scale); a true/false shows the
+  words `on` and `off` give, as an alarm with `"alarm": true`.
+- **`setpoints`**: fields that write their tags, as `SetpointGroup`'s items.
+- **`commands`**: momentary buttons, as `CommandButton` (`held` names the
+  tag that reads back as pressed).
+- **`toggles`**: switches that hold a bit on or off, as `WriteToggle`.
+- **`links`**: other equipment whose panels this one opens.
+- A string opens another's panel: `"panel": "P501"` on the pump's flow
+  meter.
+
+Equipment with no panel isn't clickable, and a click on it reaches what's
+under it, except on its own controls. `naut check` checks every tag a
+panel reads or writes and every id it names. In an app,
+`<EquipmentPanel {doc} {tags} {write} bind:selected />` beside
+`<Mimic ... onequipmentclick={(eq) => (selected = eq.id)} clickable={(eq) => !!panelFor(doc, eq.id)} {selected} />`
+does the same.
 
 ## Your own components
 
@@ -180,9 +275,15 @@ An operator picks a light or a dark theme, so colour a component from the
 kit's tokens rather than hex: text in `var(--ink)`, `var(--ink-2)` or
 `var(--muted)`; grounds in `var(--bg)`, `var(--surface)` and
 `var(--surface-2)`; outlines in `var(--edge)`; state in `var(--good)`,
-`var(--warn)` and `var(--crit)`. Each holds AA contrast on each ground in
-both themes. A hex chosen for one theme is unreadable in the other, which
-`naut check` reports.
+`var(--warn)` and `var(--crit)`. In both themes, the text tokens hold AA
+text contrast (4.5:1) and `--edge` holds AA non-text contrast (3:1) on
+every ground. The state tokens meet 3:1 as indicators (a fill, an outline,
+a lamp), except light `--warn` on `--surface-2`. As text, they fall below
+4.5:1 in places, so keep state-coloured text short and pair it with a
+word or a shape
+([#927](https://github.com/joyautomation/nautilus/issues/927)). The kit's
+palette test checks all of these. A hex chosen for one theme is
+unreadable in the other, which `naut check` reports.
 
 A `{Name}.component.json` beside the component gives it pipe ports and
 its examples: the props for each state it draws, by name.
@@ -283,8 +384,16 @@ serves them at `/`, with the engineering dashboard moved to `/_nautilus/`:
 - **With no `server.hmi`**, a project with `*.mimic.json` files gets a page
   for each: the first at `/`, the others by file name
   (`screens/pumps.mimic.json` is `/pumps`), under a bar with the project's
-  name, the pages, the connection and a theme switch. The pages are live
-  and their controls write, as in the editor. Each page shows its whole
+  name and the first screen's `description`, the pages, Diagnostics
+  (the controller's scan timing and field drivers), Parameters (the
+  setpoints against the manifest's `init:`), the shift Log (with every
+  note on equipment, tags and alarms listed under it), and Configuration
+  (the drivers and devices as forms; shown only to a session that holds the
+  `config` permission), and the active alarms
+  (the banner opens `/alarms`, to acknowledge and shelve them). The bar also
+  has Ack all, who is signed in with Sign out, the connection and a theme switch. The pages are live and their
+  controls write, as in the editor; a click on equipment with a `panel`
+  opens it. Each page shows its whole
   drawing at once, fitted to the window's width and height and centred,
   so draw the canvas for the window it's seen in: about 1880×1000 fills a
   1920×1080 screen under the bar. A taller canvas is drawn smaller, not
@@ -337,5 +446,7 @@ The screen is served from naut's own server over the project's runtime
 without scanning it: no driver starts, no write reaches anything, and
 every tag shows its initial value. `NAUT_BROWSER` names the browser to
 use (`NAUT_BROWSER=none`, or `naut check -render=false`, skips it).
+`naut check` waits up to two minutes for the browser to start;
+`NAUT_BROWSER_START_TIMEOUT` (`5m`, `90s`) changes that on a slow machine.
 Without a browser, `naut check` says the screen wasn't rendered and
 carries on.

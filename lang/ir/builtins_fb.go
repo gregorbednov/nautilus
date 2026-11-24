@@ -1,7 +1,5 @@
 package ir
 
-import "fmt"
-
 // FBs holds every built-in function block the IR knows about. The
 // lowering pass consults it when a VAR declaration names an FB type
 // that isn't a user UDT.
@@ -54,6 +52,7 @@ func registerTON() {
 		Inputs:    []FBSlot{{Name: "IN", Type: BoolT}, {Name: "PT", Type: TimeT}},
 		Outputs:   []FBSlot{{Name: "Q", Type: BoolT}, {Name: "ET", Type: TimeT}},
 		Internals: []FBSlot{{Name: "_started", Type: TimeT}},
+		TimeBase:  []TimeBaseSlot{{Index: 4}},
 		Step: func(inst *FBInstance, ctx FBStepCtx) error {
 			in := inst.Slots[0].B
 			pt := inst.Slots[1].I
@@ -93,6 +92,7 @@ func registerTOF() {
 		Inputs:    []FBSlot{{Name: "IN", Type: BoolT}, {Name: "PT", Type: TimeT}},
 		Outputs:   []FBSlot{{Name: "Q", Type: BoolT}, {Name: "ET", Type: TimeT}},
 		Internals: []FBSlot{{Name: "_stopped", Type: TimeT}, {Name: "_prevIN", Type: BoolT}},
+		TimeBase:  []TimeBaseSlot{{Index: 4}},
 		Step: func(inst *FBInstance, ctx FBStepCtx) error {
 			in := inst.Slots[0].B
 			pt := inst.Slots[1].I
@@ -148,6 +148,7 @@ func registerTP() {
 		Inputs:    []FBSlot{{Name: "IN", Type: BoolT}, {Name: "PT", Type: TimeT}},
 		Outputs:   []FBSlot{{Name: "Q", Type: BoolT}, {Name: "ET", Type: TimeT}},
 		Internals: []FBSlot{{Name: "_started", Type: TimeT}, {Name: "_prevIN", Type: BoolT}},
+		TimeBase:  []TimeBaseSlot{{Index: 4}},
 		Step: func(inst *FBInstance, ctx FBStepCtx) error {
 			in := inst.Slots[0].B
 			pt := inst.Slots[1].I
@@ -334,14 +335,4 @@ func registerLatches() {
 			return nil
 		},
 	})
-}
-
-// fbSlotByName returns the slot index for a named FB input/output/internal.
-// Used by lowering to translate `t1(IN := …)` into an InputBinding.
-func fbSlotByName(def *FBDef, name string) (int, error) {
-	idx, ok := def.SlotOf(name)
-	if !ok {
-		return 0, fmt.Errorf("FB %s has no field %q", def.Name, name)
-	}
-	return idx, nil
 }

@@ -13,6 +13,7 @@
 //	                   ?blocks=delta   — and gate the NON-tag blocks the
 //	                                     same way (scan/drivers/alarms)
 //	                   ?full=1         — never send deltas on this stream
+//	GET  /api/parameters  the setpoint parameters: value, manifest init, range, drift state (#718)
 //	GET  /api/meta     tag descriptions/units/declared types, I/O binding, scan target
 //	POST /api/tags     {"name": "TempSP", "value": 65.0} — write one tag,
 //	                   or one member of a struct tag by dotted path:
@@ -23,6 +24,9 @@
 //	GET  /api/sfc      running SFC charts; POST /api/sfc/step and
 //	                   /api/sfc/transition jump or fire once (force.go)
 //	GET  /api/cluster  this replica's redundancy status (leader.Status JSON)
+//	GET  /api/audit    the audit journal's recent entries (server/audit.go):
+//	                   every write route above records one per request,
+//	                   accepted or refused, before it is answered
 //	GET  /assets/…     the dashboard's logo, favicon and brand fonts
 //
 // The Frame shape is deliberately generic (every tag, plus the scan loop's
@@ -42,11 +46,15 @@
 // whoever holds the lease, since its own tag store is stale. See
 // proxyStandby.
 //
-// Security is progressive. Reads are always open (LAN dashboards, editor
-// live values). Writes are same-origin-only by default — enough to stop a
+// Security is progressive. Every request must be addressed to a host no
+// page can rebind (localhost, an IP, an allowed name) or carry the token
+// (GuardHost). Writes are same-origin-only by default — enough to stop a
 // random browser page from actuating outputs, with zero configuration.
 // Set Options.AuthToken to require a token on writes (and allow authorized
-// cross-origin writers); see authorizeWrite.
+// cross-origin writers); see authorizeWrite. Options.Auth (the manifest's
+// auth: block) decides every write and read by role (authorize, the read
+// gate in readgate.go). GET /healthz and /readyz answer probes without a
+// credential.
 //
 //	srv := server.New(rt)
 //	go srv.Run(ctx)                       // broadcast loop
@@ -57,7 +65,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -65,18 +72,28 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"net/url"
+	"os"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/joyautomation/nautilus/alarm"
+	"github.com/joyautomation/nautilus/alarm/acklink"
+	"github.com/joyautomation/nautilus/audit"
+	"github.com/joyautomation/nautilus/auth"
+	"github.com/joyautomation/nautilus/auth/users"
+	"github.com/joyautomation/nautilus/internal/oidcseam"
 	"github.com/joyautomation/nautilus/lang/ir"
 	"github.com/joyautomation/nautilus/leader"
+	"github.com/joyautomation/nautilus/notes"
 	"github.com/joyautomation/nautilus/runtime"
 )
 
@@ -155,7 +172,7 @@ type Frame struct {
 	Drivers []DriverStatus     `json:"drivers,omitempty"`
 	// Quality is the tags whose value is not to be trusted — ONLY the
 	// non-Good ones, keyed by tag name, valued with io.Quality's token
-	// ("stale" | "bad" | "notConnected"). Absent from the map means Good,
+	// ("stale" | "bad" | "notConnected" | "substituted"). Absent from the map means Good,
 	// which is what keeps a healthy 10,000-tag plant paying nothing for the
 	// feature: the field is omitted entirely. A name here need not appear
 	// in Tags — "notConnected" is exactly the source that has never
@@ -186,6 +203,14 @@ type Frame struct {
 	// none is. Never delta-gated (it is a handful of entries at most), so
 	// on any stream "absent" means "nothing is forced". See force.go.
 	Forces map[string]any `json:"forces,omitempty"`
+	// CheckoutForce is present on every frame while an I/O checkout is
+	// driving an output (#719): the point, who, and the seconds left. Set by
+	// the checkout's FrameHook, so only a controller that wires it carries it.
+	CheckoutForce *CheckoutForceView `json:"checkoutForce,omitempty"`
+	// Config is what runs against the manifest the controller booted
+	// from (live I/O configuration, #706): present when the controller
+	// has it, on /api/state and every full frame.
+	Config *IOConfigState `json:"config,omitempty"`
 }
 
 // Options tunes the server; zero values mean defaults.
@@ -228,9 +253,122 @@ type Options struct {
 	// allowed only from same-origin browser pages and non-browser clients
 	// (see authorizeWrite). When set, a tag write must present the token in
 	// an "Authorization: Bearer <token>" or "X-Nautilus-Token: <token>"
-	// header, which also permits authorized cross-origin writers. Reads are
-	// never gated — dashboards and editor live values stay open on the LAN.
+	// header, which also permits authorized cross-origin writers. Any
+	// request, read or write, by a host name not in AllowedHosts (nor
+	// localhost or an IP) needs the token too (GuardHost).
 	AuthToken string
+
+	// AllowedHosts are host names (no port) the server answers by without
+	// the token, besides localhost and an IP address (#811, #819): a name
+	// an operator really uses for this controller, such as
+	// "epic1.plant.lan". A request by any other name is refused unless it
+	// carries the token, because a page on an attacker's domain can rebind
+	// that name to this machine (DNS rebinding) and is then same-origin
+	// with it. NAUTILUS_ALLOWED_HOSTS adds to it in every embedder (New
+	// reads it).
+	AllowedHosts []string
+
+	// Substitutes are the addresses a person may start a substitute value
+	// on (#707), as the manifest's `substitutes:` rules resolved: what
+	// GET /api/substitutes lists and POST /api/substitutes holds a start
+	// to. Empty: no start is accepted (the runtime has none to offer).
+	Substitutes []SubstituteRule
+	// TLS, when set (server.tls, #708), is the certificate the tag API
+	// serves (the caller wraps its listener in TLS.Config()). On a
+	// redundant pair a standby then forwards to the leader over TLS,
+	// accepting the leader only if it serves this certificate (current or
+	// previous: CertSource.Pinned).
+	TLS *CertSource
+	// TrustedProxies (server.trusted-proxies) are the addresses whose
+	// X-Forwarded-Proto and X-Forwarded-For are believed: a TLS-terminating
+	// proxy that keeps the Host (tailscale serve, nginx). Empty: none.
+	TrustedProxies []netip.Prefix
+
+	// SubstituteLog, on a redundant pair, sends substitute starts, stops
+	// and acknowledgements through the replicated operator-intent log
+	// (#707 PR 3b, substitutes_oplog.go). Nil: they apply here and are
+	// saved to the retain store before the answer.
+	SubstituteLog *SubstituteLog
+	// AlarmLog, on a redundant pair, sends alarm acknowledgements, shelves
+	// and unshelves through the replicated log of operator intent (#710
+	// PR 3b-2c, alarms_oplog.go). Nil: they apply here.
+	AlarmLog *AlarmLog
+
+	// AckLinks mints and checks the links a page carries to acknowledge an
+	// alarm from the notification (#715, acklink.go): on a pair, under a
+	// key both members derive from the peer token (internal/pairkey), so
+	// a link minted by one acks on the other. Nil: no links are minted,
+	// and /alarm-ack/ answers that this controller sends none.
+	AckLinks *acklink.Keyring
+	// AckURL is alarms.oncall.ack-url, the HMI as a person paged reaches
+	// it: the base of every link. "" mints none.
+	AckURL string
+	// AckLinkSignIn is alarms.oncall.ack-from-notification: sign-in: a
+	// link acknowledges only for a browser signed in as the person it was
+	// sent to. False (the default): the link alone acknowledges.
+	AckLinkSignIn bool
+	// Inbound takes acknowledgements back through the SMS and voice
+	// provider: an SMS reply's code, a call's keypress (#715, inbound.go).
+	// Nil: /alarm-inbound/ answers that this controller takes none.
+	Inbound *Inbound
+
+	// Audit is the runtime audit journal (#709): every write route records
+	// one entry per request to it, accepted or refused, before the client
+	// is answered (server/audit.go). naut run gives it the file journal
+	// (audit.OpenFile). Nil keeps entries in memory only. Either way the
+	// last 1000 are kept in a ring that GET /api/audit serves.
+	Audit audit.Recorder
+
+	// AuditUnavailable is why the journal the project configures could not
+	// be opened (naut run sets it when audit.OpenFile fails, with Audit
+	// nil). The server then runs with the entries in memory only, and says
+	// so on the drivers block (/api/drivers, /api/state, the live frames)
+	// until it restarts; strict actions (forces, program changes) are
+	// refused meanwhile (#709, design §6 question 5).
+	AuditUnavailable error
+
+	// AuditCopy reports the journal's copy elsewhere (audit.sink:
+	// postgres, #709 PR 9), shown as its own card on the drivers block;
+	// nil when there is none.
+	AuditCopy func() audit.CopyStatus
+
+	// Auth is the manifest's compiled auth: block (#708): who may do what.
+	// Nil keeps the write rule of before it existed (AuthToken when set,
+	// else a same-origin request). With it, every write route asks the
+	// policy (authorize), NAUTILUS_TOKEN is the principal "token" with the
+	// block's token-role, and GET /api/audit needs the audit permission.
+	// Every read needs the read permission (readgate.go): every GET under
+	// /api/, and a page a browser opens, which goes to /signin without a
+	// session. Users with a users file sign in by browser (signin.go).
+	Auth *auth.Policy
+
+	// ServiceTokens are the service tokens' secrets, by name (naut run
+	// reads each from NAUTILUS_TOKEN_<NAME>). A request presenting one acts
+	// as "token:<name>", with the grants the auth: block gives it.
+	ServiceTokens map[string]string
+
+	// LeaderURLs are a redundant pair's controllers as a browser reaches
+	// them, by node name (redundancy.public-urls: {a: https://…, b: …}). A
+	// standby refers a signed-in browser to the leader's; without one it
+	// names no address (a peer address must never reach a browser).
+	LeaderURLs map[string]string
+
+	// OIDC signs browsers in at the auth: block's OpenID Connect provider
+	// (#708 PR 6, oidc.go): naut run hands it auth/oidc's client. It needs
+	// Auth with auth.oidc and Users (the pins and sign-outs live beside the
+	// users file); without them it is ignored. OIDCRedirectURL is
+	// auth.oidc.redirect-url: "" derives the redirect URI from a trusted
+	// Host.
+	// The seam's type is internal (internal/oidcseam): not stable Go API
+	// while #708 is open.
+	OIDC            oidcseam.Provider
+	OIDCRedirectURL string
+
+	// Users is the controller's users file (#708): a personal access token
+	// it holds is a credential acting as "user:<name>", with the grants
+	// the auth: block gives that user. Each change to the file is
+	// journalled (users.change). Run re-reads it once a second.
+	Users *users.Store
 
 	// OnlineEdits enables the program endpoints (PUT /api/program, POST
 	// /api/program/rollback) — PLC-style online edits of the running ST
@@ -276,6 +414,42 @@ type Options struct {
 	// live in one place; nil disables activation while leaving the history
 	// readable.
 	SourcesAt func(sha string) (map[string]string, error)
+
+	// IO, when set, serves the live I/O configuration routes (/api/io*,
+	// ioconfig.go) and puts the config block (what runs against the
+	// manifest) on every full frame. naut run wires the project loader's
+	// IOConfig into it.
+	IO *IOHook
+
+	// Params, when set, serves the IO-Link device parameter routes
+	// (/api/iolink/{port}/params*, params.go, #705): reads of the
+	// parameters of the device on a port, and writes of them through its
+	// master. naut run wires the project's port devices into it.
+	Params *ParamHook
+	// ParamWriteBack is how operator-tuned setpoints get back to the repo
+	// (#718 slice 2); nil is mode off.
+	ParamWriteBack *ParamWriteBack
+
+	// Push turns Web Push on (#722); nil leaves /api/push/* answering 404.
+	Push *PushOptions
+
+	// Notes is the operator notes and shift log (#720) of a controller on
+	// its own: a file. NotesLog, on a redundant pair, is the replicated
+	// log's index and takes its place. Neither: /api/notes answers 404.
+	Notes    *notes.Store
+	NotesLog *NotesLog
+	// Mounts are extra groups of routes (mount.go), added after the core routes
+	// and after the controller's own (mounts_controller.go), which New installs
+	// itself; NewPlayground installs none of those. FrameHooks add blocks to every frame; ShownPermissions are
+	// permissions /api/me lists that it otherwise leaves out (a feature the
+	// project did not turn on shows nothing new anywhere). A feature's own
+	// Install sets all three (CheckoutOptions.Install, #719).
+	Mounts           []Mount
+	FrameHooks       []FrameHook
+	ShownPermissions []string
+	// SessionLog, on a redundant pair, carries browser sessions through the
+	// pair's operator log so they survive a takeover (#716).
+	SessionLog *SessionLog
 
 	// HMI, when set, serves a built HMI — a SvelteKit `adapter-static`
 	// build, or any other static SPA bundle — at "/", so the controller is
@@ -359,6 +533,9 @@ type DriverStatus struct {
 	Metrics   []DriverMetric `json:"metrics,omitempty"` // labeled scalar readouts
 	Devices   []DriverDevice `json:"devices,omitempty"` // sub-devices (Sparkplug devices, etc.)
 	Extra     map[string]any `json:"extra,omitempty"`   // protocol-specific structured fields
+	// Differs is set while this driver runs an I/O configuration applied live
+	// that is not the manifest's (#706): the dashboard badges the row.
+	Differs bool `json:"differs,omitempty"`
 
 	// AsOfMs is when this status was OBSERVED, stamped by the server. On a
 	// delta stream the block may be several seconds older than the frame
@@ -421,16 +598,49 @@ type Server struct {
 	rt          *runtime.Runtime
 	interval    time.Duration
 	authToken   string
+	policy      *auth.Policy      // Options.Auth; nil without an auth: block
+	services    map[string]string // service token name (lowercased) → secret
+	allowHosts  map[string]bool
 	onlineEdits bool
 	drivers     func() []DriverStatus
+	auditCopy   func() audit.CopyStatus
 	cluster     interface{ Status() leader.Status }
 	historian   string
 	historyFn   func() *ProgramHistory
 	sourcesAt   func(sha string) (map[string]string, error)
+	paramWB     *ParamWriteBack // parameter write-back (#718); nil: off
+	push        *pushService    // Web Push subscriptions (push.go); nil: off
+	notes       *notes.Store    // operator notes, standing alone (notes.go)
+	notesLog    *NotesLog       // a pair's notes (notes.go)
+	mounts      []Mount
+	frameHooks  []FrameHook
+	shown       map[string]bool  // permissions /api/me lists beyond the core's
+	noteClock   func() time.Time // tests
+	pushKey     string           // its VAPID public key
+	io          *IOHook          // live I/O configuration (ioconfig.go); nil: none
+	params      *ParamHook       // IO-Link device parameters (params.go); nil: none
+	staging     ioStaging        // its staged candidates
 	hmi         fs.FS
 	alarms      *alarm.Engine
 	shelveTimes []time.Duration
 	tagWriter   func(name string, value any) error
+	subRules    []SubstituteRule // Options.Substitutes
+	subLog      *SubstituteLog   // Options.SubstituteLog
+	alarmLog    *AlarmLog        // Options.AlarmLog
+	// ack links (#715, acklink.go): Options.AckLinks, AckURL, AckLinkSignIn
+	ackLinks      *acklink.Keyring
+	ackURL        string
+	ackLinkSignIn bool
+	links         linkBook
+	// inbound SMS and voice acknowledgements (#715, inbound.go)
+	inbound      *Inbound
+	inboundTries tries
+	// inboundReplies counts the refusals texted to each person;
+	// inboundAll the wrong codes from anyone, over a day.
+	inboundReplies tries
+	inboundAll     tries
+	unknowns       *unknowns // proposals answered "outcome unknown", for their resolution (oplog_unknown.go)
+	audit          *auditor
 
 	resync time.Duration
 	diag   time.Duration
@@ -466,10 +676,81 @@ type Server struct {
 	tagMu   sync.Mutex
 	tagGen  uint64
 	tagSnap map[string]any
+
+	users      *users.Store
+	leaderURLs map[string]string // Options.LeaderURLs
+	sessions   *sessions         // browser sign-ins; nil without users to sign in
+	signin     *signInGate
+	// oidc is the OIDC provider's seam, nil without OIDC sign-in; the
+	// flows under way and the configured redirect URI go with it.
+	oidc         oidcseam.Provider
+	oidcFlows    *oidcFlows
+	oidcTickets  *oidcTickets
+	oidcRedirect string
+
+	// unforceAllChecked, when set (tests only), runs between clear-all's
+	// check of the forced tags and its clearing of them.
+	unforceAllChecked func()
+
+	tls *CertSource
+	// leaderTLS forwards to the leader over TLS, pinned. An interface for the
+	// same reason as pushService.sender: a concrete *http.Transport in Server's
+	// fields keeps its methods, and crypto/tls with them, in the wasm.
+	leaderTLS leaderTransport
+	// leaderPlain forwards to the leader over plain HTTP, with the same
+	// deadlines (withLeaderDeadlines). Set by New, nil under NewPlayground;
+	// an interface for the reason leaderTLS is one.
+	leaderPlain leaderTransport
+	// tlsPin is the leaf last said served (noteTLSChange).
+	tlsMu     sync.Mutex
+	tlsPin    [32]byte
+	proxies   []netip.Prefix
+	pinMu     sync.Mutex
+	pinRefuse bool // a pin mismatch is journalled (once, until a forward succeeds)
+
+	// pages renders the HTML pages (pages.go): set by New, nil under
+	// NewPlayground.
+	pages pageSet
+	// standby wraps the routes so a standby replica forwards to the leader
+	// (proxyStandby): set by New, nil under NewPlayground, which has no
+	// cluster, so the forwarding code and its reverse proxy stay out of the
+	// browser build.
+	standby func(routes *http.ServeMux, next http.Handler) http.Handler
 }
 
-// New builds a Server over a runtime.
+// New builds a controller's Server over a runtime: every route, and the
+// HTML pages (sign-in, the OIDC hop, a refused confirmation, an alarm's
+// ack link) a browser is sent to.
 func New(rt *runtime.Runtime, opts ...Options) *Server {
+	s := newServer(rt, opts...)
+	s.pages = controllerPages()
+	// the controller's routes, then any the caller lists (mounts_controller.go)
+	s.mounts = append(controllerMounts(), s.mounts...)
+	if len(opts) > 0 && opts[0].TLS != nil {
+		s.wireTLS(opts[0].TLS)
+	}
+	if len(opts) > 0 {
+		s.wirePush(rt, opts[0].Push)
+	}
+	s.standby = s.proxyStandby
+	s.leaderPlain = withLeaderDeadlines(http.DefaultTransport.(*http.Transport).Clone())
+	return s
+}
+
+// NewPlayground is New without the HTML pages and without the controller-only
+// route groups (mounts_controller.go: sign-in and OIDC, push, ack links, the
+// pair's commands, the disk-facing I/O and config routes, IO-Link, the
+// historian), for the browser playground (cmd/naut-wasm) only. Not for a
+// controller: there nobody could sign in, acknowledge from a link or stage a
+// change. The playground has no users, OIDC, ack links, files or redundant
+// pair, and leaving these out keeps the template engine (about 900 KB) and
+// their handlers out of its download (pages.go, mounts_controller.go); a
+// request for one is the API's JSON 404.
+func NewPlayground(rt *runtime.Runtime, opts ...Options) *Server {
+	return newServer(rt, opts...)
+}
+
+func newServer(rt *runtime.Runtime, opts ...Options) *Server {
 	interval := 250 * time.Millisecond
 	resync := defaultResync
 	diag := defaultDiagnostics
@@ -489,28 +770,116 @@ func New(rt *runtime.Runtime, opts ...Options) *Server {
 		onlineEdits = opts[0].OnlineEdits
 	}
 	s := &Server{
+		inboundAll:  tries{window: inboundAllWindow},
 		rt:          rt,
 		interval:    interval,
 		resync:      resync,
 		diag:        diag,
 		authToken:   token,
+		allowHosts:  map[string]bool{},
 		onlineEdits: onlineEdits,
 		clients:     map[*client]struct{}{},
 	}
+	var configured []string
+	if len(opts) > 0 {
+		configured = opts[0].AllowedHosts
+	}
+	// NAUTILUS_ALLOWED_HOSTS applies to every embedder (naut run, the
+	// serve commands, an SDK program), so the setting a 403 names always
+	// takes effect.
+	s.allowHosts = allowedHostSet(configured)
 	if len(opts) > 0 {
 		s.drivers = opts[0].Drivers
+		s.auditCopy = opts[0].AuditCopy
 		s.cluster = opts[0].Cluster
 		s.historian = opts[0].HistorianURL
 		s.historyFn = opts[0].History
 		s.sourcesAt = opts[0].SourcesAt
+		s.io = opts[0].IO
+		s.paramWB = opts[0].ParamWriteBack
+		s.params = opts[0].Params
 		s.hmi = opts[0].HMI
 		s.alarms = opts[0].Alarms
 		s.shelveTimes = opts[0].AlarmShelveTimes
 		s.tagWriter = opts[0].TagWriter
+		s.subRules = opts[0].Substitutes
+		s.subLog = opts[0].SubstituteLog
+		s.alarmLog = opts[0].AlarmLog
+		s.ackLinks, s.ackURL, s.ackLinkSignIn = opts[0].AckLinks, opts[0].AckURL, opts[0].AckLinkSignIn
+		s.inbound = opts[0].Inbound
+		s.notes, s.notesLog = opts[0].Notes, opts[0].NotesLog
+		s.mounts, s.frameHooks = opts[0].Mounts, opts[0].FrameHooks
+		if len(opts[0].ShownPermissions) > 0 {
+			s.shown = map[string]bool{}
+			for _, p := range opts[0].ShownPermissions {
+				s.shown[p] = true
+			}
+		}
+	}
+	var rec audit.Recorder
+	var unavailable error
+	if len(opts) > 0 {
+		rec, unavailable = opts[0].Audit, opts[0].AuditUnavailable
+	}
+	s.audit = newAuditor(rec)
+	s.unknowns = newUnknowns(s.audit.record)
+	if s.io != nil && s.io.OnRevert != nil {
+		s.io.OnRevert(s.recordIORevert)
+	}
+	// The logs tell this server what they apply that it proposed, so an
+	// "outcome unknown" is resolved on evidence, and an alarm lapse is
+	// journalled (oplog_unknown.go, alarms_oplog.go).
+	if s.subLog != nil {
+		s.subLog.observe(s.unknowns.applied)
+	}
+	if s.alarmLog != nil {
+		s.alarmLog.observe(s.unknowns.applied, s.audit.recordBatch)
+	}
+	if s.notesLog != nil {
+		s.notesLog.observe(s.unknowns.applied)
+	}
+	if len(opts) > 0 {
+		s.policy = opts[0].Auth
+		s.proxies = opts[0].TrustedProxies
+		s.leaderURLs = opts[0].LeaderURLs
+		for name, secret := range opts[0].ServiceTokens {
+			if secret == "" {
+				continue // an empty secret must never match an empty credential
+			}
+			if s.services == nil {
+				s.services = map[string]string{}
+			}
+			s.services[strings.ToLower(name)] = secret
+		}
+		if u := opts[0].Users; u != nil {
+			s.users = u
+			if s.policy != nil {
+				s.sessions = newSessions(s.policy.Session())
+				s.sessions.OnEnd(s.endSessionStreams)
+				if sl := opts[0].SessionLog; sl != nil {
+					sl.bind(s.sessions)
+					sl.OnLocal(s.journalLocalSession)
+				}
+				s.signin = newSignInGate()
+				if opts[0].OIDC != nil && s.policy.OIDC() {
+					s.oidc, s.oidcFlows, s.oidcTickets, s.oidcRedirect = opts[0].OIDC, newOIDCFlows(), newOIDCTickets(), opts[0].OIDCRedirectURL
+				}
+			}
+			u.OnChange(s.journalUsersChange)
+			u.OnHealth(s.journalUsersHealth)
+			// What changed while the controller was stopped.
+			u.CatchUp()
+		}
+	}
+	if unavailable != nil {
+		s.audit.unavailable = unavailable.Error()
 	}
 	if len(s.shelveTimes) == 0 {
 		s.shelveTimes = alarm.DefaultShelveTimes
 	}
+	// An expiry has no request to journal it: the server hears it from
+	// the runtime and records it (substitute.expire, by system).
+	rt.OnSubstituteEvent(s.auditSubstituteEvent)
 	return s
 }
 
@@ -519,12 +888,32 @@ func New(rt *runtime.Runtime, opts ...Options) *Server {
 func (s *Server) Run(ctx context.Context) {
 	t := time.NewTicker(s.interval)
 	defer t.Stop()
+	// The audit journal's upkeep (entries kept while it could not be
+	// written, the summaries of closed refusal windows) runs beside the
+	// broadcast loop, not in it: a journal catching up fsyncs its backlog,
+	// and the live frames must not wait on the disk. Run returns once it
+	// has flushed.
+	upkept := make(chan struct{})
+	go func() {
+		defer close(upkept)
+		s.audit.upkeep(ctx)
+	}()
+	if s.users != nil {
+		go s.users.Run(ctx)
+	}
+	if s.push != nil {
+		go s.push.run(ctx)
+	}
+	defer func() { <-upkept }()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 			s.broadcast()
+			if _, ok := s.standbyLeader(); ok {
+				s.endSessionsAsStandby()
+			}
 		}
 	}
 }
@@ -561,7 +950,11 @@ func (s *Server) frame(pats []string) Frame {
 		Drivers: s.driverStatus(now),
 		Forces:  s.rt.Tags().ForcedValues(),
 	}
+	for _, h := range s.frameHooks {
+		h(s, &f)
+	}
 	f.Alarms = s.alarmSummary()
+	f.Config = s.ioConfigState()
 	return f
 }
 
@@ -571,10 +964,19 @@ func (s *Server) frame(pats []string) Frame {
 // see DriverStatus.AsOfMs, and hashDrivers for why the stamp is excluded
 // from the block's change comparison.
 func (s *Server) driverStatus(now time.Time) []DriverStatus {
-	if s.drivers == nil {
+	var ds []DriverStatus
+	if s.drivers != nil {
+		ds = s.drivers()
+	}
+	if j := s.audit.status(); j != nil {
+		ds = append(ds, *j)
+	}
+	if s.auditCopy != nil {
+		ds = append(ds, copyCard(s.auditCopy()))
+	}
+	if ds == nil {
 		return nil
 	}
-	ds := s.drivers()
 	ms := now.UnixMilli()
 	for i := range ds {
 		if ds[i].AsOfMs == 0 {
@@ -589,32 +991,49 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/state", s.handleState)
 	mux.HandleFunc("GET /api/meta", s.handleMeta)
+	mux.HandleFunc("GET /api/parameters", s.handleParameters)
+	mux.HandleFunc("GET /api/parameters/patch", s.handleParametersPatch)
+	mux.HandleFunc("GET /api/notes", s.handleNotesList)
+	mux.HandleFunc("GET /api/notes/counts", s.handleNotesCounts)
+	mux.HandleFunc("GET /api/notes/{id}", s.handleNoteGet)
+	mux.Handle("POST /api/notes", s.audited("note.add", noteAddTarget, s.handleNoteAdd))
+	mux.Handle("POST /api/notes/{id}/revise", s.audited("note.revise", noteChangeTarget, s.handleNoteRevise))
+	mux.Handle("POST /api/notes/{id}/retract", s.audited("note.retract", noteChangeTarget, s.handleNoteRetract))
 	mux.HandleFunc("GET /api/drivers", s.handleDrivers)
 	// Alarms: always registered, 404 when no engine — see server/alarms.go.
 	// Registering them unconditionally is what makes "this controller has
 	// no alarm engine" a message rather than a bare route-not-found.
 	mux.HandleFunc("GET /api/alarms", s.handleAlarms)
 	mux.HandleFunc("GET /api/alarms/journal", s.handleAlarmJournal)
-	mux.HandleFunc("POST /api/alarms/ack", s.handleAlarmAck)
-	mux.HandleFunc("POST /api/alarms/shelve", s.handleAlarmShelve)
-	mux.HandleFunc("POST /api/alarms/unshelve", s.handleAlarmUnshelve)
+	mux.HandleFunc("GET /api/alarms/chatter", s.handleAlarmChatterAdvice)
+	mux.Handle("POST /api/alarms/ack", s.audited("alarm.ack", ackTarget, s.handleAlarmAck))
+	mux.Handle("POST /api/alarms/shelve", s.audited("alarm.shelve", shelveTarget, s.handleAlarmShelve))
+	mux.Handle("POST /api/alarms/unshelve", s.audited("alarm.unshelve", unshelveTarget, s.handleAlarmUnshelve))
+	// Equipment out of service (#715 PR 5): its alarms suppressed until a
+	// deadline, a week at most, with a reason; back in service ends it.
+	mux.HandleFunc("GET /api/alarms/out-of-service", s.handleOutOfServiceList)
+	mux.Handle("POST /api/alarms/out-of-service", s.audited("alarm.out-of-service", oosTarget, s.handleOutOfService))
+	mux.Handle("POST /api/alarms/in-service", s.audited("alarm.in-service", inServiceTarget, s.handleInService))
 	mux.HandleFunc("GET /api/stream", s.handleStream)
-	mux.HandleFunc("POST /api/tags", s.handleWriteTag)
+	mux.Handle("POST /api/tags", s.audited("tag.write", s.tagTarget, s.handleWriteTag))
 	mux.HandleFunc("GET /api/program", s.handleGetProgram)
-	mux.HandleFunc("PUT /api/program", s.handlePutProgram)
-	mux.HandleFunc("POST /api/program/rollback", s.handleRollback)
-	mux.HandleFunc("GET /api/program/history", s.handleProgramHistory)
-	mux.HandleFunc("POST /api/program/activate", s.handleActivate)
+	mux.Handle("PUT /api/program", s.audited("program.edit", s.programTarget, s.handlePutProgram))
+	mux.Handle("POST /api/program/rollback", s.audited("program.rollback", s.rollbackTarget, s.handleRollback))
+	mux.HandleFunc("GET /api/config/schema", s.handleConfigSchema)
 	mux.HandleFunc("GET /api/forces", s.handleForces)
-	mux.HandleFunc("POST /api/forces", s.handleForce)
-	mux.HandleFunc("POST /api/forces/clear", s.handleUnforceAll)
-	mux.HandleFunc("DELETE /api/forces/{name}", s.handleUnforce)
+	mux.HandleFunc("GET /api/substitutes", s.handleSubstitutes)
+	mux.Handle("POST /api/substitutes", s.audited("substitute.start", s.substituteStartTarget, s.handleSubstituteStart))
+	mux.Handle("DELETE /api/substitutes/{id}", s.audited("substitute.stop", s.substituteStopTarget, s.handleSubstituteStop))
+	mux.Handle("POST /api/substitutes/ack", s.audited("substitute.ack", s.substituteAckTarget, s.handleSubstituteAck))
+	mux.Handle("POST /api/forces", s.audited("force.set", s.forceTarget, s.handleForce))
+	mux.Handle("POST /api/forces/clear", s.audited("force.clear-all", s.unforceAllTarget, s.handleUnforceAll))
+	mux.Handle("DELETE /api/forces/{name}", s.audited("force.clear", s.unforceTarget, s.handleUnforce))
 	mux.HandleFunc("GET /api/sfc", s.handleSFC)
-	mux.HandleFunc("POST /api/sfc/step", s.handleSFCStep)
-	mux.HandleFunc("POST /api/sfc/transition", s.handleSFCTransition)
+	mux.Handle("POST /api/sfc/step", s.audited("sfc.step", sfcTarget(true), s.handleSFCStep))
+	mux.Handle("POST /api/sfc/transition", s.audited("sfc.transition", sfcTarget(false), s.handleSFCTransition))
 	mux.HandleFunc("GET /api/cluster", s.handleCluster)
-	mux.HandleFunc("GET /api/history", s.handleHistory)
-	mux.HandleFunc("GET /api/history/", s.handleHistory)
+	mux.HandleFunc("GET /api/audit", s.handleAudit)
+	mux.HandleFunc("GET /api/me", s.handleMe)
 	if s.hmi != nil {
 		// The HMI owns "/" (and whatever paths its own build wants under
 		// it, "/assets/" included); the built-in dashboard moves out of
@@ -627,7 +1046,14 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("GET /assets/", handleAsset)
 		mux.HandleFunc("GET /", s.handleIndex)
 	}
-	return withCORS(s.proxyStandby(apiNotFound(mux)))
+	for _, m := range s.mounts {
+		m(s, mux)
+	}
+	var h http.Handler = apiNotFound(mux)
+	if s.standby != nil {
+		h = s.standby(mux, h)
+	}
+	return s.GuardHost(s.withCORS(h))
 }
 
 // apiNotFound makes every /api/ path no API route matches a JSON 404,
@@ -645,6 +1071,46 @@ func apiNotFound(mux *http.ServeMux) http.Handler {
 			}
 		}
 		mux.ServeHTTP(w, r)
+	})
+}
+
+// wirePush starts Web Push when the controller has a VAPID key (#722). Only
+// New calls it, so the sender and its HTTP client stay out of the browser
+// build; the push routes are mounted only by New as well (mountPush).
+func (s *Server) wirePush(rt *runtime.Runtime, po *PushOptions) {
+	if po == nil || po.Key == nil {
+		return
+	}
+	ps, err := newPushService(s, po)
+	if err != nil {
+		slog.Error("push: not started", "error", err)
+		return
+	}
+	s.push, s.pushKey = ps, po.Key.Public()
+	rt.SetPush(ps)
+}
+
+// leaderTransport is the transport a standby forwards with.
+type leaderTransport interface {
+	http.RoundTripper
+	CloseIdleConnections()
+}
+
+// wireTLS puts the controller's certificate source in service: the leader
+// transport a standby dials with, and the journal entries for a reload or a
+// change of the leaf. Only New calls it (NewPlayground serves no TLS and no
+// standby), which keeps crypto/tls, HTTP/2 and the client transport out of
+// the browser build.
+func (s *Server) wireTLS(c *CertSource) {
+	s.tls, s.leaderTLS = c, c.leaderTransport()
+	c.OnReload(s.journalTLSReload)
+	s.tlsPin, _ = c.current()
+	// A connection to the leader was verified against the leaves
+	// accepted then; when they change, make it again. A change of
+	// the leaf served is said and journalled (tls.changed).
+	c.OnPinsChange(func() {
+		s.leaderTLS.CloseIdleConnections()
+		s.noteTLSChange()
 	})
 }
 
@@ -667,19 +1133,88 @@ func apiNotFound(mux *http.ServeMux) http.Handler {
 // /api/history*: the archive lives in the historian, not the tag store,
 // so a standby answers it as well as the leader and keeps answering it
 // mid-failover.
-func (s *Server) proxyStandby(mux http.Handler) http.Handler {
+//
+// A write the standby answers itself (the closed-gate 503, a body it
+// cannot read, a leader that failed or never answered: 502) is journalled
+// through the route's audit seam, as the leader journals one it serves.
+func (s *Server) proxyStandby(routes *http.ServeMux, mux http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.cluster == nil {
 			mux.ServeHTTP(w, r)
 			return
 		}
-		if !strings.HasPrefix(r.URL.Path, "/api/") ||
+		// An ack link (#715) acts on the leader's alarms, as an API write
+		// does: a standby forwards it (the leader checks it with the same
+		// pair-derived key), and never answers it from its own engine.
+		link := strings.HasPrefix(r.URL.Path, acklink.Path) && !mutServer("link_not_forwarded")
+		// So does a provider's inbound reply or keypress: it carries its
+		// signature, which the leader checks against the same configured
+		// URL.
+		inbound := strings.HasPrefix(r.URL.Path, InboundPath) && !mutServer("inbound_not_forwarded")
+		// Answered as the provider's only on its two routes; anything else
+		// under the prefix is a plain answer.
+		inboundRoute := r.Method == http.MethodPost && (r.URL.Path == InboundSMSPath ||
+			(strings.HasPrefix(r.URL.Path, InboundVoicePath) && len(r.URL.Path) > len(InboundVoicePath) && !strings.Contains(r.URL.Path[len(InboundVoicePath):], "/")))
+		link = link || inbound
+		if (!strings.HasPrefix(r.URL.Path, "/api/") && !link) ||
 			r.URL.Path == "/api/cluster" ||
+			// The pair's operator commands act on this controller and its
+			// members, never on the leader's tag store, and are needed
+			// exactly when nobody leads (#1029 3c-3a).
+			(localClusterOps[r.URL.Path] && !mutServer("cluster_ops_proxied")) ||
 			strings.HasPrefix(r.URL.Path, "/api/history") {
 			mux.ServeHTTP(w, r)
 			return
 		}
 		st := s.cluster.Status()
+		if link && (noLeaderKnown(st) || heldHere(st)) {
+			// Nobody here can act on the alarm: say so on the page, for a
+			// GET too (this store's engine does not scan).
+			const msg = "No controller is leading right now, so the alarm cannot be acknowledged from here. Try the link again in a minute, or open the HMI."
+			if inbound && inboundRoute {
+				auditedAnswer(routes, w, r, func(w http.ResponseWriter, _ *http.Request) {
+					// A call hears why; an SMS gets nothing back: this
+					// replica has not checked the sender, and a reply would
+					// go to whatever number the request names.
+					kind, reply := "sms", ""
+					if strings.HasPrefix(r.URL.Path, InboundVoicePath) {
+						kind, reply = "voice", "Not acknowledged: no controller is leading right now. Try again in a minute, or open the HMI."
+					}
+					s.inboundRefused(w, kind, http.StatusServiceUnavailable, "no controller is leading", reply, true)
+				})
+				return
+			}
+			if inbound {
+				http.Error(w, "no controller is leading", http.StatusServiceUnavailable)
+				return
+			}
+			if r.Method == http.MethodPost {
+				auditedAnswer(routes, w, r, func(w http.ResponseWriter, _ *http.Request) {
+					s.linkRefused(w, http.StatusServiceUnavailable, msg)
+				})
+				return
+			}
+			s.linkPage(w, http.StatusServiceUnavailable, linkPageData{Title: "Not acknowledged", Error: msg})
+			return
+		}
+		if noLeaderKnown(st) {
+			// A redundant pair's standby that knows no leader (an election
+			// under way, the leader gone, a pair not yet commissioned): a
+			// write here would land in a store that does not scan, so it
+			// is refused, as a lease holder with its gate closed refuses
+			// one (#621). Reads are answered from this store, and so is a
+			// sign-out (it only revokes; sign-in waits for the election).
+			if r.Method == http.MethodGet || r.Method == http.MethodHead || r.URL.Path == "/api/signout" {
+				mux.ServeHTTP(w, r)
+				return
+			}
+			auditedAnswer(routes, w, r, func(w http.ResponseWriter, _ *http.Request) {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+					"error": "no leader: this controller is standing by and no leader is known (an election is under way, or the pair cannot elect); try again shortly",
+				})
+			})
+			return
+		}
 		if st.IsLeader || st.LeaderAddr == "" {
 			// We're the leader, or nobody's address is known yet (a fresh
 			// cluster still electing, or a standalone-mode elector that never
@@ -693,14 +1228,34 @@ func (s *Server) proxyStandby(mux http.Handler) http.Handler {
 			// scans are not completing, #621): the leader's address is our
 			// own, and forwarding would send the request back here, again
 			// and again. Reads are answered from this store; a write is
-			// refused, since nothing here scans it.
-			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			// refused, since nothing here scans it. A sign-out is
+			// answered: the sessions are this box's.
+			if r.Method == http.MethodGet || r.Method == http.MethodHead || r.URL.Path == "/api/signout" {
 				mux.ServeHTTP(w, r)
 				return
 			}
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-				"error": "this replica holds the lease but its write gate is closed (its scans are not completing); try again shortly",
+			auditedAnswer(routes, w, r, func(w http.ResponseWriter, _ *http.Request) {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+					"error": "this replica holds the lease but its write gate is closed (its scans are not completing); try again shortly",
+				})
 			})
+			return
+		}
+		// Sign-in, sign-out and /api/me are decided at the box the client
+		// reached, never forwarded: secure() at the leader would judge the
+		// standby's hop, not the client's (#1043 review). Sessions live on
+		// the leader (#708 decision (c)), so a sign-in here, a sign-out
+		// (only the leader can revoke the session) and any request with
+		// the sign-in cookie and no bearer credential are referred to it.
+		s.endSessionsAsStandby()
+		if standbyRefers(r) && !link {
+			auditedAnswer(routes, w, r, func(w http.ResponseWriter, _ *http.Request) {
+				s.referToLeader(w, s.leaderURLs[st.Leader])
+			})
+			return
+		}
+		if r.URL.Path == "/api/me" {
+			mux.ServeHTTP(w, r)
 			return
 		}
 		// The body is kept so a request the leader never received can be
@@ -710,24 +1265,104 @@ func (s *Server) proxyStandby(mux http.Handler) http.Handler {
 		if r.Body != nil && r.Body != http.NoBody {
 			b, err := io.ReadAll(io.LimitReader(r.Body, maxReplayBody+1))
 			if err != nil {
-				http.Error(w, "reading request: "+err.Error(), http.StatusBadRequest)
+				auditedAnswer(routes, w, r, func(w http.ResponseWriter, _ *http.Request) {
+					http.Error(w, "reading request: "+err.Error(), http.StatusBadRequest)
+				})
 				return
 			}
 			if len(b) > maxReplayBody {
 				r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(b), r.Body))
-				s.forwardTo(w, r, st.LeaderAddr, mux, nil, false)
+				s.forwardTo(w, r, st.LeaderAddr, routes, mux, nil, false)
 				return
 			}
 			body = b
 		}
-		s.forwardTo(w, r, st.LeaderAddr, mux, body, true)
+		s.forwardTo(w, r, st.LeaderAddr, routes, mux, body, true)
 	})
+}
+
+// standbyRefers reports a request a forwarding standby answers with the
+// leader's address: sign-in, sign-out, and anything sent with the sign-in
+// cookie and no bearer credential. The standby holds no sessions, so it
+// goes by the cookie being there, valid or not.
+func standbyRefers(r *http.Request) bool {
+	switch r.URL.Path {
+	case "/api/signin", "/api/signout", "/api/elevate", oidcStartPath, oidcCallbackPath, oidcElevatedPath:
+		return true
+	}
+	return hasSessionCookie(r) && presentedToken(r) == ""
+}
+
+// referToLeader is a forwarding standby's answer to a browser session's
+// request: 503, and the leader's configured public URL (Location and
+// "leader") for the HMI kit to follow. Never the peer address: that is
+// for the pair (leader.Status keeps it out of JSON), and this answer goes
+// to anyone. Without a configured URL, the 503 names none. The cookie is
+// left as it is: only the leader can end the session it names.
+func (s *Server) referToLeader(w http.ResponseWriter, leader string) {
+	w.Header().Set("Cache-Control", "no-store")
+	// standby is the field a page keys on (the HMI kit follows it to
+	// leader); the error text is for a person.
+	body := map[string]any{"error": "this controller is the standby; open the leader (browser sign-ins live on the leader)", "standby": true}
+	if leader != "" {
+		w.Header().Set("Location", leader+"/")
+		body["leader"] = leader
+	}
+	writeJSON(w, http.StatusServiceUnavailable, body)
+}
+
+// endSessionsAsStandby ends the browser sessions this controller issued
+// while it led, once it is a standby that forwards to another leader:
+// sessions live on the leader, and one kept here would act again if this
+// box led again (a failover signs browser users out), where a sign-out at
+// the leader in between could not have revoked it. Run checks at every
+// tick; a forwarded request checks too.
+func (s *Server) endSessionsAsStandby() {
+	if s.sessions == nil {
+		return
+	}
+	if n := s.sessions.endAll(); n > 0 {
+		slog.Info("auth: this controller is now a standby; its browser sessions are ended", "sessions", n)
+		s.audit.record(audit.Entry{User: "system", Source: audit.SourceSystem, Action: "auth.sessions-ended",
+			Detail: map[string]any{"reason": "this controller is now a standby: browser sessions live on the leader", "sessions": n},
+			Result: audit.ResultOK})
+	}
+}
+
+// journalLocalSession records a sign-in the operator log did not commit: it
+// is valid on this controller only until the log comes back (#716).
+func (s *Server) journalLocalSession(se session) {
+	slog.Warn("auth: a session stays local to this controller: the operator log did not commit it; it is replicated when the log returns", "user", se.key())
+	s.audit.record(audit.Entry{User: se.key(), Source: audit.SourceSystem, Action: "auth.session-local",
+		Detail: map[string]any{"session": se.hash, "reason": "the operator log did not commit the sign-in: the session is valid on this controller only until it does"},
+		Result: audit.ResultOK})
+}
+
+// standbyLeader reports whether this controller is a standby that
+// forwards to a leader, and that leader's configured public URL ("" when
+// none is).
+func (s *Server) standbyLeader() (string, bool) {
+	if s.cluster == nil {
+		return "", false
+	}
+	st := s.cluster.Status()
+	if st.IsLeader || st.LeaderAddr == "" || noLeaderKnown(st) || heldHere(st) {
+		return "", false
+	}
+	return s.leaderURLs[st.Leader], true
 }
 
 // heldHere reports a replica that the lease names but that is not leading:
 // its gate is closed while it still holds the lease (a hung scan, #621, or
 // a renew older than the lease), so LeaderAddr is its own address. Never a
 // proxy target: that is a request forwarding to itself without end.
+// noLeaderKnown: a redundant pair member (quorum mode) that does not lead
+// and knows no leader. The Kubernetes mode keeps serving locally then: its
+// standalone elector never names a leader address.
+func noLeaderKnown(st leader.Status) bool {
+	return st.Mode == "quorum" && !st.IsLeader && st.LeaderAddr == ""
+}
+
 func heldHere(st leader.Status) bool {
 	return !st.IsLeader && st.Leader != "" && st.Leader == st.Pod
 }
@@ -742,6 +1377,50 @@ const maxReplayBody = 1 << 20
 // answers nothing (#483). Overridable in tests.
 var failoverWait = 10 * time.Second
 
+// The deadlines on a standby's forward to the leader (#710). Without them
+// a leader that accepts the connection and never answers held the request
+// for as long as the client waited, and a dial to a leader whose host is
+// gone took the system's 30 s before failing over.
+//
+// leaderHeaderTimeout bounds the wait for the leader's response headers.
+// It must stay ABOVE the longest wait a leader's own handler makes before
+// it answers. A shorter deadline would turn a write the leader commits
+// late into a 502 at the standby, with the write applied, and hide the
+// leader's own message. Those waits:
+//   - substituteProposeWait, paramTimeout, pushSaveWait: 10 s;
+//   - oidcExchangeTimeout: 15 s;
+//   - an I/O apply (POST /api/io/staged/{id}/apply), whose failure path
+//     adds them up: each driver put back may take undoTimeout (10 s), then
+//     the put-back is saved (putBackWait, 10 s);
+//   - a program download or activation, which compiles, on an ARM box.
+//
+// So 2 minutes: room for a failed I/O apply across several drivers. Don't
+// tighten it without bounding those. It still ends the wait on a leader
+// that took a request and will never answer, which before had none. It
+// bounds only the headers, never the body, so a stream (SSE) runs as long
+// as it likes. Vars for tests.
+var (
+	leaderHeaderTimeout = 2 * time.Minute
+	leaderDialTimeout   = 2 * time.Second
+)
+
+const leaderHandshakeTimeout = 2 * time.Second
+
+// withLeaderDeadlines puts the deadlines above on t, the transport a
+// standby forwards to the leader with (plain or TLS). A dial that times out
+// is a dial error, so a write the leader never received is replayed to the
+// next leader (forwardTo); a leader that never sends its headers is a 502.
+func withLeaderDeadlines(t *http.Transport) *http.Transport {
+	d := &net.Dialer{Timeout: leaderDialTimeout, KeepAlive: 30 * time.Second}
+	t.DialContext = d.DialContext
+	t.TLSHandshakeTimeout = leaderHandshakeTimeout
+	t.ResponseHeaderTimeout = leaderHeaderTimeout
+	if mutServer("leader_headers_unbounded") {
+		t.ResponseHeaderTimeout = 0
+	}
+	return t
+}
+
 // forwardTo reverse-proxies r to the leader at addr. When the leader
 // refuses the connection, the request never reached it, so replaying it
 // cannot apply a write twice: with replay set, the standby waits for the
@@ -749,12 +1428,33 @@ var failoverWait = 10 * time.Second
 // if this replica is the new leader. Any other failure (the leader took
 // the request and then failed) is a 502, as before; replaying that one
 // could repeat a write.
-func (s *Server) forwardTo(w http.ResponseWriter, r *http.Request, addr string, mux http.Handler, body []byte, replay bool) {
+func (s *Server) forwardTo(w http.ResponseWriter, r *http.Request, addr string, routes *http.ServeMux, mux http.Handler, body []byte, replay bool) {
 	if body != nil {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		r.ContentLength = int64(len(body))
 	}
-	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: addr})
+	scheme := "http"
+	if s.leaderTLS != nil {
+		scheme = "https"
+	}
+	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: scheme, Host: addr})
+	direct := proxy.Director
+	proxy.Director = func(out *http.Request) {
+		direct(out)
+		s.forwardHeaders(out)
+	}
+	if s.leaderPlain != nil {
+		proxy.Transport = s.leaderPlain
+	}
+	if s.leaderTLS != nil {
+		proxy.Transport = s.leaderTLS
+		proxy.ModifyResponse = func(*http.Response) error {
+			s.pinMu.Lock()
+			s.pinRefuse = false
+			s.pinMu.Unlock()
+			return nil
+		}
+	}
 	// -1 disables buffering: an SSE frame must reach the client the
 	// instant the leader emits it, not whenever the proxy's timer next
 	// fires.
@@ -770,11 +1470,20 @@ func (s *Server) forwardTo(w http.ResponseWriter, r *http.Request, addr string, 
 					mux.ServeHTTP(w, r)
 					return
 				}
-				s.forwardTo(w, r, next, mux, body, false)
+				s.forwardTo(w, r, next, routes, mux, body, false)
 				return
 			}
 		}
-		http.Error(w, "leader unavailable: "+err.Error(), http.StatusBadGateway)
+		if errors.Is(err, errNotOurCert) {
+			s.journalPinMismatch(addr)
+			auditedAnswer(routes, w, r, func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "leader unavailable: "+errNotOurCert.Error(), http.StatusBadGateway)
+			})
+			return
+		}
+		auditedAnswer(routes, w, r, func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "leader unavailable: "+err.Error(), http.StatusBadGateway)
+		})
 	}
 	proxy.ServeHTTP(w, r)
 }
@@ -807,25 +1516,122 @@ func (s *Server) awaitLeaderChange(ctx context.Context, old string) (addr string
 	}
 }
 
-// withCORS allows browser HMIs served from another origin (e.g. a Vite dev
-// server) to call the API. The controller API carries no credentials, so a
-// wildcard is appropriate; put a real gateway in front for anything exposed
-// beyond the machine/plant network.
-func withCORS(next http.Handler) http.Handler {
+// withCORS lets a browser page on another origin read (and, with a token,
+// write) the API only when that page cannot be someone else's site (#815):
+// a page on this machine (a loopback origin, any port: a dev server), the
+// controller's own host on another port (when that host is one #811
+// trusts), a name in AllowedHosts, or a request that carries the token. It
+// echoes that Origin, with Vary: Origin, and sends nothing for any other,
+// so a website the operator happens to have open cannot read the tags,
+// the alarms, the history or the program source. It once sent "*".
+//
+// A preflight (OPTIONS) reads nothing; with a token configured it is
+// answered for any origin, so an authorized cross-origin client can send
+// its token header, and the real request is then judged as above.
+func (s *Server) withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		// Always: a cache must not hand one origin's answer (with or
+		// without the CORS header) to another.
+		w.Header().Add("Vary", "Origin")
 		if r.Method == http.MethodOptions {
-			// Every method a route below answers: PUT is the online-edit
-			// push (PUT /api/program), DELETE the per-tag unforce.
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			// Allow the auth headers so an authorized cross-origin writer's
-			// preflight succeeds; Content-Type for JSON bodies.
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Nautilus-Token")
-			w.WriteHeader(http.StatusNoContent)
+			s.answerPreflight(w, r)
+			return
+		}
+		s.allowOrigin(w, r)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// allowOrigin sends the CORS answer for r's Origin when a page there may
+// read the API (corsOrigin, or a request carrying a valid credential), and
+// nothing for any other. withCORS sends it for every route; the read gate,
+// which answers before withCORS is reached, sends it on its refusals, so
+// an allowed dev page can read why it was refused instead of a bare
+// network error. The caller has already added Vary: Origin.
+func (s *Server) allowOrigin(w http.ResponseWriter, r *http.Request) {
+	origin := r.Header.Get("Origin")
+	if origin != "" && (s.corsOrigin(r, origin) || s.validCredential(r)) {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		// A page may read whether its action was journalled to disk.
+		w.Header().Set("Access-Control-Expose-Headers", auditJournalHeader)
+	}
+}
+
+// answerPreflight answers an OPTIONS request: 204, no body, and for a
+// trusted origin (any origin when a token is configured) the methods and
+// headers a cross-origin page may use. It never reaches a route.
+func (s *Server) answerPreflight(w http.ResponseWriter, r *http.Request) {
+	if origin := r.Header.Get("Origin"); origin != "" && (s.corsOrigin(r, origin) || s.credentialsConfigured()) {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		// Every method a route below answers: PUT is the online-edit
+		// push (PUT /api/program), DELETE the per-tag unforce.
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		// The auth headers, so an authorized cross-origin writer's
+		// preflight succeeds; Content-Type for JSON bodies.
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Nautilus-Token, X-Nautilus-Client")
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GuardHost answers only a request addressed to a Host no page can rebind
+// (localhost, an IP address or an allowed name, the rule #811 applies to
+// writes), or, when a token is configured, one that carries it (#819). A
+// page on an attacker's domain rebound to this machine is same-origin with
+// it, so CORS does not stop it reading; this does, for every route: the
+// API, the live stream, the dashboard and the HMI. A page load and an
+// EventSource cannot send a header, so a dashboard reached by a name needs
+// that name allowed, token or not. A facade that serves routes of its own
+// wraps its handler in it too.
+func (s *Server) GuardHost(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Liveness and readiness carry one word and nothing else: a
+		// probe may reach them by any Host, with no credential.
+		if s.probe(w, r) {
+			return
+		}
+		trusted := s.trustedHost(r.Host)
+		// A browser's CORS preflight never carries the token, so on a token
+		// server a genuine one is answered here (204, no data) and never
+		// passed to a route of the handler this wraps; the request it asks
+		// about still needs the token.
+		if !trusted && s.credentialsConfigured() && r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
+			w.Header().Add("Vary", "Origin")
+			s.answerPreflight(w, r)
+			return
+		}
+		if !trusted && !s.validCredential(r) {
+			refuseHost(w, r, "controller", s.credentialsConfigured())
+			return
+		}
+		// With an auth: block, a read needs the read permission
+		// (readgate.go). A facade wraps a handler that is already
+		// wrapped: the second pass decides the same.
+		if s.readRefused(w, r) {
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// corsOrigin reports a browser Origin whose page may read the API across
+// origins without a token: loopback, this controller's own (trusted) host,
+// or an allowed name. Any port.
+func (s *Server) corsOrigin(r *http.Request, origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return false // "null" (a sandboxed frame, a file), or garbage
+	}
+	oh := strings.ToLower(hostOnly(u.Host))
+	if oh == "localhost" || strings.HasSuffix(oh, ".localhost") {
+		return true
+	}
+	if ip := net.ParseIP(oh); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	if s.allowHosts[oh] {
+		return true
+	}
+	return oh == strings.ToLower(hostOnly(r.Host)) && s.trustedHost(r.Host)
 }
 
 // handleIndex serves the landing page at exactly "/". Because "GET /" is
@@ -925,6 +1731,10 @@ func (s *Server) handleHMI() http.Handler {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-cache")
+		if strings.HasSuffix(lookup, ".webmanifest") {
+			// the standard sniffing would call it text/plain
+			w.Header().Set("Content-Type", "application/manifest+json")
+		}
 		if e := etagFor(lookup); e != "" {
 			w.Header().Set("Etag", e)
 		}
@@ -1029,7 +1839,40 @@ func (s *Server) handleCluster(w http.ResponseWriter, r *http.Request) {
 		st = s.cluster.Status()
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(st)
+	json.NewEncoder(w).Encode(clusterBody{Status: st, Peers: s.clusterPeers(st)})
+}
+
+// clusterBody is GET /api/cluster: the replica's own status plus, for a
+// pair with redundancy.public-urls, the controllers as a browser opens them.
+type clusterBody struct {
+	leader.Status
+	Peers []clusterPeer `json:"peers,omitempty"`
+}
+
+// clusterPeer is one controller of the pair as a browser reaches it. URL is
+// the operator-named public URL, never a pod or peer-link address (#716);
+// Leader is this replica's own view and may disagree with the other's
+// during a takeover, so a client confirms with the peer it picks.
+type clusterPeer struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	Leader bool   `json:"leader"`
+}
+
+func (s *Server) clusterPeers(st leader.Status) []clusterPeer {
+	if len(s.leaderURLs) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(s.leaderURLs))
+	for n := range s.leaderURLs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]clusterPeer, 0, len(names))
+	for _, n := range names {
+		out = append(out, clusterPeer{Name: n, URL: s.leaderURLs[n], Leader: st.Leader == n})
+	}
+	return out
 }
 
 // handleHistory forwards /api/history* to the historian daemon, trimming
@@ -1050,6 +1893,14 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	proxy.Director = func(req *http.Request) {
 		orig(req)
 		req.URL.Path = strings.TrimPrefix(r.URL.Path, "/api")
+		// Addressed to the historian by the name it was configured as,
+		// not the controller's: the historian answers by its own Host
+		// rule (#831), and the controller's names are not its.
+		req.Host = target.Host
+		// The controller's token is for the controller; the historian
+		// is another service and never sees it.
+		req.Header.Del("Authorization")
+		req.Header.Del("X-Nautilus-Token")
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		http.Error(w, "historian unavailable: "+err.Error(), http.StatusBadGateway)
@@ -1088,8 +1939,9 @@ type metaResponse struct {
 	// look like an error.
 	Alarms bool `json:"alarms"`
 	// Quality says this controller can report per-tag data quality: it runs
-	// a driver that implements io.QualityReporter, or simply has
-	// driver-bound inputs the runtime can mark Stale on a read failure.
+	// a driver that implements io.QualityReporter, has driver-bound inputs
+	// the runtime can mark Stale on a read failure, or is a redundant
+	// replica, whose standby marks every scan-fed tag Stale.
 	// The capability flag matters more here than anywhere else in this
 	// response, because the FALSE case is invisible: an empty `quality` map
 	// looks exactly like a healthy plant, and an HMI that cannot tell the
@@ -1145,6 +1997,74 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleParameters is GET /api/parameters: every scalar setpoint with a
+// manifest init, its live value, its range and whether the plant and the
+// repo agree (runtime.Parameter). Read-only; drift is reported, not
+// resolved.
+func (s *Server) handleParameters(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ps := s.rt.Parameters()
+	mode := "off"
+	if wb := s.paramWB; wb != nil {
+		if wb.Mode != "" {
+			mode = wb.Mode
+		}
+		if wb.Unwritable != nil {
+			why := wb.Unwritable()
+			for i := range ps {
+				if ps[i].Pending() {
+					ps[i].Unwritable = why[ps[i].Name]
+				}
+			}
+		}
+	}
+	json.NewEncoder(w).Encode(struct {
+		WriteBack  string              `json:"writeBack"`
+		Parameters []runtime.Parameter `json:"parameters"`
+	}{mode, ps})
+}
+
+// ParamWriteBack is the controller's way of putting plant-ahead parameter
+// values back in the repo (#718): the mode, the patch of what a commit
+// would write, and why some parameters cannot be written.
+type ParamWriteBack struct {
+	Mode string // off | patch | commit
+	// Patch is the plant-ahead values as a patch ("" when nothing would
+	// change). An error wrapping ErrIOCommitRefused is a 409.
+	Patch func() (string, error)
+	// Unwritable is, by parameter name, why a pending one is left as drift.
+	Unwritable func() map[string]string
+}
+
+// handleParametersPatch is GET /api/parameters/patch: what a commit would
+// write, as a patch for `git apply`, for a controller with no repo. It
+// returns whole files' lines, so it needs the edit permission.
+func (s *Server) handleParametersPatch(w http.ResponseWriter, r *http.Request) {
+	if code, msg := s.authorizeWrite(r); code != 0 {
+		writeJSON(w, code, map[string]string{"error": msg})
+		return
+	}
+	wb := s.paramWB
+	if wb == nil || wb.Patch == nil || wb.Mode == "" || wb.Mode == "off" {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "parameters.writeBack is off: set it to patch or commit in nautilus.yaml to get tuned values back as a patch"})
+		return
+	}
+	p, err := wb.Patch()
+	switch {
+	case errors.Is(err, ErrIOCommitRefused):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	case p == "":
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "nothing to patch: no parameter is ahead of the repo (or the ones that are cannot be written: GET /api/parameters says why)"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/x-diff; charset=utf-8")
+	_, _ = w.Write([]byte(p))
+}
+
 func shelveSeconds(ds []time.Duration) []int {
 	out := make([]int, 0, len(ds))
 	for _, d := range ds {
@@ -1167,40 +2087,82 @@ func nonNilStrings(s []string) []string {
 // browser page from another origin (the drive-by CSRF case) carries an
 // Origin header that won't match the host and is refused; non-browser
 // clients (curl, the LSP, server-to-server) send no Origin and are allowed.
-// This costs nothing to run and needs no setup.
+// A same-origin browser write must also be addressed to a Host no page can
+// rebind: localhost, an IP address, or a name in AllowedHosts (#811).
+// This costs nothing to run and needs no setup on localhost or by IP.
 //
 // Progressive enhancement — AuthToken set: the request must present the
 // token, and a valid token authorizes the write from any origin (an
 // attacker's page can't read or guess it, so CORS is irrelevant to safety).
 // AuthorizeWrite applies the server's write policy — the auth token, else
 // same-origin — to a request another handler serves, so a facade that adds
-// an endpoint keeps the same rule for it. 0 means allowed.
+// an endpoint keeps the same rule for it. 0 means allowed. With an auth:
+// block it needs write over every tag; an endpoint that does something
+// else asks Authorize for its own permission.
 func (s *Server) AuthorizeWrite(r *http.Request) (int, string) { return s.authorizeWrite(r) }
 
 func (s *Server) authorizeWrite(r *http.Request) (int, string) {
+	if s.policy != nil {
+		// The audit seam has checked the route's own permission (and a
+		// handler then checks its target); anything else needs write over
+		// every tag.
+		if decidedBySeam(r) {
+			return 0, ""
+		}
+		return s.authorize(r, PermWrite, auth.All)
+	}
+	if _, ok := linkOf(r); ok && !mutServer("link_needs_write_rule") {
+		// An ack link (#715, acklink.go) is its own credential: checked
+		// (signature, expiry) before the request got here, and good for one
+		// occurrence of one alarm. The token-or-same-origin rule would
+		// refuse a phone that holds no NAUTILUS_TOKEN.
+		return 0, ""
+	}
 	if s.authToken != "" {
 		if tokenMatches(r, s.authToken) {
 			return 0, ""
 		}
 		return http.StatusUnauthorized, "missing or invalid auth token"
 	}
-	if sameOrigin(r) {
-		return 0, ""
+	if !sameOrigin(r) {
+		return http.StatusForbidden, "cross-origin writes require an auth token (start nautilus with one, e.g. NAUTILUS_TOKEN)"
 	}
-	return http.StatusForbidden, "cross-origin writes require an auth token (start nautilus with one, e.g. NAUTILUS_TOKEN)"
+	// A browser request whose Origin matches its Host can still come from
+	// an attacker's page: rebind that page's name to this machine (DNS
+	// rebinding) and Host and Origin are both the attacker's name. Without a
+	// token, trust only a Host no one can rebind (#811).
+	if r.Header.Get("Origin") != "" && !s.trustedHost(r.Host) {
+		return http.StatusForbidden, fmt.Sprintf("a browser write addressed to %q is refused without an auth token: only localhost, an IP address, or a name in NAUTILUS_ALLOWED_HOSTS is trusted (a page on another site could rebind %q to this machine); set NAUTILUS_TOKEN, or add the name to NAUTILUS_ALLOWED_HOSTS", r.Host, hostOnly(r.Host))
+	}
+	return 0, ""
 }
 
-// tokenMatches reports whether the request carries the expected token, in
-// either "Authorization: Bearer <t>" or "X-Nautilus-Token: <t>" form.
-// Comparison is constant-time.
-func tokenMatches(r *http.Request, token string) bool {
-	got := r.Header.Get("X-Nautilus-Token")
-	if got == "" {
-		if a := r.Header.Get("Authorization"); strings.HasPrefix(a, "Bearer ") {
-			got = strings.TrimPrefix(a, "Bearer ")
+// trustedHost reports a request Host a page cannot have been rebound to:
+// localhost (and *.localhost, which browsers keep on loopback), an IP
+// literal (a browser sends one only for a page it loaded from that very
+// address), or a name configured in AllowedHosts.
+func (s *Server) trustedHost(host string) bool {
+	return hostTrusted(s.allowHosts, host)
+}
+
+// EnvAllowedHosts is NAUTILUS_ALLOWED_HOSTS: host names, comma-separated,
+// the server answers by without the token besides localhost and an IP.
+func EnvAllowedHosts() []string {
+	var out []string
+	for _, h := range strings.Split(os.Getenv("NAUTILUS_ALLOWED_HOSTS"), ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			out = append(out, h)
 		}
 	}
-	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1
+	return out
+}
+
+// hostOnly strips the port (and an IPv6 address's brackets) from a Host.
+func hostOnly(host string) string {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		return h
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
 }
 
 // sameOrigin reports whether a request is safe from a CSRF standpoint: it
@@ -1240,6 +2202,10 @@ func (s *Server) handleWriteTag(w http.ResponseWriter, r *http.Request) {
 	var req writeTagRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		http.Error(w, `expected {"name": ..., "value": ...}`, http.StatusBadRequest)
+		return
+	}
+	if code, msg := s.authorize(r, PermWrite, req.Name); code != 0 {
+		http.Error(w, msg, code)
 		return
 	}
 	if s.tagWriter == nil {
@@ -1288,7 +2254,7 @@ func (s *Server) handleWriteTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if member || enum {
-		s.frontDoor(w, req, false)
+		s.frontDoor(w, req, false, s.principalOf(r))
 		return
 	}
 	// Whole-tag scalar write. JSON numbers decode to float64; booleans to
@@ -1324,7 +2290,7 @@ func (s *Server) handleWriteTag(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "value must be a number or boolean", http.StatusUnprocessableEntity)
 		return
 	}
-	s.frontDoor(w, req, true)
+	s.frontDoor(w, req, true, s.principalOf(r))
 }
 
 // frontDoor applies one write through the runtime's front door
@@ -1339,8 +2305,8 @@ func (s *Server) handleWriteTag(w http.ResponseWriter, r *http.Request) {
 // it cannot be born retyped (#421 on the output a Sparkplug host commands
 // through). Only a tag with no declared type at all, which has nothing to
 // convert against, is written as it comes.
-func (s *Server) frontDoor(w http.ResponseWriter, req writeTagRequest, whole bool) {
-	err := s.rt.Tags().Write([]runtime.WriteOp{{Path: req.Name, Value: req.Value}})[0]
+func (s *Server) frontDoor(w http.ResponseWriter, req writeTagRequest, whole bool, by string) {
+	err := s.rt.Tags().WriteAs([]runtime.WriteOp{{Path: req.Name, Value: req.Value}}, by)[0]
 	if whole && errors.Is(err, runtime.ErrUndefined) {
 		if t := s.rt.Tags().TypeOf(req.Name); t != nil {
 			var nv ir.Value
@@ -1357,6 +2323,9 @@ func (s *Server) frontDoor(w http.ResponseWriter, req writeTagRequest, whole boo
 		w.WriteHeader(http.StatusNoContent)
 	case errors.Is(err, runtime.ErrForced):
 		http.Error(w, err.Error(), http.StatusConflict)
+	case errors.Is(err, runtime.ErrSwitching):
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 	case whole && errors.Is(err, ir.ErrTypeMismatch):
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 	default:

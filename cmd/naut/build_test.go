@@ -299,6 +299,11 @@ func TestEmitBinarySkipsDependencyTrees(t *testing.T) {
 		"pki/trusted/certs/a.der":   "CERT",
 		"certs/own/private/key.pem": "-----BEGIN PRIVATE KEY-----",                                           // a store under another name
 		"opcua-client/key.pem":      "-----BEGIN RSA PRIVATE KEY-----\nMII\n-----END RSA PRIVATE KEY-----\n", // a flat client pki-dir
+		// `naut run` keeps the audit journal there too (#709): who did
+		// what on this machine, never part of the program.
+		"audit/audit-20261118.jsonl":     `{"id":"01J","user":"anonymous"}`,
+		"var/log/audit-20261119-1.jsonl": `{"id":"01K","user":"anonymous"}`,
+		"audit/.audit.lock":              "",
 	}
 	for name, body := range files {
 		p := filepath.Join(proj, filepath.FromSlash(name))
@@ -341,7 +346,7 @@ func TestEmitBinarySkipsDependencyTrees(t *testing.T) {
 		t.Error("the hmi build output must still be embedded")
 	}
 	for name := range names {
-		if strings.Contains(name, "node_modules") || strings.HasPrefix(name, "vendor/") || strings.HasPrefix(name, "pki/") || strings.HasPrefix(name, "certs/") || strings.HasSuffix(name, "key.pem") {
+		if strings.Contains(name, "node_modules") || strings.HasPrefix(name, "vendor/") || strings.HasPrefix(name, "pki/") || strings.HasPrefix(name, "certs/") || strings.HasSuffix(name, "key.pem") || strings.HasSuffix(name, ".jsonl") || strings.HasSuffix(name, ".audit.lock") {
 			t.Errorf("archive contains %q, which should have been skipped", name)
 		}
 	}
@@ -414,34 +419,34 @@ func TestBuildEmbedsHMIAndBuiltBinaryServesIt(t *testing.T) {
 	h := server.New(rt, p.Server).Handler()
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/", nil))
 	if rec.Code != 200 || rec.Body.String() != "<html>hmi shell</html>" {
 		t.Fatalf("GET / = %d %q, want the embedded HMI's index.html", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/assets/app.js", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/assets/app.js", nil))
 	if rec.Code != 200 || rec.Body.String() != "console.log('hi')" {
 		t.Fatalf("GET /assets/app.js = %d %q", rec.Code, rec.Body.String())
 	}
 
 	// A client-side route with no matching file falls back to index.html.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/some/spa/route", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/some/spa/route", nil))
 	if rec.Code != 200 || rec.Body.String() != "<html>hmi shell</html>" {
 		t.Fatalf("GET /some/spa/route = %d %q, want SPA fallback", rec.Code, rec.Body.String())
 	}
 
 	// /api/* must still work — the HMI owns "/", not the API.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/state", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/state", nil))
 	if rec.Code != 200 {
 		t.Fatalf("GET /api/state = %d, want 200", rec.Code)
 	}
 
 	// The built-in dashboard is still there, moved to /_nautilus/.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/_nautilus/", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/_nautilus/", nil))
 	if rec.Code != 200 {
 		t.Fatalf("GET /_nautilus/ = %d, want 200 (the built-in dashboard)", rec.Code)
 	}

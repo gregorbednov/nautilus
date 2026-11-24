@@ -35,9 +35,11 @@ import (
 	"os"
 	"reflect"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -99,6 +101,10 @@ type Options struct {
 	// Logger takes the write audit (an Info line per landed write, a Warn
 	// once per client, node and reason for a refusal); nil is slog.Default.
 	Logger *slog.Logger
+	// Mapped lays a device's address space over the tag store (mapped.go):
+	// its namespaces come first, its tree is what Objects organizes, and
+	// the project folder is left off. Nil serves the tag store as itself.
+	Mapped *Mapped
 }
 
 // serverDiagnosticsLeftOut are the static diagnostic nodes under the Server
@@ -146,17 +152,21 @@ type Server struct {
 	host string
 	port int
 
-	mu      sync.Mutex
-	srv     *opcserver.Server
-	ns      *namespace
-	cancel  context.CancelFunc
-	done    chan struct{}
-	up      bool
-	since   time.Time
-	lastErr error
-	url     string
-	version string
-	cert    CertInfo // the server certificate, when PKI is set
+	red atomic.Pointer[opcserver.Redundancy]
+	// announced is the ApplicationUri the server announces: the configured
+	// one, or the certificate's when that names another (Part 4 §7.1).
+	announced atomic.Pointer[string]
+	mu        sync.Mutex
+	srv       *opcserver.Server
+	ns        *namespace
+	cancel    context.CancelFunc
+	done      chan struct{}
+	up        bool
+	since     time.Time
+	lastErr   error
+	url       string
+	version   string
+	cert      CertInfo // the server certificate, when PKI is set
 
 	w *writeAccess // the write policy and audit; outlives Stop/Start
 }
@@ -188,6 +198,11 @@ func New(rt *runtime.Runtime, o Options) (*Server, error) {
 	}
 	if err := writable.Patterns(o.Writable).Validate(); err != nil {
 		return nil, fmt.Errorf("opcua.%w", err)
+	}
+	if o.Mapped != nil {
+		if _, err := newMappedTree(o.Mapped); err != nil {
+			return nil, fmt.Errorf("opcua: %w", err)
+		}
 	}
 	w := &writeAccess{patterns: writable.Patterns(o.Writable), anonymous: o.AnonymousWrites, log: o.Logger}
 	if w.log == nil {
@@ -292,14 +307,23 @@ func (s *Server) startOn(ctx context.Context, port int) error {
 	if s.version != "" {
 		build.version = s.version
 	}
+	serverName, manufacturer, product, productURI := "Nautilus · "+s.opts.Name, "Joy Automation", "Nautilus", ProductURI
+	if m := s.opts.Mapped; m != nil && m.Product != nil {
+		p := m.Product
+		serverName, manufacturer, product, productURI = p.Name, p.Manufacturer, p.Name, p.URI
+		if p.Version != "" {
+			build.version = p.Version
+		}
+	}
 	opts := []opcserver.Option{
 		opcserver.EndPoint(listen, port),
-		opcserver.ServerName("Nautilus · " + s.opts.Name),
+		opcserver.ServerName(serverName),
 		opcserver.ApplicationURI(s.opts.ApplicationURI),
-		opcserver.ManufacturerName("Joy Automation"),
-		opcserver.ProductName("Nautilus"),
-		opcserver.ProductURI(ProductURI),
+		opcserver.ManufacturerName(manufacturer),
+		opcserver.ProductName(product),
+		opcserver.ProductURI(productURI),
 		opcserver.SoftwareVersion(build.version),
+		opcserver.RedundancyFunc(s.redundancyNow),
 		opcserver.BuildNumber(build.number),
 		opcserver.BuildDate(build.date),
 		opcserver.EnableSecurity("None", ua.MessageSecurityModeNone),
@@ -315,9 +339,20 @@ func (s *Server) startOn(ctx context.Context, port int) error {
 			return err
 		}
 		opts = append(opts, sec...)
+		// UserName tokens, on the secure endpoints only, when there are
+		// users to sign in (SetIdentity, identity.go).
+		if id := s.w.id; id != nil && id.SignsIn() {
+			opts = append(opts, opcserver.UserNameAuth(s.w.checkUser))
+		}
 	}
 	srv := opcserver.New(opts...)
+	tree, err := s.mappedTree()
+	if err != nil {
+		s.lastErr = err
+		return err
+	}
 	ns := &namespace{
+		mapped:  tree,
 		rt:      s.rt,
 		uri:     "urn:joyautomation:nautilus:" + s.opts.Name,
 		title:   s.opts.Name,
@@ -326,6 +361,12 @@ func (s *Server) startOn(ctx context.Context, port int) error {
 		mstamps: map[string]mstamp{},
 		w:       s.w,
 		enums:   collectEnums(s.rt),
+	}
+	// A map's namespaces take the indices the device uses, ahead of ours.
+	if m := s.opts.Mapped; m != nil {
+		for _, uri := range m.Namespaces {
+			srv.AddNamespace(&mappedSpace{uri: uri, ns: ns})
+		}
 	}
 	srv.AddNamespace(ns)
 	registerServices(srv, ns)
@@ -389,7 +430,18 @@ func (s *Server) startOn(ctx context.Context, port int) error {
 	if objects == nil {
 		return errors.New("opcua: gopcua has no Objects folder")
 	}
-	objects.AddRef(ns.folderNode(), opcserver.RefTypeIDOrganizes, true)
+	if tree == nil {
+		objects.AddRef(ns.folderNode(), opcserver.RefTypeIDOrganizes, true)
+	} else {
+		// A device's tree instead of the project folder: its top nodes.
+		for _, top := range tree.top {
+			if sp, err := srv.Namespace(int(top.nid.Namespace())); err == nil {
+				if n := sp.Node(top.nid); n != nil {
+					objects.AddRef(n, opcserver.RefTypeIDOrganizes, true)
+				}
+			}
+		}
+	}
 	// Each enumeration the project declares is a DataType under ns=0's
 	// Enumeration, where a client looks for the member names (#425).
 	if enumeration := root.Node(ua.NewNumericNodeID(0, id.Enumeration)); enumeration != nil {
@@ -444,6 +496,40 @@ func (s *Server) warnAnonymousWrites(listen string) {
 func loopbackHost(host string) bool {
 	ip := net.ParseIP(strings.TrimSuffix(strings.TrimPrefix(host, "["), "]"))
 	return ip != nil && ip.IsLoopback()
+}
+
+// Redundancy is the server's part in a redundant set (see
+// uaserver.Redundancy): Support, every member's ApplicationUri, and this
+// member's ServiceLevel.
+type Redundancy = opcserver.Redundancy
+
+// SetRedundancy makes the server a member of a non-transparent redundant
+// set: RedundancySupport, ServerUriArray and a ServiceLevel that follows
+// r.ServiceLevel, which `naut run` takes from the elector. It takes effect
+// at once, running or not; nil leaves the set.
+func (s *Server) SetRedundancy(r *Redundancy) { s.red.Store(r) }
+
+// redundancyNow is the redundancy the nodes report. ServerUriArray names
+// this member by the ApplicationUri it announces, which is the certificate's
+// when an old certificate names another URI: a client that looks for the
+// server it is talking to in the array must find it there.
+func (s *Server) redundancyNow() *opcserver.Redundancy {
+	r := s.red.Load()
+	if r == nil {
+		return nil
+	}
+	a := s.announced.Load()
+	if a == nil || *a == s.opts.ApplicationURI {
+		return r
+	}
+	c := *r
+	c.ServerURIs = slices.Clone(r.ServerURIs)
+	for i, u := range c.ServerURIs {
+		if u == s.opts.ApplicationURI {
+			c.ServerURIs[i] = *a
+		}
+	}
+	return &c
 }
 
 // SetSoftwareVersion sets the version the server reports as
@@ -609,6 +695,7 @@ func (s *Server) secure(listen string, aliases []string) ([]opcserver.Option, er
 		appURI = info.ApplicationURI
 	}
 	s.cert = info
+	s.announced.Store(&appURI)
 	opts := []opcserver.Option{
 		opcserver.ApplicationURI(appURI),
 		opcserver.Certificate(der),
@@ -735,7 +822,7 @@ func (s *Server) sweep(ctx context.Context, done chan struct{}) {
 			}
 		}
 		for _, mon := range mons {
-			root, _ := ir.SplitAddress(mon.nid.StringID())
+			root, _ := ir.SplitAddress(s.ns.addrOf(mon.nid))
 			rk := ir.NameKey(root)
 			liveRoots[rk] = struct{}{}
 			if prev, seen := lastQual[rk]; seen && prev != qual[rk] {
@@ -757,7 +844,7 @@ func (s *Server) sweep(ctx context.Context, done chan struct{}) {
 					owed = true
 				}
 			}
-			root, _ := ir.SplitAddress(mon.nid.StringID())
+			root, _ := ir.SplitAddress(s.ns.addrOf(mon.nid))
 			rk := ir.NameKey(root)
 			_, moved := changed[rk]
 			_, requalified := requal[rk]
@@ -844,7 +931,7 @@ func (s *Server) monitored() []monitoredNode {
 	out := make([]monitoredNode, 0, len(mi.Nodes))
 	for k, items := range mi.Nodes {
 		nid, err := ua.ParseNodeID(k)
-		if err != nil || nid.Namespace() != s.ns.id || nid.Type() != ua.NodeIDTypeString {
+		if err != nil || !s.ns.owns(nid) || s.ns.addrOf(nid) == "" {
 			continue
 		}
 		mon := monitoredNode{key: k, nid: nid, items: make([]watched, 0, len(items))}

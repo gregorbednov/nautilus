@@ -2,6 +2,334 @@
 
 ## Unreleased
 
+### Added
+
+- **Live video from an RTSP camera plays in the panel** (#724 slice 3b, kit side): a camera the controller marks
+  `hls` shows a muted `<video>` instead of the motion-JPEG `<img>`, started only by "Watch live" and stopped by Stop,
+  a hidden tab, leaving the page and any error (the viewer cap, the 15-minute limit and a camera that did not open
+  show the controller's words). The player is the kit's own (about 200 lines, Media Source Extensions; Safari and
+  iOS play HLS natively): no hls.js, so the playground's wasm does not grow. The measured bitrate is shown, or
+  "bitrate not measured" where the browser plays the stream itself. `Camera.hls`; new exports: `playHls`,
+  `parsePlaylist`, `codecFromInit`, `nextSegments`, `bufferTrim`, `liveSeek`, `BitrateMeter`, `LIVE_LIMIT`,
+  `CameraClient.hlsUrl`.
+
+- **A picture is kept when an alarm activates** (#724 slice 2, kit side): `<AlarmJournal>` shows a small thumbnail (a
+  link to the full picture, up to 3 cameras then "+N") on each `Activated` row that has one. Pictures are asked for
+  lazily, three requests at a time; a controller that keeps none (404) is asked once and the journal looks as
+  before, and a person without the `camera` permission sees one line, not one per row. `AlarmJournal` takes
+  `snapshotClient` (null: no request); `AlarmEvent.occurrence`. New exports: `SnapshotClient`, `parseSnaps`,
+  `thumbSplit`, `NO_SNAP_VIEW`.
+
+- **`<CameraPanel {asset}/>`: the controller's built-in cameras on an asset page** (#724 slice 1, kit side): a refreshing still
+  by default, live video only after "Watch live", with the measured bitrate and a Stop button; live stops when the
+  tab is hidden, on a stream error and when the page goes away. A failure shows the controller's own message (the
+  viewer cap, a camera that did not answer). With no cameras for the asset nothing is drawn. `AssetPage` takes
+  `cameraClient` (null: no request). New exports: `CameraPanel`, `CameraClient`, `formatBps`, `camerasFor`,
+  `watchingText`, `cameraNext`.
+
+- **`<CheckoutPage {force}/>` and `<CheckoutBanner {frame}/>`** (#719 slice 3): the I/O checkout, as the kit shows
+  it: progress by area and device, Pass/Fail/Note per point, a forced output with typed confirmation, and a banner on
+  every screen while a checkout force stands (the controller's countdown; "state unknown" on a quiet stream, never
+  "released" from a client timer). New exports: `CheckoutPage`, `CheckoutBanner`, `CheckoutClient`, `forceValue`,
+  `countdown`, `canIn` and friends; `NautilusFrame.checkoutForce`. The built-in app has them only when the project has
+  a `checkout:` section.
+
+- **`<AreaPage {area} {assets}/>`** (#714 slice 3): an area of the plant model, its equipment each with the alarms
+  standing on it (out of service counted apart) and a link to its process scheme. New exports: `AreaPage`,
+  `areaRows`, `AreaDescriptor`, `AreaRow`. The built-in app has `/areas/<id>`, and `naut hmi scheme` writes the
+  schemes it links to.
+
+- **The plant model feeds the asset pages** (#714 slice 2): `plant.yaml` (areas, equipment with a tag or a
+  `devices:` row and an asset type, flows) names every piece of the plant once, and `naut hmi build` writes an
+  asset page for each, grouped by area on `/assets`. A mimic's equipment may carry `plant: <id>` (the drawing
+  keeps the layout, the plant the identity) and then makes no page of its own. `AssetDescriptor` gains `area`;
+  new `assetGroups`; an asset's alarms match its id too; `MimicEquipment` gains `plant`.
+
+- **`<AssetPage {asset}/>`: one page for one piece of equipment** (#714): live values with a trend of the
+  chosen ones, settings and commands (greyed by the signed-in role), the equipment's alarms (by their
+  `equipment:` key) with an out-of-service badge and their history, the equipment's notes, the audit of
+  writes to its tags, and an optional camera URL. An `AssetDescriptor` is the equipment's `MimicPanel` plus
+  `trend`, `equipment`, `camera` and `notes`. New exports: `AssetPage`, `assetTitle`, `assetTags`,
+  `assetAlarms`, `assetSlug`, `indexAssets`, `assetFromEquipment`, `trendTags`, `writableTags`, `tagValue`
+  (a struct member by path: `CONV.Speed`), `hasTag`. The built-in app gets `/assets` and `/assets/<id>` for each
+  mimic equipment that has a `panel`, and for each `devices:` row (its readings, commands and setpoints
+  from the profile's points).
+
+- **Equipment out of service in the HMI** (#616, #715 PR 5): `<OutOfServicePanel/>` lists the windows
+  standing, soonest to end first (why, who, until, time left), with "Return to service" and "Take out of
+  service" (equipment, up to 7 days, a one-line reason; the controller asks for the password). A suppressed
+  alarm in `<AlarmTable/>` carries `<OutOfServiceBadge/>`: the kind of suppression, why, and for out of
+  service who and until. `AlarmClient` gains `outOfService`, `suppressed`, `refreshOutOfService()`,
+  `takeOutOfService()` and `returnToService()`, and asks for suppressed alarms (`?suppressed=1`, which an
+  older controller ignores). `AlarmClient.active` no longer includes suppressed alarms. The built-in HMI's
+  alarms page has both.
+
+- **`<AlarmJournal/>` shows paging rows** (#616, #715): each notification an escalation sent, or tried to
+  send, is its own row kind ("Paged, level 2", "sent to bob by sms", "nobody on call (joined late)"),
+  filterable (Paged in the event filter) and hidden until the Paging box is ticked, so a screen that never
+  paged looks as before. A host fetches them with `alarms.journal(from, to, { kinds: journalKinds(true) })`;
+  the controller leaves them out of an unnamed query. New exports: `journalKinds`, `visibleKind`,
+  `pagingEvent`, `pagingOutcome`, `STATE_KINDS`; `AlarmEventKind` gains `'notify'`.
+
+- **`<NotesPanel/>`, `<ShiftLog/>` and `NotesClient`** (#720): operator notes about a tag, an asset, an
+  alarm (and its occurrence), an area or the plant. Write a note, mark a handover, edit or retract your
+  own within the hour, add an addendum to anyone's; the shift log groups by day with handovers on top. A
+  note is never overwritten or deleted: "edited" notes show their history. What a person types is kept as
+  a draft per person and target, and a write the controller did not keep (no majority on a pair, an
+  unconfirmed proposal, a lost race) says why and leaves the text, never "failed" for an outcome that is
+  unknown. Signing out, or someone else signing in, takes away the previous person's drafts (shared
+  kiosks). Notes of a replaced log history are shown apart and read-only. The built-in HMI has a Log page.
+
+- **`<PushCard/>` and `PushClient`** (#722): notifications and install for this device. Turn on
+  asks the browser's permission (it must be a tap, and only after the controller has said it can
+  page: a controller with no push never causes a prompt), subscribes, and hands the controller the
+  subscription, which belongs to the signed-in person. It says why it cannot instead of showing a
+  dead button: plain http ("install needs https"), an iPhone not yet on the Home Screen, a browser
+  with no push, signed out, a controller with no push, a blocked permission. The controller never
+  returns an endpoint or a key, so the list of other devices names a push service's host only. A
+  subscription the controller refuses is dropped from the browser again. The built-in HMI shows it
+  on Diagnostics. Pure parts (`pushState`, `readPushEnv`, `enablePush`, `disablePush`,
+  `keyBytes`, `endpointId`) are exported.
+
+### Changed
+
+- **`<AuditTable/>` reads at a glance** (#709): the Change column says the substitute actions in a
+  few words (`95 until 14:05:00 (live 40)`, `95 → live 40`, `95 by akhan until … → live 41`) and an
+  acknowledge-all as the alarms it took (`acknowledged HiTemp, LoFlow`); other objects are
+  flattened and clipped, and the whole before/after is under an expandable "raw" on the cell
+  (`changeRaw`). Below 640 px of its own width the table stacks, one labelled card per entry,
+  instead of scrolling sideways. The user filter takes the bare name the Who column shows
+  (`alice`) as well as `user:alice`. `changeText` takes an optional clock formatter.
+
+### Added
+
+- **`<ParameterList/>` cannot overwrite a value edited while its confirm was open** (#718): "Use repo value" sends the values its dry run saw as `expectFrom`; a value that moved makes the controller refuse the set (409, nothing written) and the list says to read again.
+- **`<ParameterList/>`** (#718): the setpoint parameters (`GET /api/parameters`) as a table of the
+  plant's value, the manifest's `init:`, the range and a drift badge (`in step`, `plant ahead`,
+  `committed`, `repo ahead`, `conflict`), with who last edited it, a filter for only where plant and
+  repo differ, and the write-back mode. For a repo-ahead or conflict row, "Use repo value" asks the
+  controller what would change (a dry run through `POST /api/parameters/import`), confirms it, and
+  applies all or nothing; an operator's edit (plant ahead) is never reverted from here. Stacks to
+  cards below 640 px. `ParametersClient` and the pure helpers are exported.
+- **Modbus points in `<ConfigEditor/>`** (#711): each Modbus driver's manifest file shows its
+  sources and points as tables. A point's table, address and scan class and a source's host, port
+  and unit id are editable, because a live apply may change those and nothing else; format, scale,
+  direction and adding or removing points are shown, not edited. A scan class the driver does not
+  declare under `scan-classes:` is named before staging, with the declared ones offered. Pure side
+  in `config/modbus.ts`.
+- **Commit and patch in `<ConfigReview/>`** (#711): once a change is applied, a Commit button
+  (optional message) saves it as a git commit via `POST /api/config/commit`, and Download patch
+  fetches `GET /api/config/patch` for controllers that run from a build rather than a checkout; a
+  refusal shows the server's text, which names the other way. `ReviewClient.commit()` / `.patch()`.
+- **Option lists in `<SchemaForm/>`** (#711): a string field the controller sent `x-options` /
+  `x-options-builtin` for (a device's `profile`) is a text input with a suggestion
+  list (`Field.options`); built-in profiles that need `naut devices add` say so. Not an enum: any
+  text is still accepted and the loader says what is wrong with it.
+- **`<ConfigReview/>`** (#711 slice 3), inside `<ConfigEditor/>` (own client `review`): the diff of
+  the edited files (`unifiedDiff`, `diffFiles`: the shape of `naut pull --io --dry-run`, pure
+  TypeScript), then Stage, Validate (checks, probes, changes, what the first scan will command) and
+  Apply with an optional revert-if-silent duration on #706's `/api/io/staged` routes
+  (`ReviewClient`). Apply is only enabled on a valid candidate, an edit after staging makes the
+  candidate stale, and every refusal says what to do. Seen in a browser against a running controller.
+- **`@joyautomation/nautilus-hmi/config`** (#711 slice 2): the configuration screens' kit, in its own
+  entry because it carries the `yaml` parser (an HMI that imports only the root never bundles it;
+  a test walks the root's import graph to keep that true). `<ConfigEditor/>` reads the controller's
+  manifest (`GET /api/config/files`) and schema (`GET /api/config/schema`), shows each driver and
+  `devices:` row as a `<SchemaForm/>` and reports the overlay of changed files through
+  `onoverlay` (`{files, changed}`); it stages and applies nothing. Edits are text patches
+  (`patch`, `renderScalar`): a changed value replaces only its own text, a same-value edit changes
+  no byte, and comments, order and flow style survive. Strings the loaders could read as something
+  else (`on`, `yes`, `0x10`, `1e3`) are written quoted. The schema walker (`sectionField`,
+  `validate`) supports exactly the keywords the drivers and devices sections use and shows
+  anything else as raw text, never dropped. `ConfigClient` names the fix for each refusal (sign in,
+  the write permission, online edits off, a standby). Editing `driver:` (one) is supported; adding
+  a second driver to it asks for a `drivers:` list first.
+- **`createAuth`, `AuthClient`, `AuthSession`** (#708): the kit's side of sign-in. Mounted once
+  beside `<ConfirmDialog/>`, it installs its fetch for every kit client: a `401` with
+  `elevate: true` asks for the password, proves it (`POST /api/elevate`) and repeats the request
+  once, byte for byte (one prompt for concurrent refusals; cancel returns the refusal); any other
+  `401`, or a dropped stream, is judged by a fresh `/api/me`, and a sign-in that has ended goes
+  to `/signin?next=`; a standby's `503` sends the page to the `leader` it names (http(s) only, no
+  https→http, a 30 s loop guard kept in `sessionStorage` and no follow without it, never the
+  `Location` header). Does nothing without `auth:`. The
+  pure rules (`leaderTarget`, `needsPassword`, `refusalMessage`, …) are exported and tested.
+- **Role-aware controls** (#708 PR 7b): `WriteNumber`, `WriteToggle`, `CommandButton`, `AckButton`,
+  `AlarmTable`, `SubstitutesPanel`, `PortParameters` and `NumberField` (given its new `tag`) grey
+  themselves out, with the reason, when
+  the signed-in role does not hold the permission for that tag (`deniedFor`, `can`). Area patterns
+  come from `/api/me`'s new `areas` and are matched as the controller matches them (`areaMatch`, a
+  port of Go's `path.Match`, tested against the controller's own table). `PortParameters` shows a
+  lock while a write would ask for the password. A convenience only: the controller decides.
+- **Acknowledgements recorded as the signed-in user** (#708 PR 7b): the ack and shelve dialogs drop
+  the operator-name field and say whose record it is (`recordedAs`). The controller decides it: a
+  request acting as a user is recorded under that user, whatever `by` it sends.
+- **`AccountChip`, `ReferralBanner`** (#708 PR 7b): who is signed in, the password window, Sign out
+  (through the referral rules on a standby) or Sign in; a standby's unfollowed referral with the
+  leader's link. `AuthClient.can`, `.user`, `.signOut`, `currentAuth()`, `passwordState`.
+- **`AuditTable`, `AuditClient`** (#709, #708 PR 7b): the audit journal (`GET /api/audit`), filtered
+  by user, action, target, result and time; says when the list was cut, and tells a role without
+  `audit` so rather than showing an empty table.
+- **`askPassword`, and a password mode in `<ConfirmDialog/>`** (#708): the elevation prompt.
+  Resolves to what was typed, or null; with no dialog mounted it resolves null at once (never a
+  plain-text browser prompt).
+- **`kitFetch`, `setKitFetch`**: the fetch every kit client uses unless handed one; `createAuth`
+  installs itself there.
+
+- **`PortParameters`, `PortParamClient`** (#705): the parameters of the device
+  on an IO-Link port, over `/api/iolink/{port}/params`: what the device's
+  IODD says each is (access, allowed range, named values), what it holds,
+  and a confirmed write. A read says which device answered (the identity is
+  shown, and a value from a device that is not the one expected is marked);
+  a refused write changed nothing and says why; a write whose outcome is
+  uncertain (the device on the port changed during it, a 5xx, a lost
+  connection) is neither a failure nor a success: the panel says the outcome
+  is not known and reads the parameter back. Needs a mounted
+  `<ConfirmDialog/>`.
+
+- **`SubstitutesPanel`, `SubstituteClient`** (#707): list, start, stop and
+  acknowledge substitute values over `/api/substitutes`. The client sends a
+  fresh `requestId` per action and reuses it on retry, treats a 503 "outcome
+  unknown" as neither success nor failure (it re-reads and says the change
+  may still take effect), never retries a 409 blind, and shows a
+  `kept: false` warning. Needs a mounted `<ConfirmDialog/>`.
+- **`DriverStatus.differs`** (#706): a driver that runs an I/O configuration
+  applied live, not the manifest's, carries `differs`, and `DriverStatusCard`
+  badges it.
+
+### Changed
+
+- **Refusals read as the controller's reason** (#708): `writeTag`, `AlarmClient` and
+  `SubstituteClient` show a refusal's JSON `error`, not the JSON, and `writeTag` no longer says
+  "this controller requires an auth token" for every 401/403 (under `auth:` it is "sign in",
+  "confirm your password" or the role). `SubstituteClient` classes a 401/403 as `forbidden`
+  even when no outcome header came with it (it is a refusal, never "outcome unknown"). A 401/403
+  on a RETRY of an unknown start refuses that retry only: `SubstituteSession` keeps the pending
+  "may still take effect" entry and returns the refusal's reason.
+
+- **`Quality` gains `'substituted'`** (#707): a value an operator put in
+  place of a bad sensor's, which the logic runs on. A new `ValueStatus`
+  `substituted` draws it in `--q-substituted` with the badge `SUBST`,
+  degraded and, unlike stale and bad, still commandable (the badge is the
+  cue); precedence is notPublished > bad >
+  substituted > simulated > stale > good. `StateChip` and `EquipmentCard`
+  (a dotted border) know it. A `switch` over `Quality` in your own code
+  needs the new case.
+
+### Fixed
+
+- **`Modal` (so `<ConfirmDialog/>`) no longer cancels a question that opens right after another** (#708):
+  a native `close` event from the first close arrived while the second was on screen and was
+  taken as the user closing it. Seen as a password re-prompt (after a wrong password) cancelling
+  itself; a confirm asked straight after another could do the same. A close event that finds the
+  dialog open again is now ignored (`dialog.ts`).
+
+- **An unknown quality token is drawn as bad, never good.** `valueStatus`
+  used to fall through to `good` for a token it did not know, so a newer
+  controller's quality reached the screen as trustworthy and commandable.
+
+### Upgrading
+
+- **Sign-in (#708) needs one line in the root layout**, beside `<ConfirmDialog/>`:
+  `const auth = createAuth();` then `auth.start()` in `onMount` (and `auth.stop()` on destroy).
+  Without it the kit behaves exactly as before: an elevated action is refused with the
+  controller's "sign in again" message, a sign-out mid-shift is not noticed until a reload, and a
+  standby's referral is not followed. `<ConfirmDialog/>` must be mounted for the password prompt.
+
+## 0.10.0 — 2026-11-18 (minor: no breaking API changes; visual defaults change: grey liquid, single-line ISA-101 pipes, a darker light-theme `--s1`)
+
+### Added
+
+- **A demoted task says so** (#836). The scan diagnostics show
+  `DEMOTED (overrun)` or `DEMOTED (CPU limit)` for a task whose real-time
+  priority the runtime withdrew mid-run, instead of `REFUSED`, which now
+  means only a request the OS turned down at start (`schedVerdict`,
+  `SchedStats.demoted` and `guard`).
+
+- **Sense lines and state words on a mimic's labels** (James's review of
+  the hand-built lift station, 11-15). A label's `at` names the point its
+  reading belongs to, and a dashed sense line joins them. A label's
+  `state` shows a state in words as a status chip, the first whose `when`
+  tag is true (`labelState(label, tags)`), so a pump says Running, Stopped
+  or Fault beside its symbol as well as on it. A bound label of a STRING
+  tag shows the text, and `values` gives words for the values a tag takes
+  (a step's name, a state code). A pit's `hatchAt` moves its access hatch
+  off a riser's line.
+- **A tank's pump ranges** (James's round-2 review, 11-15). A `Tank`'s
+  `ranges` draw a pump's start and stop as one bracket from on to off,
+  each end with its value, beside the scale; ranges that overlap stand in
+  columns of their own, so a lead and a lag pump's levels never crowd. An
+  alarm mark is also a dotted line across the vessel at its level.
+- **`ReadoutRow`** (James, 11-16): a reading as a two-cell row, its name
+  in a shaded cell, then the value, unit, sparkline and state in words
+  (`<ReadoutRow name="Level" value={62} unit="%" history={buf}
+  state={{ text: 'Normal' }} />`). Rows of one width stack as a table.
+  Its outline is half way from the ground to `--edge`, stronger than a
+  panel's `--border`, so the row holds its shape on the drawing.
+- **A label's `as`** (James, 11-16): `chip` (default), `text` (bare text
+  with a halo of the background colour, legible over a liquid or a pipe)
+  or `row` (a `ReadoutRow`; it may carry both `bind` and `state`), and its
+  `width`. `align: "center"` makes `x` its middle. The lift station's pumps say On/Off,
+  speed and Lead/Lag this way, stacked and centred over each pump, On
+  and Off in plain ink.
+- **A tank's range brackets** carry their name above the bracket and
+  "On 60" / "Off 30" at its ends, and stand as close to the scale as they
+  can:
+  one only clears the brackets it overlaps and those of their lines level
+  with it, not the widest line on the tank.
+
+### Changed (11-16)
+
+- **The bar at 16 px.** naut's default bar (title, description, screens),
+  `StatusPill`, the compact `AlarmBanner` and a `md` `Button` are 16 px
+  (`sm` 14 px); the bar's Ack all is `md`.
+- **The alarm banner says what it counts**: "2 unacked" in the bar too,
+  and "No active alarms" (no bare 0, no "clear") when there are none.
+
+### Changed
+
+- **Readout and state labels' names in `--ink-2`**, not `--muted`: plain
+  text, well past AA on the readout's chip.
+
+- **Colour only for state and alarms.** A `Tank`'s liquid is a neutral
+  grey (a project can still set `--fluid`); its new `alarm` turns it the
+  alarm colour while a condition holds (too hot, out of spec). An alarm
+  mark is grey with a hollow arrow until the level reaches it (`alarm`:
+  `true`, `"high"` or `"low"`). Sparklines on a mimic's readouts and in
+  `EquipmentPanel` draw in ink grey, not the accent blue.
+- **Text as the web asks of it:** `naut check` flags text drawn under 12 px
+  (was 9), on the page and in every panel; `EquipmentPanel` reads at 16 px
+  and is 360 px wide. The selection glow is blue again: blue is the kit's
+  highlight and focus colour.
+- **Status chips read at arm's length:** `StatusPill` is 13 px, not 12. The
+  light theme's `--s1` is a step darker (#2768c0), so white text on it (a
+  selected tab, an Auto button) passes 4.5:1.
+
+- **Level marks on a `Tank`.** `marks` puts an arrow and its value at each
+  level that matters (a pump's start and stop from a setpoint tag, a high
+  alarm at a fixed value) against the vessel, on its left or, with
+  `marksSide: "right"`, past its scale, as the lift station's LevelMarks
+  does beside its wet well. They draw outside the tank's box, so the
+  vessel keeps its size and its place on its pipes; labels too close are
+  nudged apart. `<Mimic>` hands a tank with marks the live tags, and
+  `naut check` checks each mark's tag.
+
+- **Panels: what a click on a mimic's equipment opens.** A piece of
+  equipment's `panel` lists its live readings, setpoints, commands and
+  switches (or names another piece whose panel it opens), and the new
+  `EquipmentPanel` shows it beside the drawing, as the lift station's
+  hand-built panel does. `panelFor(doc, id)` resolves one. `<Mimic>`
+  takes `clickable` (which equipment a click goes to; the rest let a
+  click through to what's under them, all but their own controls) and
+  `trends` (a sparkline of its last few minutes in every bound label;
+  `"trend"`, `"min"` and `"max"` on a label). A doc's `description` is a
+  line on what it shows. `sampleTag` / `tagHistory` keep the series, once
+  a second per tag, across page changes.
+
+- **A setpoint field with no `decimals` shows its value as it is** (up to
+  four places): a gain of 4.25 reads 4.25 and 0.07 reads 0.07, where they
+  were rounded to one place (screen evals, arm N: Kp, Ki and Kd in a panel
+  that gave no `decimals` read 4.3, 0.1 and 0.3).
+
 ### Changed
 
 - **Pipes on an ISA-101 screen are single lines.** `<Mimic>` draws a pipe
@@ -12,6 +340,16 @@
   dots are 10 px on a line.
 
 ### Added
+
+- **The screen routes a pipe itself.** A mimic pipe with `"routing":
+  "auto"` names what it connects, a port at each end or another pipe it
+  tees into (`"to": {"pipe": "AIR_HDR"}`), and `<Mimic>` draws the line:
+  square, clear of equipment and labels by 10 units, with as few bends
+  and crossings as it can, never along another pipe, its tees dotted.
+  Points on it are waypoints. The router is `routePipes()` (route.ts),
+  and `autoRoutes()` routes a document's pipes for both renderers, so the
+  VS Code editor draws them the same. `naut check` checks the ends, and
+  reports a routed pipe with no clear way (drawn straight across).
 
 - **A pipe through a label is reported.** `<Mimic>` marks each pipe's
   line (`data-pipe`), and `naut check`'s render pass reports a tag or a

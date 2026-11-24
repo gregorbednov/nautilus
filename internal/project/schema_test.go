@@ -30,6 +30,9 @@ import (
 	"time"
 
 	"github.com/joyautomation/nautilus/alarm"
+	"github.com/joyautomation/nautilus/alarm/channel"
+	"github.com/joyautomation/nautilus/alarm/escalate"
+	"github.com/joyautomation/nautilus/devbind"
 	"gopkg.in/yaml.v3"
 )
 
@@ -65,6 +68,9 @@ func goKeys(v any) []string {
 	t := reflect.TypeOf(v)
 	var out []string
 	for i := range t.NumField() {
+		if !t.Field(i).IsExported() {
+			continue // YAML never reads it: load-time bookkeeping
+		}
 		name, _, _ := strings.Cut(t.Field(i).Tag.Get("yaml"), ",")
 		if name == "" {
 			name = strings.ToLower(t.Field(i).Name)
@@ -73,6 +79,15 @@ func goKeys(v any) []string {
 			out = append(out, name)
 		}
 	}
+	sort.Strings(out)
+	return out
+}
+
+// withTLS replaces a channel's inlined TLS block (goKeys sees it as one
+// field) with the keys it inlines.
+func withTLS(keys []string) []string {
+	out := slices.DeleteFunc(keys, func(k string) bool { return k == "tlsconf" })
+	out = append(out, goKeys(channel.TLS{})...)
 	sort.Strings(out)
 	return out
 }
@@ -118,6 +133,7 @@ func TestSchemaMatchesLoader(t *testing.T) {
 		{"a task", goKeys(TaskConfig{}), schemaKeys(s.Definitions["task"].Properties)},
 		{"a tag", goKeys(TagConfig{}), schemaKeys(s.Definitions["tag"].Properties)},
 		{"the driver", goKeys(DriverConfig{}), schemaKeys(s.Definitions["driver"].Properties)},
+		{"a device", goKeys(devbind.Device{}), schemaKeys(s.Definitions["device"].Properties)},
 		{"sparkplug", goKeys(SparkplugConfig{}), schemaKeys(s.Definitions["sparkplug"].Properties)},
 		{"opcua", goKeys(OPCUAConfig{}), schemaKeys(s.Definitions["opcua"].Properties)},
 		{"an rbe class", goKeys(RBEConfig{}), schemaKeys(s.Definitions["rbe"].Properties)},
@@ -125,9 +141,26 @@ func TestSchemaMatchesLoader(t *testing.T) {
 		{"alarms", goKeys(AlarmsConfig{}), schemaKeys(s.Definitions["alarms"].Properties)},
 		{"alarm defaults", goKeys(alarm.Defaults{}), schemaKeys(s.Definitions["alarm-defaults"].Properties)},
 		{"the alarm journal", goKeys(AlarmJournalConfig{}), schemaKeys(s.Definitions["alarm-journal"].Properties)},
+		{"alarm chatter", goKeys(alarm.ChatterConfig{}), schemaKeys(s.Definitions["alarm-chatter"].Properties)},
+		{"alarm flood", goKeys(alarm.FloodConfig{}), schemaKeys(s.Definitions["alarm-flood"].Properties)},
 		{"an alarm notifier", goKeys(AlarmNotifyConfig{}), schemaKeys(s.Definitions["alarm-notify"].Properties)},
+		{"alarm on-call", goKeys(escalate.Oncall{}), schemaKeys(s.Definitions["alarm-oncall"].Properties)},
+		{"an on-call roster", goKeys(escalate.Roster{}), schemaKeys(s.Definitions["alarm-roster"].Properties)},
+		{"a roster's shift", slices.Sorted(slices.Values(append(goKeys(escalate.Window{}), "members"))), schemaKeys(s.Definitions["alarm-shift"].Properties)},
+		{"a time window", goKeys(escalate.Window{}), schemaKeys(s.Definitions["alarm-window"].Properties)},
+		{"an escalation policy", goKeys(escalate.Policy{}), schemaKeys(s.Definitions["alarm-escalation"].Properties)},
+		{"an escalation match", goKeys(escalate.Match{}), schemaKeys(s.Definitions["alarm-escalation-match"].Properties)},
+		{"an escalation level", goKeys(escalate.Level{}), schemaKeys(s.Definitions["alarm-level"].Properties)},
+		{"an escalation repeat", goKeys(escalate.Repeat{}), schemaKeys(s.Definitions["alarm-repeat"].Properties)},
+		{"alarm channels", goKeys(channel.Config{}), schemaKeys(s.Definitions["alarm-channels"].Properties)},
+		{"the email channel", withTLS(goKeys(channel.Email{})), schemaKeys(s.Definitions["alarm-channel-email"].Properties)},
+		{"an sms or voice channel", withTLS(goKeys(channel.Provider{})), schemaKeys(s.Definitions["alarm-channel-provider"].Properties)},
+		{"the webhook channel", withTLS(goKeys(channel.Webhook{})), schemaKeys(s.Definitions["alarm-channel-webhook"].Properties)},
 		{"an alarm rule", goKeys(alarm.Rule{}), schemaKeys(s.Definitions["alarm-rule"].Properties)},
 		{"an alarm rule's match", goKeys(alarm.Match{}), schemaKeys(s.Definitions["alarm-match"].Properties)},
+		{"substitutes", goKeys(SubstitutesConfig{}), schemaKeys(s.Definitions["substitutes"].Properties)},
+		{"substitute defaults", goKeys(SubstituteDefaults{}), schemaKeys(s.Definitions["substitute-defaults"].Properties)},
+		{"a substitute rule", goKeys(SubstituteRule{}), schemaKeys(s.Definitions["substitute-rule"].Properties)},
 	} {
 		if !reflect.DeepEqual(tc.got, tc.schema) {
 			t.Errorf("%s: the loader accepts %v, the extension's schema declares %v\n"+
@@ -277,6 +310,8 @@ func TestSchemaRequiresWhatLoaderRequires(t *testing.T) {
 
 	// opcua-client needs an endpoint and a manifest; opcua.New never
 	// dials either, so a complete config builds with no server in sight.
+	// (A section with neither is a devices: row's connection template,
+	// #975, which withDevices never builds; the schema allows both shapes.)
 	opcuaFS := fstest.MapFS{"opcua_manifest.yaml": &fstest.MapFile{Data: []byte(
 		"namespaces: [\"http://opcfoundation.org/UA/\", \"urn:x\"]\ntags:\n" +
 			"  - {name: T, nodeid: \"ns=1;s=T\", namespace: \"urn:x\", type: Double}\n")}}
@@ -527,6 +562,10 @@ func TestSchemaAlarmKeysAreAccepted(t *testing.T) {
 		"display": "Zones/15", "notes": "n", "on-delay": "5m",
 		"off-delay": "2s", "ack-required": "false", "auto-clear": "false",
 		"shelve": "false", "enable": "RTU9__Online",
+		"consequence": "Line over-pressure", "response": "Stop P101",
+		"rationalization": "{state: approved, by: alice, at: 2026-11-20}",
+		"suppress-when":   "P101.Stopped", "suppress-reason": "pump stopped",
+		"equipment": "P101",
 	}
 	for _, key := range schemaKeys(props) {
 		v, ok := sample[key]
@@ -694,5 +733,17 @@ alarms:
 		if err := dec.Decode(&m); err == nil {
 			t.Errorf("decoder accepted %q — a typo must be an error, not silence", bad)
 		}
+	}
+}
+
+// The audit: section's keys are the loader's.
+func TestSchemaAuditKeys(t *testing.T) {
+	s := loadSchema(t)
+	var node schemaNode
+	if err := json.Unmarshal(s.Properties["audit"], &node); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := goKeys(AuditConfig{}), schemaKeys(node.Properties); !reflect.DeepEqual(got, want) {
+		t.Errorf("audit: the loader accepts %v, the schema declares %v", got, want)
 	}
 }

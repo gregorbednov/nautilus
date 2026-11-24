@@ -73,6 +73,7 @@ type serverConfig struct {
 	productName      string
 	productURI       string
 	softwareVersion  string
+	redundancy       func() *Redundancy
 	buildNumber      string
 	buildDate        time.Time
 
@@ -83,6 +84,10 @@ type serverConfig struct {
 	// channels under any policy but None (uasc.Config.VerifyPeer). Nil
 	// trusts every certificate.
 	verifyPeer func(cert []byte) error
+
+	// userName decides UserName identity tokens (UserNameAuth); nil: only
+	// anonymous is accepted.
+	userName UserNameCheck
 
 	cap ServerCapabilities
 
@@ -443,6 +448,12 @@ func (s *Server) initEndpoints() {
 			}
 
 			for _, auth := range s.cfg.enabledAuth {
+				// A user token is never offered on an unsigned endpoint: its
+				// password would be encrypted, but nothing would bind the
+				// session's later requests to the user who proved it.
+				if auth.tokenType != ua.UserTokenTypeAnonymous && sec.secPolicy == ua.SecurityPolicyURINone {
+					continue
+				}
 				for _, authSec := range s.cfg.enabledSec {
 					if auth.tokenType == ua.UserTokenTypeAnonymous {
 						authSec.secPolicy = "http://opcfoundation.org/UA/SecurityPolicy#None"

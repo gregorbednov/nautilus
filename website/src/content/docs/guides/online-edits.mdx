@@ -65,6 +65,12 @@ and exits non-zero, so CI can fail a build when a controller has un-pulled
 edits. Composition is a single definition shared by the runtime, the language
 server, download, and pull, so a program round-trips losslessly.
 
+A live I/O configuration (a driver or a device applied over the API, not a
+program edit) comes back the same way: `naut pull --host <controller> --io`
+writes the project files it was read from, `--dry-run` shows the diff first,
+and a file you changed locally since the build is refused unless `--force`.
+See [Live I/O configuration](/guides/http-api/#live-io-configuration).
+
 In VS Code, Pull previews the change and asks before writing. If the program
 file is open, the pull goes through its editor — the text and any diagram view
 show the controller's program, and the file is saved — so the editor and the
@@ -93,8 +99,11 @@ default; set `NAUTILUS_ADDR=0.0.0.0:8080` to expose the tag API to other
 machines, and point the editor at it with the `nautilus.runtimeUrl` setting
 (`naut pull` takes `--host`). Exposing the API on the network also
 exposes its write surface, so set `NAUTILUS_TOKEN` on the controller and the
-matching `nautilus.token` in the editor — reads and `naut pull` stay
-open, but tag writes and online edits then require the token.
+matching `nautilus.token` in the editor. Tag writes and online edits then
+require the token. Reads and `naut pull` need it only when they reach the
+controller by a name that isn't `localhost`, an IP address or in its
+`NAUTILUS_ALLOWED_HOSTS`; the editor and `naut pull` (from
+`NAUTILUS_TOKEN` in its environment) send it.
 
 ## Every program, both directions
 

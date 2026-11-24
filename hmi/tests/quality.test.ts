@@ -41,6 +41,28 @@ describe('valueStatus — precedence', () => {
 	});
 });
 
+describe('valueStatus — substituted, and a token this kit does not know (#707)', () => {
+	it('substituted is its own status, below bad, above simulated and stale', () => {
+		expect(valueStatus({ quality: 'substituted' })).toBe('substituted');
+		expect(valueStatus({ quality: 'substituted', simulated: true })).toBe('substituted');
+		expect(valueStatus({ present: false, quality: 'substituted' })).toBe('notPublished');
+	});
+
+	it('an unknown quality token is bad, never good', () => {
+		// A controller newer than this kit may send a quality the kit has no
+		// case for: it must not be drawn as a trustworthy value.
+		expect(valueStatus({ quality: 'excellent' as never })).toBe('bad');
+		expect(isWritable({ quality: 'excellent' as never })).toBe(false);
+	});
+
+	it('a substituted value is degraded and still commandable (James, #707)', () => {
+		expect(STATUS_META.substituted.degraded).toBe(true);
+		expect(isWritable({ quality: 'substituted' })).toBe(true);
+		expect(isWritable({ quality: 'stale' })).toBe(false);
+		expect(isWritable({ quality: 'bad' })).toBe(false);
+	});
+});
+
 describe('valueStatus — the write gate', () => {
 	it('good and simulated may be commanded; nothing else may', () => {
 		expect(isWritable({})).toBe(true);

@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/joyautomation/nautilus/lang/ir"
 	"github.com/joyautomation/nautilus/lang/ld"
 	"github.com/joyautomation/nautilus/lang/st"
 )
@@ -65,6 +66,12 @@ func (c *rungCtx) logixExpr(e ld.Expr) (string, string) {
 		return ref, ""
 	case *ld.Call:
 		name := strings.ToUpper(x.Name)
+		if ref, ok := c.timerMillis(x); ok {
+			return ref, ""
+		}
+		if a, ok := intToRealOperand(x); ok {
+			return c.logixExpr(a)
+		}
 		if name == "EXPT" && len(x.Args) == 2 {
 			l, bad := c.logixExpr(x.Args[0])
 			if bad != "" {
@@ -122,8 +129,49 @@ func (c *rungCtx) simple(e ld.Expr) (string, bool) {
 	case *ld.Lit, *ld.Ref:
 		s, bad := c.logixExpr(x)
 		return s, bad == ""
+	case *ld.Call:
+		if ref, ok := c.timerMillis(x); ok {
+			return ref, true
+		}
+		if a, ok := intToRealOperand(x); ok {
+			return c.simple(a)
+		}
 	}
 	return "", false
+}
+
+// timerMillis reads TIME_TO_DINT(t.ET) / TIME_TO_DINT(t.PT) as the timer's
+// ACC / PRE, which Logix holds as that DINT of milliseconds (#793), and
+// TIME_TO_REAL of one, its milliseconds beside a REAL (#782).
+func (c *rungCtx) timerMillis(x *ld.Call) (string, bool) {
+	if !(strings.EqualFold(x.Name, "TIME_TO_DINT") || strings.EqualFold(x.Name, "TIME_TO_REAL")) || len(x.Args) != 1 {
+		return "", false
+	}
+	r, ok := x.Args[0].(*ld.Ref)
+	if !ok {
+		return "", false
+	}
+	up := strings.ToUpper(r.Text)
+	if !strings.HasSuffix(up, ".ET") && !strings.HasSuffix(up, ".PT") {
+		return "", false
+	}
+	return c.ref(r.Text)
+}
+
+// intToRealOperand reads DINT_TO_REAL(x) (an integer tag or literal into
+// a REAL) as x: as an operand beside a REAL, Logix converts it the same
+// way as it computes the box in REAL (#782; the ST writer does the same,
+// convert.go intToReal).
+func intToRealOperand(x *ld.Call) (ld.Expr, bool) {
+	from, to, trunc, ok := splitConversion(x.Name)
+	if !ok || trunc || len(x.Args) != 1 || (strings.ToUpper(to) != "REAL" && strings.ToUpper(to) != "LREAL") || !isConvInt(strings.ToUpper(from)) || strings.EqualFold(from, "TIME") {
+		return nil, false
+	}
+	switch x.Args[0].(type) {
+	case *ld.Ref, *ld.Lit:
+		return x.Args[0], true
+	}
+	return nil, false
 }
 
 // binaryInstr: the arithmetic with an instruction of its own. MOD, NEG,
@@ -143,6 +191,15 @@ func (c *rungCtx) assign(e ld.Element) ([]string, bool) {
 		a := as[i]
 		// A whole array or structure, or a run the import marked
 		// `@logix COP n`/`CPS n`, is a copy (copy.go).
+		if a.Pragma("logix MSG.Flags") {
+			// The import's copy of a message's status word (msg.go).
+			text, ok := c.msgFlags(a)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, text)
+			continue
+		}
 		var run *copyRun
 		if r, ok := runs[i]; ok {
 			run = &r
@@ -165,6 +222,11 @@ func (c *rungCtx) assign(e ld.Element) ([]string, bool) {
 		if hasBoolOp(a.Value) {
 			c.lw.diag(ruleDataOp, c.r.Line, c.r.Name, "{ %s := %s }: a comparison or boolean operator in an assignment has no Logix data instruction; drive the BOOL with a coil", a.Target, a.Value.IEC())
 			return nil, false
+		}
+		// A conversion that is the whole right-hand side, into a tag of
+		// its own type, is the store a data box makes anyway (#777).
+		if inner, ok := c.storeConversion(a); ok {
+			a.Value = inner
 		}
 		if c.realQuotient(a.Target, a.Value.IEC()) {
 			c.lw.diag(ruleConversion, c.r.Line, c.r.Name, "{ %s := %s }: %s", a.Target, a.Value.IEC(), realQuotientMsg)
@@ -202,6 +264,59 @@ func (c *rungCtx) assign(e ld.Element) ([]string, bool) {
 		out = append(out, texts...)
 	}
 	return out, true
+}
+
+// storeConversion reads `{ y := X_TO_Y(v) }` as `{ y := v }` when the
+// conversion is the one a Logix data box makes as it stores into y, so the
+// box (MOV, MUL, CPT, …) computes nautilus's value with no conversion of
+// its own (#777):
+//
+//	REAL → SINT/INT/DINT   the store rounds halves to even, as nautilus
+//	                       does (verified on a v38 controller; convert.go)
+//	DINT/INT → INT/SINT    the store keeps the low bits, which is
+//	                       nautilus's wrap (Logix's documented integer
+//	                       conversion; not yet run on a controller)
+//	TIME → SINT/INT/DINT   a timer's ET or PT is a DINT of milliseconds
+//	                       on Logix (ACC, PRE), narrowed as above
+//
+// Only from a source of the conversion's own type: an LREAL, or a source
+// the writer cannot type, keeps the conversion, which is then refused.
+func (c *rungCtx) storeConversion(a ld.Assignment) (ld.Expr, bool) {
+	call, ok := a.Value.(*ld.Call)
+	if !ok || len(call.Args) != 1 {
+		return nil, false
+	}
+	from, to, trunc, ok := splitConversion(call.Name)
+	if !ok || trunc || from == "" || !ir.IsConversion(call.Name) {
+		return nil, false
+	}
+	from, to = strings.ToUpper(from), strings.ToUpper(to)
+	w := &stWriter{lw: c.lw}
+	t := parseSTExpr(a.Target)
+	arg := parseSTExpr(call.Args[0].IEC())
+	if t == nil || arg == nil || w.typeOf(t) != to {
+		return nil, false
+	}
+	at := w.typeOf(arg)
+	switch {
+	case from == "REAL" && at == "REAL" && (to == "SINT" || to == "INT" || to == "DINT"):
+		return call.Args[0], true
+	case isConvInt(from) && isConvInt(to) && from != "TIME" && to != "TIME" &&
+		convWidth[from] > convWidth[to] && (at == from || at == anyInt):
+		return call.Args[0], true
+	case from == "TIME" && at == "TIME" && (to == "SINT" || to == "INT" || to == "DINT"):
+		// A timer's ET or PT is the DINT of milliseconds the box moves.
+		return call.Args[0], true
+	case to == "TIME" && isConvInt(from) && from != "TIME" && (at == from || at == anyInt):
+		// Into a timer's ET or PT: the box moves milliseconds into ACC or
+		// PRE (#793).
+		return call.Args[0], true
+	case (to == "REAL" || to == "LREAL") && isConvInt(from) && from != "TIME" && (at == from || at == anyInt):
+		// An integer into a REAL: the box converts as it stores (#782;
+		// a REAL is 32 bits on the controller, as ever).
+		return call.Args[0], true
+	}
+	return nil, false
 }
 
 // cpt lowers an assignment whose value is a whole expression.

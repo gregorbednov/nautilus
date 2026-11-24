@@ -5,6 +5,7 @@
 package uaserver
 
 import (
+	"context"
 	"crypto/rsa"
 	"fmt"
 	"log"
@@ -104,6 +105,27 @@ func VerifyPeer(fn func(cert []byte) error) Option {
 	return func(s *serverConfig) { s.verifyPeer = fn }
 }
 
+// UserNameCheck decides an ActivateSession's UserName identity token, once
+// its password has been decrypted and its server nonce checked: the
+// identity the session then acts as ("user:<name>") and an opaque
+// credential the caller can later recheck, or the status that refuses the
+// activation. It is called OFF the message loop (it may take a password
+// hash's time, and wait for a slot), with a context that ends when the
+// check must give up.
+type UserNameCheck func(ctx context.Context, sc *uasc.SecureChannel, name string, password []byte) (identity, cred string, code ua.StatusCode)
+
+// UserNameAuth enables UserName identity tokens, decided by check. They
+// are advertised on the secure endpoints only: never on None, where the
+// session that follows would carry no signature (initEndpoints). A
+// UserName token presented on an unsigned channel is refused before check
+// is called.
+func UserNameAuth(check UserNameCheck) Option {
+	return func(s *serverConfig) {
+		s.userName = check
+		EnableAuthMode(ua.UserTokenTypeUserName)(s)
+	}
+}
+
 // EnableAuthMode registers a new user authentication mode to the server.
 // All AuthModes except Anonymous require encryption by default, so EnableSecurity()
 // must also be called with at least one non-"None" SecurityPolicy
@@ -150,6 +172,27 @@ func ManufacturerName(name string) Option {
 func ProductName(name string) Option {
 	return func(s *serverConfig) {
 		s.productName = name
+	}
+}
+
+// Redundancy is what a member of a non-transparent redundant set (Part 4
+// §6.6.2.4.5.2) tells its clients: RedundancySupport, the ApplicationUris of
+// the whole set (ServerUriArray) and its own ServiceLevel, read at every
+// Read so it follows the elector.
+type Redundancy struct {
+	// Support is the RedundancySupport enumeration (1 Cold, 2 Warm, 3 Hot).
+	Support int32
+	// ServerURIs are every member's ApplicationUri.
+	ServerURIs []string
+	// ServiceLevel is this member's, 0-255.
+	ServiceLevel func() byte
+}
+
+// RedundancyFunc names the redundancy to report; nil (or a func returning
+// nil) is a server that is not in a redundant set.
+func RedundancyFunc(f func() *Redundancy) Option {
+	return func(s *serverConfig) {
+		s.redundancy = f
 	}
 }
 

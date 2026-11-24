@@ -13,11 +13,17 @@
 	import type { AlarmInstance, AlarmState, Priority } from '../alarms.svelte.js';
 	import { DEFAULT_SHELVE_TIMES_S, PRIORITY_META, PRIORITY_ORDER, STATE_META } from '../alarms.svelte.js';
 	import AlarmSign from './AlarmSign.svelte';
+	import ChatterBadge from './ChatterBadge.svelte';
+	import ChatterShelveDialog from './ChatterShelveDialog.svelte';
+	import { focusSplit, seenWhenText } from '../alarmchatter.js';
+	import type { AlarmFloodBrief } from '../alarms.svelte.js';
+	import OutOfServiceBadge from './OutOfServiceBadge.svelte';
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
 	import Icon from './Icon.svelte';
 	import { confirm } from '../confirm.svelte.js';
-	import { getOperator } from '../confirm.js';
+	import { getOperator, recordedAs } from '../confirm.js';
+	import { currentAuth, deniedFor } from '../auth.svelte.js';
 	import { ackLine, worstFirst } from './AckButton.svelte';
 
 	type SortKey = 'priority' | 'activeTime' | 'state' | 'name' | 'ackTime';
@@ -33,7 +39,12 @@
 		operator = '',
 		onselect,
 		pageSize = 100,
-		confirmAck = false
+		confirmAck = false,
+		flood = null,
+		focus = false,
+		onchattershelve,
+		suggestShelve,
+		search = ''
 	}: {
 		/** Full instance list — active, unack-RTN, and shelved together (e.g.
 		 * `alarmClient.instances`). Shelved rows are hidden by default; toggle
@@ -64,6 +75,20 @@
 		 *  changes for an existing caller; mount `<ConfirmDialog/>` once and
 		 *  turn it on. */
 		confirmAck?: boolean;
+		/** The flood in progress, if any (#1249). With `focus` it reorders the table. */
+		flood?: AlarmFloodBrief | null;
+		/** Flood focus: what needs a person first, highest priority first, and
+		 *  chattering or long-acknowledged alarms under "also standing". Nothing
+		 *  is hidden for good or acknowledged; it only applies during a flood. */
+		focus?: boolean;
+		/** Set it and a chattering alarm's badge opens the shelve-with-a-reason
+		 *  dialog; `by` is the name to record. Unset, the badge is only a label. */
+		onchattershelve?: (id: string, seconds: number, reason: string, by: string) => void | boolean | Promise<void | boolean>;
+		/** Seconds the chatter dialog opens on (the project's `shelve-suggest`). */
+		suggestShelve?: number;
+		/** The search box's starting text: a page's link to one alarm (#1249)
+		 * opens the table on it. Read once; the box is the operator's after. */
+		search?: string;
 	} = $props();
 
 	let sortKey = $state<SortKey>('activeTime');
@@ -71,8 +96,15 @@
 	let filterPriority = $state<Priority | ''>('');
 	let filterState = $state<AlarmState | ''>('');
 	let filterSite = $state('');
-	let filterText = $state('');
+	let filterText = $state(untrack(() => search));
 	let showShelved = $state(false);
+	let filterChatter = $state(false);
+	let chatterOpen = $state(false);
+	// The alarm the dialog was opened on, kept as it was: a chattering alarm
+	// leaves the list each time it returns to normal, and the dialog must not
+	// lose it mid-sentence.
+	let chatterAlarm = $state<AlarmInstance | null>(null);
+	let alsoOpen = $state(false);
 	let page = $state(0);
 	let selected = $state<Set<string>>(new Set());
 
@@ -104,6 +136,7 @@
 			if (!showShelved && a.state === 'shelved') return false;
 			if (filterPriority && a.priority !== filterPriority) return false;
 			if (filterState && a.state !== filterState) return false;
+			if (filterChatter && !a.chatter) return false;
 			if (filterSite && a.site !== filterSite) return false;
 			if (text) {
 				const hay = `${a.name} ${a.tag} ${a.id} ${a.site ?? ''} ${a.area ?? ''}`.toLowerCase();
@@ -139,11 +172,27 @@
 		});
 	});
 
-	const pageCount = $derived(Math.max(1, Math.ceil(sorted.length / pageSize)));
+	// Flood focus: the split of what is filtered; the "also standing" group is
+	// shown only when opened.
+	const split = $derived(focus && flood ? focusSplit(filtered, flood) : null);
+	const ordered = $derived(split ? [...split.first, ...(alsoOpen ? split.also : [])] : sorted);
+	const unackedAlso = $derived((split?.also ?? []).filter((a) => a.state === 'unack-active' || a.state === 'unack-rtn').length);
+	const chatteringCount = $derived(alarms.filter((a) => a.chatter).length);
+
+	// Under flood focus, a row collapsed out of sight is not selected: Ack (N)
+	// must not act on what the operator cannot see.
+	$effect(() => {
+		if (!split) return;
+		const visible = new Set(ordered.map((a) => a.id));
+		const kept = [...untrack(() => selected)].filter((id) => visible.has(id));
+		if (kept.length !== untrack(() => selected).size) selected = new Set(kept);
+	});
+
+	const pageCount = $derived(Math.max(1, Math.ceil(ordered.length / pageSize)));
 	$effect(() => {
 		if (page > pageCount - 1) page = Math.max(0, pageCount - 1);
 	});
-	const pageRows = $derived(sorted.slice(page * pageSize, page * pageSize + pageSize));
+	const pageRows = $derived(ordered.slice(page * pageSize, page * pageSize + pageSize));
 
 	const SORT_LABEL: Record<SortKey, string> = {
 		activeTime: 'Active time',
@@ -169,34 +218,48 @@
 
 	function toggleOne(id: string, ev: Event) {
 		ev.stopPropagation();
+		if (alarms.find((a) => a.id === id)?.state === 'suppressed') return;
 		const next = new Set(selected);
 		if (next.has(id)) next.delete(id);
 		else next.add(id);
 		selected = next;
 	}
 
-	const pageAllSelected = $derived(pageRows.length > 0 && pageRows.every((r) => selected.has(r.id)));
+	// A suppressed alarm is answered by returning its equipment to service, not by ack or shelve.
+	const pickable = $derived(pageRows.filter((r) => r.state !== 'suppressed'));
+	const pageAllSelected = $derived(pickable.length > 0 && pickable.every((r) => selected.has(r.id)));
 	function togglePage() {
 		const next = new Set(selected);
-		if (pageAllSelected) for (const r of pageRows) next.delete(r.id);
-		else for (const r of pageRows) next.add(r.id);
+		if (pageAllSelected) for (const r of pickable) next.delete(r.id);
+		else for (const r of pickable) next.add(r.id);
 		selected = next;
 	}
+
+	// What the signed-in role may do with the selection (#708): ack and
+	// shelve by each alarm's tag, ack all on the whole controller. A
+	// convenience: the controller decides.
+	const chosen = $derived(alarms.filter((a) => selected.has(a.id)));
+	const ackDenied = $derived(chosen.map((a) => deniedFor('ack', a.tag)).find((r) => r) ?? '');
+	const shelveDenied = $derived(chosen.map((a) => deniedFor('shelve', a.tag)).find((r) => r) ?? '');
+	const ackAllDenied = $derived(deniedFor('ack'));
+	/** The name a record carries: the signed-in user's, else the typed one. */
+	const recordBy = (typed: string) => recordedAs(currentAuth()?.user).by(typed);
 
 	const unackedCount = $derived(alarms.filter((a) => a.state === 'unack-active' || a.state === 'unack-rtn').length);
 
 	/** Ask before acking, when `confirmAck` is on. Returns the name to record. */
 	async function askAck(subject: AlarmInstance[], title: string): Promise<string | null> {
-		if (!confirmAck) return byField || operator;
+		if (!confirmAck) return recordBy(byField || operator);
+		const rec = recordedAs(currentAuth()?.user);
 		const ok = await confirm({
 			title,
 			items: worstFirst(subject).map(ackLine),
 			confirmLabel: 'Acknowledge',
-			operator: true,
-			note: 'Acknowledgement is permanent and unauthenticated — the name above is the whole record.'
+			operator: rec.operator,
+			note: rec.note
 		});
 		if (!ok) return null;
-		return getOperator() || byField || operator;
+		return rec.by(getOperator() || byField || operator);
 	}
 
 	async function ackSelected() {
@@ -220,7 +283,7 @@
 	}
 	function unshelveSelected() {
 		if (!onunshelve) return;
-		for (const id of selected) onunshelve(id, byField || operator);
+		for (const id of selected) onunshelve(id, recordBy(byField || operator));
 		selected = new Set();
 	}
 
@@ -231,7 +294,7 @@
 	}
 	function confirmShelve() {
 		const until = now + shelveSeconds * 1000;
-		for (const id of selected) onshelve(id, until, byField || operator);
+		for (const id of selected) onshelve(id, until, recordBy(byField || operator));
 		selected = new Set();
 		shelveOpen = false;
 	}
@@ -250,7 +313,8 @@
 			day: '2-digit',
 			hour: '2-digit',
 			minute: '2-digit',
-			second: '2-digit'
+			second: '2-digit',
+			timeZoneName: 'short'
 		});
 	}
 	function fmtShelveOpt(s: number): string {
@@ -287,6 +351,12 @@
 				<input type="checkbox" bind:checked={showShelved} />
 				show shelved
 			</label>
+			{#if chatteringCount || filterChatter}
+				<label class="chip">
+					<input type="checkbox" bind:checked={filterChatter} />
+					Chattering ({chatteringCount})
+				</label>
+			{/if}
 			<!-- Only shown in the stacked layout, where the sortable header is
 			     out of sight — same `sortKey`/`sortDir` the header drives. -->
 			<div class="sortctl" role="group" aria-label="Sort">
@@ -311,14 +381,14 @@
 		</div>
 
 		<div class="actions">
-			<span class="count">{unackedCount} unack · {sorted.length} shown</span>
-			<Button size="sm" icon="check" disabled={!selected.size} onclick={ackSelected}>
+			<span class="count">{unackedCount} unack · {ordered.length} shown</span>
+			<Button size="sm" icon="check" disabled={!selected.size || !!ackDenied} title={ackDenied || undefined} onclick={ackSelected}>
 				Ack ({selected.size})
 			</Button>
-			<Button size="sm" variant="secondary" icon="check-circle" onclick={ackAll}>Ack All</Button>
-			<Button size="sm" icon="clock" disabled={!selected.size} onclick={openShelveModal}>Shelve</Button>
+			<Button size="sm" variant="secondary" icon="check-circle" disabled={!!ackAllDenied} title={ackAllDenied || undefined} onclick={ackAll}>Ack All</Button>
+			<Button size="sm" icon="clock" disabled={!selected.size || !!shelveDenied} title={shelveDenied || undefined} onclick={openShelveModal}>Shelve</Button>
 			{#if onunshelve}
-				<Button size="sm" variant="ghost" icon="arrow-path" disabled={!selected.size} onclick={unshelveSelected}>
+				<Button size="sm" variant="ghost" icon="arrow-path" disabled={!selected.size || !!shelveDenied} title={shelveDenied || undefined} onclick={unshelveSelected}>
 					Unshelve
 				</Button>
 			{/if}
@@ -372,7 +442,7 @@
 							: undefined}
 					>
 						<td class="sel" onclick={(e) => toggleOne(a.id, e)}>
-							<input type="checkbox" checked={selected.has(a.id)} onclick={(e) => toggleOne(a.id, e)} />
+							<input type="checkbox" checked={selected.has(a.id)} disabled={a.state === 'suppressed'} onclick={(e) => toggleOne(a.id, e)} />
 						</td>
 						<td class="col-priority">
 							<span class="prio" style="--c: {PRIORITY_META[a.priority].color}" title={PRIORITY_META[a.priority].label}>
@@ -387,8 +457,13 @@
 								<span class="dot" aria-hidden="true"></span>
 								{meta.label}
 							</span>
+							{#if a.state === 'suppressed'}<OutOfServiceBadge alarm={a} />{/if}
 						</td>
-						<td class="col-label" title={a.tag}>{a.name}</td>
+						<td class="col-label" title={a.tag}>
+							{a.name}
+							{#if a.chatter}<ChatterBadge chatter={a.chatter} {now} onclick={onchattershelve ? () => ((chatterAlarm = a), (chatterOpen = true)) : undefined} />{/if}
+							{#if a.seenWhen}<span class="seen">{seenWhenText(a)}</span>{/if}
+						</td>
 						<td class="col-pipeline">{a.class ?? ([a.site, a.area].filter(Boolean).join(' / ') || '—')}</td>
 						<td class="col-ack num" class:blank={!a.ackMs} data-label="Acked">{fmtTime(a.ackMs)}</td>
 						<td class="col-ackuser" class:blank={!a.ackBy} data-label="by">{a.ackBy ?? '—'}</td>
@@ -400,6 +475,14 @@
 		</table>
 	</div>
 
+	{#if split?.also.length}
+		<div class="also">
+			<Button size="sm" variant="ghost" onclick={() => (alsoOpen = !alsoOpen)} aria-expanded={alsoOpen}>
+				Also standing ({split.also.length}{unackedAlso ? `, ${unackedAlso} unacknowledged` : ''}): chattering or acknowledged before the flood. {alsoOpen ? 'Hide' : 'Show'}
+			</Button>
+		</div>
+	{/if}
+
 	{#if pageCount > 1}
 		<div class="pager">
 			<Button size="sm" variant="ghost" disabled={page === 0} onclick={() => (page -= 1)}>Prev</Button>
@@ -408,6 +491,18 @@
 		</div>
 	{/if}
 </div>
+
+{#if onchattershelve}
+	<ChatterShelveDialog
+		bind:open={chatterOpen}
+		alarm={chatterAlarm}
+		{now}
+		{shelveTimes}
+		suggest={suggestShelve}
+		operator={operator}
+		onconfirm={onchattershelve}
+	/>
+{/if}
 
 <Modal bind:open={shelveOpen} title="Shelve {selected.size} alarm(s)" size="sm">
 	{#snippet children()}
@@ -419,10 +514,14 @@
 				{/each}
 			</select>
 		</label>
-		<label class="field">
-			<span>Acknowledged by</span>
-			<input type="text" bind:value={byField} placeholder="operator name" />
-		</label>
+		{#if currentAuth()?.user}
+			<p class="field">Recorded as {currentAuth()?.user}, the signed-in user.</p>
+		{:else}
+			<label class="field">
+				<span>Acknowledged by</span>
+				<input type="text" bind:value={byField} placeholder="operator name" />
+			</label>
+		{/if}
 	{/snippet}
 	{#snippet footer()}
 		<Button variant="ghost" onclick={() => (shelveOpen = false)}>Cancel</Button>
@@ -494,6 +593,14 @@
 		font: inherit;
 		font-size: var(--font-xs);
 		padding: var(--space-1) var(--space-2);
+	}
+	.seen {
+		display: block;
+		font-size: var(--font-2xs);
+		color: var(--muted);
+	}
+	.also {
+		padding: var(--space-1) 0;
 	}
 	.chip {
 		display: inline-flex;

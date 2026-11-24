@@ -6,9 +6,10 @@
 package opcua
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"net"
+	"log/slog"
 	"reflect"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/gopcua/opcua/id"
 	"github.com/gopcua/opcua/server"
 	"github.com/gopcua/opcua/ua"
+	"github.com/gopcua/opcua/uasc"
 	nio "github.com/joyautomation/nautilus/io"
 )
 
@@ -39,18 +41,6 @@ type testServer struct {
 	sess *Session
 }
 
-// freePort asks the kernel for a port and gives it back — the gopcua server
-// does not report the port it bound when asked for :0.
-func freePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
-}
-
 func startServer(t *testing.T, port int) *testServer {
 	t.Helper()
 	return startServerWith(t, port, "urn:nautilus:test", 12.5)
@@ -60,6 +50,14 @@ func startServer(t *testing.T, port int) *testServer {
 // chosen, so a test can restart "the same" server with its namespace gone
 // and another namespace holding the same index and node ids.
 func startServerWith(t *testing.T, port int, nsURI string, speed float64, opts ...server.Option) *testServer {
+	t.Helper()
+	return startServerHooked(t, port, nsURI, speed, nil, opts...)
+}
+
+// startServerHooked is startServerWith with before run on the server just
+// before Start: gopcua registers its service handlers in Start and keeps
+// one registered earlier, so a test can replace a service there.
+func startServerHooked(t *testing.T, port int, nsURI string, speed float64, before func(*server.Server), opts ...server.Option) *testServer {
 	t.Helper()
 	if len(opts) == 0 {
 		opts = []server.Option{server.EnableSecurity("None", ua.MessageSecurityModeNone)}
@@ -87,6 +85,9 @@ func startServerWith(t *testing.T, port int, nsURI string, speed float64, opts .
 	add("Run", true, id.Boolean, rd)
 	add("Name", "pump-1", id.String, rd)
 	add("Setpoint", 0.0, id.Double, rw)
+	if before != nil {
+		before(srv)
+	}
 	if err := srv.Start(context.Background()); err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -300,8 +301,9 @@ func TestWrites(t *testing.T) {
 	d := startDriver(t, ts.url, manifest(2))
 	waitFor(t, "first poll", func() bool { _, ok := read(t, d)["Setpoint"]; return ok })
 
-	// Baseline: recorded, never sent.
-	if err := d.WriteOutputs(nio.Values{"Setpoint": 5.0}); err != nil {
+	// Baseline: the server holds 0.0 and so does the program, so nothing is
+	// sent (a differing first value is a command: TestFirstOutput*).
+	if err := d.WriteOutputs(nio.Values{"Setpoint": 0.0}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(150 * time.Millisecond)
@@ -348,6 +350,7 @@ func TestReconnectAndStale(t *testing.T) {
 	ts := startServer(t, port)
 	d := startDriver(t, ts.url, manifest(2))
 	waitFor(t, "first poll", func() bool { _, ok := read(t, d)["Speed"]; return ok })
+	_ = d.WriteOutputs(nio.Values{"Setpoint": 0.0}) // baseline, equal to the server's value
 
 	_ = ts.srv.Close()
 	waitFor(t, "offline", func() bool { return read(t, d)["plant__Online"] == false })
@@ -358,7 +361,6 @@ func TestReconnectAndStale(t *testing.T) {
 		t.Errorf("Speed quality during outage = %v, want stale", q["Speed"])
 	}
 	// A write queued while down waits for the reconnect.
-	_ = d.WriteOutputs(nio.Values{"Setpoint": 0.0}) // baseline
 	_ = d.WriteOutputs(nio.Values{"Setpoint": 3.0})
 	if h := d.Health(); h.QueuedWrites != 1 || h.State == "connected" {
 		t.Errorf("health during outage = %+v", h)
@@ -707,4 +709,163 @@ func TestStandbyFirstPushCommands(t *testing.T) {
 	open.Store(true)
 	_ = d.WriteOutputs(nio.Values{"Setpoint": 9.0})
 	waitFor(t, "the takeover push commands", func() bool { return ts.get(t, "Setpoint") == 9.0 })
+}
+
+// A demotion in the middle of a batch stops the rest of it (G1c, #861):
+// the gate is looked at before every chunk, not once per batch. Here the
+// server closes the gate while it handles the first chunk (one write per
+// chunk), so no second chunk may arrive; the dropped commands are
+// forgotten and asked for again, as when the whole batch is dropped.
+func TestWriteGateClosingMidBatchStopsTheRest(t *testing.T) {
+	var open atomic.Bool
+	open.Store(true)
+	var writeCalls atomic.Int64
+	ts := startServerHooked(t, freePort(t), "urn:nautilus:test", 12.5, func(s *server.Server) {
+		s.RegisterHandler(id.WriteRequest_Encoding_DefaultBinary,
+			func(_ *uasc.SecureChannel, r ua.Request, _ uint32) (ua.Response, error) {
+				req := r.(*ua.WriteRequest)
+				writeCalls.Add(1)
+				open.Store(false) // demoted while this chunk is on the wire
+				res := make([]ua.StatusCode, len(req.NodesToWrite))
+				return &ua.WriteResponse{
+					ResponseHeader: &ua.ResponseHeader{ // as gopcua's server fills one in
+						Timestamp:          time.Now(),
+						RequestHandle:      req.RequestHeader.RequestHandle,
+						ServiceDiagnostics: &ua.DiagnosticInfo{},
+						StringTable:        []string{},
+						AdditionalHeader:   ua.NewExtensionObject(nil),
+					},
+					Results:         res,
+					DiagnosticInfos: []*ua.DiagnosticInfo{},
+				}, nil
+			})
+	})
+	m := manifest(2)
+	for _, n := range []string{"SetA", "SetB"} {
+		m.Tags = append(m.Tags, TagBinding{Name: n, NodeID: "ns=2;s=Setpoint", Namespace: "urn:nautilus:test", Type: "Double", Writable: true})
+	}
+	logs := &lockedBuffer{}
+	d := startDriver(t, ts.url, m, WithMaxNodes(1),
+		WithLogger(slog.New(slog.NewTextHandler(logs, nil))))
+	d.SetWriteGate(open.Load)
+	waitFor(t, "online", d.Online)
+
+	_ = d.WriteOutputs(nio.Values{"Setpoint": 0.0, "SetA": 0.0, "SetB": 0.0}) // baseline
+	_ = d.WriteOutputs(nio.Values{"Setpoint": 1.0, "SetA": 2.0, "SetB": 3.0})
+	waitFor(t, "the first chunk", func() bool { return writeCalls.Load() >= 1 })
+	time.Sleep(500 * time.Millisecond) // time for further chunks, were they sent
+	if n := writeCalls.Load(); n != 1 {
+		t.Errorf("%d write requests reached the server; the gate closed during the first, so only it may", n)
+	}
+	if h := d.Health(); h.Writes != 1 {
+		t.Errorf("health counts %d writes, want 1", h.Writes)
+	}
+	if !d.OutputsWanted() {
+		t.Error("the commands dropped mid-batch must be asked for again")
+	}
+	// The log says the batch was cut short, how much went out, and which
+	// tags did not, so an operator can tell what reached the PLC. Map
+	// order decides which tag went first; the other two were dropped.
+	var line string
+	for _, l := range strings.Split(logs.String(), "\n") {
+		if strings.Contains(l, "mid-batch") {
+			line = l
+		}
+	}
+	if line == "" {
+		t.Fatalf("no mid-batch log line; got:\n%s", logs.String())
+	}
+	if !strings.Contains(line, "sent=1") || !strings.Contains(line, "dropped=2") {
+		t.Errorf("log line should give sent=1 dropped=2: %s", line)
+	}
+	named := 0
+	for _, n := range []string{"Setpoint", "SetA", "SetB"} {
+		if strings.Contains(line, n) {
+			named++
+		}
+	}
+	if named != 2 {
+		t.Errorf("log line names %d of the tags, want the 2 dropped: %s", named, line)
+	}
+}
+
+// lockedBuffer is a log sink the driver's goroutines and the test can share.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// Uncertain_SubstituteValue keeps its value and reports Substituted; any other
+// Uncertain code is still Bad; a later Good read clears it (#707).
+func TestSubstituteValueStatus(t *testing.T) {
+	d := &Driver{snapshot: map[string]any{}, online: true}
+	b := &binding{TagBinding: TagBinding{Name: "Speed"}}
+	d.classes = []*scanClass{{bindings: []*binding{b}}}
+	dv := func(sc ua.StatusCode, v float64) *ua.DataValue {
+		return &ua.DataValue{EncodingMask: ua.DataValueValue | ua.DataValueStatusCode, Status: sc, Value: ua.MustVariant(v)}
+	}
+	q := func() nio.Quality { return d.Quality()["Speed"] }
+
+	d.apply(b, dv(0x40910000, 41.5))
+	if q() != nio.Substituted || d.snapshot["Speed"] != 41.5 {
+		t.Errorf("substitute value: quality %v value %v", q(), d.snapshot["Speed"])
+	}
+	d.apply(b, dv(0x40900000, 1)) // Uncertain_LastUsableValue
+	if q() != nio.Bad {
+		t.Errorf("other uncertain: quality %v, want bad", q())
+	}
+	d.apply(b, dv(0x40910000, 42))
+	d.apply(b, dv(0, 43))
+	if _, ok := d.Quality()["Speed"]; ok || d.snapshot["Speed"] != 43.0 {
+		t.Errorf("good again: %v %v", d.Quality(), d.snapshot["Speed"])
+	}
+}
+
+// A server that restarts with its state reset must be commanded again
+// with the program's unchanged value (#1061): an unchanged value is not a
+// command, but a new session is a new start for the server.
+func TestReassertAfterServerRestart(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		on := on
+		t.Run(fmt.Sprintf("on=%v", on), func(t *testing.T) {
+			t.Parallel()
+			port := freePort(t)
+			ts := startServer(t, port)
+			d := startDriver(t, ts.url, manifest(2), WithReassertOnReconnect(on))
+			waitFor(t, "online", func() bool { return read(t, d)["plant__Online"] == true })
+			_ = d.WriteOutputs(nio.Values{"Setpoint": 0.0}) // baseline
+			_ = d.WriteOutputs(nio.Values{"Setpoint": 9.0})
+			waitFor(t, "the write", func() bool { return ts.get(t, "Setpoint") == 9.0 })
+
+			_ = ts.srv.Close()
+			waitFor(t, "offline", func() bool { return read(t, d)["plant__Online"] == false })
+			ts2 := startServer(t, port) // fresh state: Setpoint back at its start value
+			start := ts2.get(t, "Setpoint")
+			waitFor(t, "reconnect", func() bool { return read(t, d)["plant__Online"] == true })
+			// The runtime's scan: the driver asks for every output, and
+			// the program's value has not changed.
+			deadline := time.Now().Add(3 * time.Second)
+			for time.Now().Before(deadline) && ts2.get(t, "Setpoint") != 9.0 {
+				if d.OutputsWanted() {
+					_ = d.WriteOutputs(nio.Values{"Setpoint": 9.0})
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			if got := ts2.get(t, "Setpoint") == 9.0; got != on {
+				t.Errorf("reassert=%v: Setpoint %v after the restart (start value %v)", on, ts2.get(t, "Setpoint"), start)
+			}
+		})
+	}
 }

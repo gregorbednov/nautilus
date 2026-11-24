@@ -8,11 +8,15 @@ package project
 // commissioning day.
 
 import (
+	"os"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	"github.com/joyautomation/nautilus/alarm"
+	"github.com/joyautomation/nautilus/devbind"
 	"github.com/joyautomation/nautilus/runtime"
 )
 
@@ -336,5 +340,244 @@ alarms:
 `, nil), "")
 	if err == nil || !strings.Contains(err.Error(), "capture group") {
 		t.Errorf("want a capture-group error, got %v", err)
+	}
+}
+
+// The runtime owns the substitute companion BOOLs, so an alarm on one is not
+// "dead" (#707) — but only in a project that has substitutes:, and only for
+// a substitutable input's own <tag>__Substituted.
+func TestCheckAlarmsKnowsSubstituteCompanions(t *testing.T) {
+	withSubs := `
+tasks:
+  - program: program.st
+tags:
+  - { name: Level, role: input, type: REAL, init: 0.0 }
+  - { name: Other, role: input, type: REAL, init: 0.0 }
+substitutes:
+  rules:
+    - { match: Level, substitute: 50.0 }
+alarms:
+  defs:
+    - { id: exp, tag: __Substitute_Expired }
+    - { id: flt, tag: __Substitute_Fault }
+    - { id: una, tag: __SubstitutesUnacked }
+    - { id: lvl, tag: Level__Substituted }
+    - { id: oth, tag: Other__Substituted }
+`
+	proj, rt := loadAlarms(t, alarmFS(withSubs, nil))
+	_, errs, warns, err := proj.CheckAlarms(rt)
+	if err != nil || len(errs) != 0 {
+		t.Fatalf("errs %v err %v", errs, err)
+	}
+	// Only Other__Substituted (Other is not substitutable) is unknown.
+	if len(warns) != 1 || !strings.Contains(warns[0], "Other__Substituted") {
+		t.Fatalf("want one warning, for Other__Substituted: %v", warns)
+	}
+
+	noSubs := strings.Replace(withSubs, "substitutes:\n  rules:\n    - { match: Level, substitute: 50.0 }\n", "", 1)
+	proj, rt = loadAlarms(t, alarmFS(noSubs, nil))
+	_, _, warns, _ = proj.CheckAlarms(rt)
+	if len(warns) != 5 {
+		t.Fatalf("without substitutes: every companion is an undeclared tag: %v", warns)
+	}
+}
+
+// An IO-Link port device raises its identity fault by default: high
+// priority, qualified by its master answering, named for the port. A
+// project with no port devices adds none.
+func TestPortDeviceIdentityFaultIsAnAlarm(t *testing.T) {
+	prof, err := os.ReadFile("../../devprofile/profiles/pepperl-fuchs-ice3.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iodd, err := os.ReadFile("../../iolink/iodd/testdata/acme-level100-20261118-IODD1.1.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fsys := fstest.MapFS{
+		"profiles/pepperl-fuchs-ice3.yaml":        {Data: prof},
+		"iodd/acme-level100-20261118-IODD1.1.xml": {Data: iodd},
+	}
+	set, err := devbind.Resolve(fsys, []devbind.Device{{
+		Name: "M", Profile: "pepperl-fuchs-ice3", Endpoint: "h",
+		Ports: map[int]devbind.Port{3: {Name: "LEVEL3", IODD: "acme-level100-20261118-IODD1.1.xml"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &Project{devices: set}
+	files := p.deviceAlarmFiles()
+	cfg := &alarm.Config{}
+	defs, err := cfg.Compose(files, []alarm.TagInfo{{Name: "LEVEL3__IdentityFault", TypeName: "BOOL"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 1 {
+		t.Fatalf("defs %+v, want the one identity fault", defs)
+	}
+	d := defs[0]
+	if d.Tag != "LEVEL3__IdentityFault" || d.Priority != alarm.High || d.Enable != "M__Online" || d.Name != "LEVEL3: wrong, missing or unconfirmed device on M port 3" {
+		t.Errorf("def %+v", d)
+	}
+	if got := (&Project{}).deviceAlarmFiles(); got != nil {
+		t.Errorf("a project with no devices has device alarms %+v", got)
+	}
+
+	// And it reaches the project's own composition, beside the manifest's.
+	proj, rt := loadAlarms(t, alarmFS(alarmTags+`  - { name: LEVEL3__IdentityFault, role: state, init: false }
+alarms:
+  defs:
+    - { id: intrusion, tag: RTU9_ZONE15_INT_001_YA, name: Intrusion }
+`, nil))
+	proj.devices = set
+	all, err := proj.AlarmDefs(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, d := range all {
+		ids[d.ID] = true
+	}
+	if !ids["intrusion"] || !ids["LEVEL3__IdentityFault"] || len(all) != 2 {
+		t.Errorf("project alarms %v, want the manifest's and the identity fault", ids)
+	}
+}
+
+// suppress-when is checked like enable (#715 PR 5): a member the type
+// does not have, or one that is not a BOOL, is an error (at run time it
+// would suppress nothing, silently against the author's intent); a tag
+// the manifest does not declare is a warning, as a condition is.
+func TestCheckAlarmsChecksSuppressWhen(t *testing.T) {
+	proj, rt := loadAlarms(t, alarmFS(alarmTags+`
+alarms:
+  defs:
+    - { id: a, tag: RTU9_ZONE15_FIT_001.HH, suppress-when: RTU9_ZONE15_FIT_001.STOP }
+    - { id: b, tag: RTU9_ZONE15_FIT_001.L, suppress-when: RTU9_ZONE15_FIT_001.PV }
+    - { id: c, tag: RTU9_ZONE15_FIT_001.HH, equipment: Skid, suppress-when: RTU7_PMP01_STOPPED }
+    - { id: d, tag: RTU9_ZONE15_FIT_001.HH, suppress-when: Duty }
+`, nil))
+	_, errs, warns, err := proj.CheckAlarms(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(errs, "\n")
+	if len(errs) != 3 || !strings.Contains(joined, "alarm a's suppress-when") || !strings.Contains(joined, "alarm b's suppress-when") || !strings.Contains(joined, `alarm d's suppress-when "Duty" is not a BOOL`) {
+		t.Fatalf("want 3 suppress-when errors (unknown member, non-BOOL member, non-BOOL flat tag), got %v", errs)
+	}
+	if !strings.Contains(strings.Join(warns, "\n"), "RTU7_PMP01_STOPPED") {
+		t.Errorf("an undeclared suppress-when tag should warn: %v", warns)
+	}
+}
+
+// alarms.chatter and alarms.flood reach the engine, and naut check
+// refuses settings the detector cannot honour (#1249).
+func TestAlarmDetectionConfig(t *testing.T) {
+	proj, rt := loadAlarms(t, alarmFS(alarmTags+`
+alarms:
+  chatter: { window: 30s, count: 4 }
+  flood: { window: 5m, threshold: 20 }
+  defs:
+    - { id: a, tag: RTU7_PMP01_FAULT }
+`, nil))
+	if _, errs, _, err := proj.CheckAlarms(rt); err != nil || len(errs) != 0 {
+		t.Fatalf("CheckAlarms: %v %v", errs, err)
+	}
+	eng, err := proj.AlarmEngine(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { eng.Close() })
+	if got := proj.Alarms.Flood.Resolved(); got.Threshold != 20 || time.Duration(got.Window) != 5*time.Minute {
+		t.Fatalf("flood config = %+v", got)
+	}
+	if got := proj.Alarms.Chatter.Resolved(); got.Count != 4 || time.Duration(got.Window) != 30*time.Second {
+		t.Fatalf("chatter config = %+v", got)
+	}
+
+	// Each setting reaches the engine: one it cannot honour stops it.
+	for _, yml := range []string{"chatter: { count: 1 }", "flood: { threshold: 5000 }"} {
+		p, r := loadAlarms(t, alarmFS(alarmTags+"\nalarms:\n  "+yml+"\n  defs:\n    - { id: a, tag: RTU7_PMP01_FAULT }\n", nil))
+		if _, err := p.AlarmEngine(r); err == nil {
+			t.Errorf("the engine took %s", yml)
+		}
+	}
+
+	bad, rt2 := loadAlarms(t, alarmFS(alarmTags+`
+alarms:
+  chatter: { count: 1 }
+  flood: { threshold: 5000 }
+  defs:
+    - { id: a, tag: RTU7_PMP01_FAULT }
+`, nil))
+	_, errs, _, err := bad.CheckAlarms(rt2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(errs) != 2 || !strings.Contains(errs[0], "alarms.chatter.count") || !strings.Contains(errs[1], "alarms.flood.threshold") {
+		t.Fatalf("errs = %v", errs)
+	}
+}
+
+// Paging under chattering and floods is on by default (#1249 slice 3);
+// alarms.flood.individual adds to critical and safety and can never take
+// them away; naut check refuses a priority it does not know and a class
+// no alarm has.
+func TestAlarmPagingConfig(t *testing.T) {
+	proj, rt := loadAlarms(t, alarmFS(alarmTags+`
+alarms:
+  defs:
+    - { id: a, tag: RTU7_PMP01_FAULT, class: level }
+`, nil))
+	chatter, flood := proj.Alarms.paging()
+	if !chatter || !flood.Group || !slices.Equal(flood.Priorities, []alarm.Priority{alarm.Critical}) || !slices.Equal(flood.Classes, []string{"safety"}) {
+		t.Fatalf("defaults: chatter %v flood %+v", chatter, flood)
+	}
+	if _, errs, _, err := proj.CheckAlarms(rt); err != nil || len(errs) != 0 {
+		t.Fatalf("CheckAlarms: %v %v", errs, err)
+	}
+
+	proj, rt = loadAlarms(t, alarmFS(alarmTags+`
+alarms:
+  chatter: { page: false }
+  flood: { group-pages: false, individual: { priorities: [high], classes: [level] } }
+  defs:
+    - { id: a, tag: RTU7_PMP01_FAULT, class: level }
+`, nil))
+	chatter, flood = proj.Alarms.paging()
+	if chatter || flood.Group || !slices.Equal(flood.Priorities, []alarm.Priority{alarm.Critical, alarm.High}) ||
+		!slices.Equal(flood.Classes, []string{"safety", "level"}) {
+		t.Fatalf("set: chatter %v flood %+v", chatter, flood)
+	}
+	if _, errs, _, err := proj.CheckAlarms(rt); err != nil || len(errs) != 0 {
+		t.Fatalf("CheckAlarms: %v %v", errs, err)
+	}
+
+	// A class compares ignoring case: LEVEL names the level alarms, and
+	// Safety is the safety class already there.
+	proj, rt = loadAlarms(t, alarmFS(alarmTags+`
+alarms:
+  flood: { individual: { classes: [LEVEL, Safety] } }
+  defs:
+    - { id: a, tag: RTU7_PMP01_FAULT, class: level }
+`, nil))
+	if _, flood = proj.Alarms.paging(); !slices.Equal(flood.Classes, []string{"safety", "LEVEL"}) {
+		t.Fatalf("mixed case: %+v", flood)
+	}
+	if _, errs, _, err := proj.CheckAlarms(rt); err != nil || len(errs) != 0 {
+		t.Fatalf("CheckAlarms mixed case: %v %v", errs, err)
+	}
+
+	bad, rt2 := loadAlarms(t, alarmFS(alarmTags+`
+alarms:
+  flood: { individual: { priorities: [urgent], classes: [levle] } }
+  defs:
+    - { id: a, tag: RTU7_PMP01_FAULT, class: level }
+`, nil))
+	_, errs, _, err := bad.CheckAlarms(rt2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(errs) != 2 || !strings.Contains(errs[0], "alarms.flood.individual.priorities[0]") || !strings.Contains(errs[1], `no alarm has class "levle"`) {
+		t.Fatalf("errs = %v", errs)
 	}
 }

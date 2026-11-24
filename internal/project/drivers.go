@@ -14,6 +14,7 @@ import (
 	opcuaserver "github.com/joyautomation/nautilus/opcua/server"
 	"github.com/joyautomation/nautilus/optommp"
 	"github.com/joyautomation/nautilus/plcnext"
+	"github.com/joyautomation/nautilus/profinet"
 	"github.com/joyautomation/nautilus/prom"
 	"github.com/joyautomation/nautilus/redfish"
 	"github.com/joyautomation/nautilus/replay"
@@ -28,7 +29,17 @@ import (
 // server.Options.Drivers so /api/drivers and the stream frame carry it, with
 // the server package staying free of any driver dependency.
 func (p *Project) DriverStatus(node *sparkplug.Node, opc *opcuaserver.Server) func() []server.DriverStatus {
-	rows := driverStatusFuncs(p.Runtime.Driver)
+	differs := func(name string) bool { return p.ioDiffers != nil && p.ioDiffers(name) }
+	rows := driverStatusRows(p.Runtime.Driver, differs)
+	if len(rows) == 1 && len(p.drivers) == 1 && !isMulti(p.Runtime.Driver) {
+		// A lone driver is not wrapped in a Multi: its row is the one driver's.
+		row, name := rows[0], p.drivers[0].Name
+		rows[0] = func() server.DriverStatus {
+			s := row()
+			s.Differs = differs(name)
+			return s
+		}
+	}
 	if len(rows) == 0 && node == nil && opc == nil {
 		return nil
 	}
@@ -47,11 +58,36 @@ func (p *Project) DriverStatus(node *sparkplug.Node, opc *opcuaserver.Server) fu
 	}
 }
 
+// isMulti reports whether d is (or wraps) a composite of several drivers.
+func isMulti(d nio.Driver) bool {
+	for {
+		if _, ok := d.(*nio.Multi); ok {
+			return true
+		}
+		u, ok := d.(interface{ Unwrap() nio.Driver })
+		if !ok {
+			return false
+		}
+		d = u.Unwrap()
+	}
+}
+
 // driverStatusFuncs maps a driver onto the per-kind adapters below — one
 // row per driver, so a multi-driver set flattens to one row per CHILD and
 // /api/drivers (already a list) needs no new shape. The memory loopback
 // reports nothing, exactly as before.
 func driverStatusFuncs(d nio.Driver) []func() server.DriverStatus {
+	return driverStatusRows(d, nil)
+}
+
+// driverStatusRows is driverStatusFuncs with differs, which says whether the
+// named configured driver runs an I/O configuration other than the
+// manifest's: its row carries Differs (#706).
+func driverStatusRows(d nio.Driver, differs func(name string) bool) []func() server.DriverStatus {
+	if u, ok := d.(interface{ Unwrap() nio.Driver }); ok {
+		// a driver carrying devices (devbind) reports as the driver it is
+		return driverStatusRows(u.Unwrap(), differs)
+	}
 	switch drv := d.(type) {
 	case *eip.Driver:
 		return []func() server.DriverStatus{func() server.DriverStatus { return eipStatus(drv.Health()) }}
@@ -73,10 +109,31 @@ func driverStatusFuncs(d nio.Driver) []func() server.DriverStatus {
 		return []func() server.DriverStatus{func() server.DriverStatus { return opcuaClientStatus(drv.Health()) }}
 	case *replay.Driver:
 		return []func() server.DriverStatus{func() server.DriverStatus { return replayStatus(drv.Health()) }}
+	case *profinet.DeviceDriver:
+		return []func() server.DriverStatus{func() server.DriverStatus { return profinetDeviceStatus(drv.Health()) }}
 	case *nio.Multi:
 		var out []func() server.DriverStatus
 		for _, c := range drv.Children() {
-			out = append(out, driverStatusFuncs(c.Driver)...)
+			rows := driverStatusRows(c.Driver, nil)
+			if len(rows) != 1 {
+				out = append(out, rows...)
+				continue
+			}
+			// The child is looked up on every call, not kept from load: an
+			// I/O configuration applied live (#706) replaces it, and the row
+			// must report the driver that runs, not the one stopped.
+			name, first := c.Name, rows[0]
+			out = append(out, func() server.DriverStatus {
+				st := first
+				if cur, ok := drv.Child(name); ok && !sameDriver(cur, c.Driver) {
+					if now := driverStatusFuncs(cur); len(now) == 1 {
+						st = now[0]
+					}
+				}
+				s := st()
+				s.Differs = differs != nil && differs(name)
+				return s
+			})
 		}
 		return out
 	}
@@ -495,7 +552,11 @@ func opcuaClientStatus(h opcua.Health) server.DriverStatus {
 		s.Message = fmt.Sprintf("%d of %d %s refused by the server — check node ids and namespaces", h.BadTags, h.Tags, plural(h.Tags, "tag"))
 	case h.State == "connected":
 		s.State = "connected"
-		s.Message = fmt.Sprintf("Polling %d %s in %d %s", h.Tags, plural(h.Tags, "tag"), h.Classes, plural(h.Classes, "scan class"))
+		verb := "Polling"
+		if h.ReadMode == opcua.ReadModeSubscribe {
+			verb = "Subscribed to"
+		}
+		s.Message = fmt.Sprintf("%s %d %s in %d %s", verb, h.Tags, plural(h.Tags, "tag"), h.Classes, plural(h.Classes, "scan class"))
 	case h.LastError != "":
 		s.State = "error"
 		s.Message = "Connect failed — retrying"
@@ -510,11 +571,17 @@ func opcuaClientStatus(h opcua.Health) server.DriverStatus {
 		{Label: "writes", Value: float64(h.Writes), Volatile: true},
 		{Label: "errors", Value: float64(h.Errors), Volatile: true},
 	}
+	if h.ReadMode == opcua.ReadModeSubscribe {
+		s.Metrics = append(s.Metrics, server.DriverMetric{Label: "notifications", Value: float64(h.Notifications), Volatile: true})
+	}
 	if h.QueuedWrites > 0 {
 		s.Metrics = append(s.Metrics, server.DriverMetric{Label: "queued writes", Value: float64(h.QueuedWrites)})
 	}
 	s.Devices = []server.DriverDevice{{ID: h.Name, Online: h.State == "connected", Detail: opcuaClientDetail(h)}}
-	s.Extra = map[string]any{"policy": h.Policy, "mode": h.Mode, "maxNodes": h.MaxNodes, "retries": h.Retries}
+	s.Extra = map[string]any{"policy": h.Policy, "mode": h.Mode, "maxNodes": h.MaxNodes, "retries": h.Retries, "readMode": h.ReadMode}
+	if len(h.RevisedMs) > 0 {
+		s.Extra["publishingMs"] = h.RevisedMs // as the server revised each class's interval
+	}
 	s.VolatileExtra = []string{"retries"}
 	return s
 }
@@ -656,6 +723,19 @@ func sparkplugStatus(st sparkplug.Status) server.DriverStatus {
 			Text:  agoText(st.LastPubMs),
 		})
 	}
+	if st.DeviceDeathDelayMs > 0 {
+		d := time.Duration(st.DeviceDeathDelayMs) * time.Millisecond
+		s.Metrics = append(s.Metrics, server.DriverMetric{Label: "DDEATH held", Value: d.Seconds(), Text: d.String()})
+		var held []string
+		for _, dev := range st.Devices {
+			if dev.DeathHeld {
+				held = append(held, dev.ID)
+			}
+		}
+		if len(held) > 0 {
+			s.Metrics = append(s.Metrics, server.DriverMetric{Label: "devices held", Value: float64(len(held)), Text: strings.Join(held, ", ")})
+		}
+	}
 	if sf := st.StoreForward; sf != nil {
 		s.Metrics = append(s.Metrics, server.DriverMetric{Label: "buffered", Value: float64(sf.Buffered), Text: fmt.Sprintf("%d / %d", sf.Buffered, sf.Max)})
 		if sf.Buffered > 0 && s.State == "connected" {
@@ -725,6 +805,13 @@ func plcnextStatus(h plcnext.Health) server.DriverStatus {
 	}
 	if h.Shim != nil && h.Shim.Watchdog {
 		s.State, s.Message = "error", "The shim's output watchdog lapsed: outputs are driven to zero"
+	}
+	// The write gate (a hung or starved scan, #858): nothing is written.
+	switch {
+	case h.GateHolds:
+		s.State, s.Message = "error", "Write gate closed: outputs held (no safe state: no output watchdog on this route)"
+	case h.GateClosed:
+		s.State, s.Message = "error", "Write gate closed: nothing is written; the shim's watchdog drives the outputs to zero"
 	}
 	s.Metrics = []server.DriverMetric{
 		{Label: "tags", Value: float64(h.Tags)},
@@ -876,6 +963,59 @@ func replayStatus(h replay.Health) server.DriverStatus {
 		s.Metrics = append(s.Metrics,
 			server.DriverMetric{Label: "at", Value: float64(h.AtS), Text: time.Unix(h.AtS, 0).UTC().Format("2006-01-02 15:04Z"), Volatile: true},
 			server.DriverMetric{Label: "loops", Value: float64(h.Loops), Volatile: true})
+	}
+	return s
+}
+
+// profinetDeviceStatus is nautilus as a PROFINET IO device: whether a PLC
+// holds an AR and exchanges data, whether it is in run, and whether the
+// data we provide is valid (the write gate and the program's first push).
+func profinetDeviceStatus(h profinet.DeviceHealth) server.DriverStatus {
+	s := server.DriverStatus{Kind: "profinet-device", Name: h.Station, LastError: h.LastError, SinceMs: h.SinceMs}
+	s.Detail = fmt.Sprintf("station %s on %s", h.Station, h.Interface)
+	switch {
+	case h.State == "error":
+		s.State, s.Message = "error", "Not on the network: "+h.LastError
+	case h.State == "standby":
+		// A redundant standby is silent on purpose: no socket, no DCP.
+		s.State, s.Message = "waiting", "Standby: silent on the network; the leader is the device"
+	case h.State != "running":
+		s.State, s.Message = "connecting", "Opening the interface"
+	case h.AR == "data" && h.ControllerState == "run" && h.Diff == 0 && h.InputsValid:
+		s.State, s.Message = "connected", fmt.Sprintf("Exchanging data with %s (run)", h.Controller)
+	case h.AR == "data":
+		why := []string{}
+		if h.ControllerState != "run" {
+			why = append(why, "the controller is in "+h.ControllerState)
+		}
+		if h.Diff > 0 {
+			why = append(why, fmt.Sprintf("%d module(s) differ from the layout", h.Diff))
+		}
+		if !h.InputsValid {
+			why = append(why, "our data is marked invalid (write gate closed, or no full push yet)")
+		}
+		s.State, s.Message = "degraded", fmt.Sprintf("AR with %s: %s", h.Controller, strings.Join(why, "; "))
+	case h.AR == "startup":
+		s.State, s.Message = "connecting", fmt.Sprintf("AR with %s starting up", h.Controller)
+	default:
+		s.State, s.Message = "waiting", "Waiting for a PLC to connect"
+	}
+	// Only refusals and aborts are errors; "AR from …" is news, not one.
+	if ev := h.LastEvent; s.LastError == "" && (strings.Contains(ev, "refused") || strings.Contains(ev, "stopped") || strings.Contains(ev, "aborted") || strings.Contains(ev, "fragmented")) {
+		s.LastError = ev
+	}
+	s.Metrics = []server.DriverMetric{
+		{Label: "tags", Value: float64(h.Tags)},
+		{Label: "bad", Value: float64(h.BadTags)},
+		{Label: "ARs", Value: float64(h.ARs)},
+		{Label: "aborts", Value: float64(h.Aborts)},
+		{Label: "frames", Value: float64(h.OutputFrames), Volatile: true},
+	}
+	if h.RefusedARs > 0 {
+		s.Metrics = append(s.Metrics, server.DriverMetric{Label: "refused ARs", Value: float64(h.RefusedARs)})
+	}
+	if h.SetIPRefused > 0 {
+		s.Metrics = append(s.Metrics, server.DriverMetric{Label: "refused Set IP", Value: float64(h.SetIPRefused)})
 	}
 	return s
 }

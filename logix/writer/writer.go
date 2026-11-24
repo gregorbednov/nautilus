@@ -62,6 +62,10 @@ import (
 // Options shape the project around the program. Every field has a default
 // that produces a buildable project for the DemoLine fixture.
 type Options struct {
+	// Warn, when set, takes the writer's warnings: what it writes on
+	// purpose but differently from nautilus, for the CLI to print. Never a
+	// refusal (those are Diags).
+	Warn func(string)
 	// Controller is the Logix controller (project) name. Default: the
 	// nautilus PROGRAM name.
 	Controller string
@@ -121,6 +125,16 @@ type Options struct {
 	// (AcceptTmr.ACC) still finds it (#371). Each must be a VAR of the
 	// program; its description comes from Descs.
 	ControllerScoped []string
+	// Channels are the manifest's channels: (msg.go): where a READ or
+	// WRITE block's ID points, and so the ConnectionPath of the MSG it is
+	// written as. Messages carries, per instance, the MSG parameters the
+	// import found that the block does not say (target.logix.messages).
+	Channels []Channel
+	Messages []Message
+	// check: a rules check with no manifest in hand (Check), so a
+	// channel it cannot see is not an error here; naut check resolves
+	// IDs against the manifest itself.
+	check bool
 	// Hardware is the project's I/O configuration (target.logix.hardware):
 	// its <Modules> section replaces the Local module the writer would
 	// generate, verbatim, and every alias of a rack point must name a
@@ -317,7 +331,7 @@ func Check(src string, libs ...string) ([]Diag, error) {
 	if err != nil {
 		return nil, err
 	}
-	lw := lowerSrc(m, src, Options{Libs: libs}.withDefaults(m.Name))
+	lw := lowerSrc(m, src, Options{Libs: libs, check: true}.withDefaults(m.Name))
 	return lw.diags, nil
 }
 
@@ -348,6 +362,8 @@ type lowered struct {
 	model *ld.Model
 	opts  Options
 	diags []Diag
+	// pairWarned: the pair-state warning went out (PairStateWarning).
+	pairWarned bool
 
 	vars     map[string]ld.VarDecl // by lower-cased name
 	ctrlTags []tagDef
@@ -416,7 +432,10 @@ type tagDef struct {
 	DataType string // BOOL SINT INT DINT REAL LREAL TIMER COUNTER
 	Dim      int    // 0 scalar, n = Dimensions="n"
 	Value    string // scalar initial value in Logix spelling ("0", "85.0"); "" = zero
-	Preset   int64  // TIMER.PRE / COUNTER.PRE
+	// Elems are an array's initial values in Logix spelling, from index
+	// 0; an element past the end is zero.
+	Elems  []string
+	Preset int64 // TIMER.PRE / COUNTER.PRE
 	// Presets holds per-element presets for an array of timers or counters
 	// (Dim > 0), keyed by index; elements not present preset to 0.
 	Presets map[int]int64
@@ -427,6 +446,9 @@ type tagDef struct {
 	// initial value (a map of members), when any.
 	Struct *udt
 	Init   any
+	// Message is a MESSAGE tag's parameters, from the READ or WRITE call
+	// that sends it (msg.go); nil until a rung calls it.
+	Message *msgParams
 	// AOI marks an Add-On Instruction instance.
 	AOI bool
 	// Alias makes the tag a Logix alias tag of this operand (an I/O point,
@@ -485,6 +507,7 @@ func lowerSrc(m *ld.Model, src string, opts Options) *lowered {
 		lw.rung(r, notes[r.Line])
 	}
 	lw.dropUnusedClocks()
+	lw.checkMessages()
 	lw.side()
 	return lw
 }
@@ -556,7 +579,7 @@ var scalarTypes = map[string]string{
 // blockTypes are the standard blocks with a Logix structure behind them.
 // TONR is the Logix dialect's resettable timer (internal/dialect): a TIMER
 // with a RES rung ahead of the timer's.
-var blockTypes = map[string]string{"TON": "TIMER", "TOF": "TIMER", "TONR": "TIMER", "CTU": "COUNTER"}
+var blockTypes = map[string]string{"TON": "TIMER", "TOF": "TIMER", "TONR": "TIMER", "CTU": "COUNTER", "READ": "MESSAGE", "WRITE": "MESSAGE"}
 
 func (lw *lowered) declare(v ld.VarDecl) {
 	scope := ""
@@ -603,12 +626,32 @@ func (lw *lowered) declare(v ld.VarDecl) {
 		return
 	}
 	init := v.Init
+	var elems []any
 	if init == "" && external {
 		if iv, _, ok := ir.Lookup(lw.opts.Inits, v.Name); ok && iv != nil {
-			init = fmt.Sprint(iv)
+			if list, isList := iv.([]any); isList && dim > 0 {
+				elems = list // an array's manifest init: its elements
+			} else {
+				init = fmt.Sprint(iv)
+			}
 		}
 	}
 	switch {
+	case scalarTypes[u] != "" && elems != nil:
+		if len(elems) > dim {
+			lw.diag(ruleInit, v.Line, "", "%s: %d initial values for an array of %d", v.Name, len(elems), dim)
+			return
+		}
+		vals := make([]string, len(elems))
+		for i, e := range elems {
+			val, ok := literal(u, fmt.Sprint(e))
+			if !ok {
+				lw.diag(ruleInit, v.Line, "", "%s[%d]: initial value %q is not a literal the Logix tag can carry", v.Name, i, fmt.Sprint(e))
+				return
+			}
+			vals[i] = val
+		}
+		lw.addTag(tagDef{Name: v.Name, DataType: scalarTypes[u], Dim: dim, Elems: vals, Scope: scope, Line: v.Line})
 	case scalarTypes[u] != "":
 		val, ok := literal(u, init)
 		if !ok {
@@ -641,6 +684,10 @@ func (lw *lowered) declare(v ld.VarDecl) {
 		}
 		lw.clocks[strings.ToLower(v.Name)] = true
 		lw.addTag(tagDef{Name: v.Name, DataType: "DINT", Dim: 7, Scope: scope, Line: v.Line})
+	case lw.blockType(u) == "MESSAGE" && lw.inAOI:
+		lw.diag(ruleMessage, v.Line, "", "%s: a READ or WRITE inside a FUNCTION_BLOCK; an Add-On Instruction cannot hold a MESSAGE tag, so call it from the program", v.Name)
+	case lw.st && (u == "READ" || u == "WRITE"):
+		lw.diag(ruleMessage, v.Line, "", "%s: a READ or WRITE is written as an MSG on a ladder rung; call it from a .ld program", v.Name)
 	case lw.blockType(u) != "":
 		if v.Init != "" {
 			lw.diag(ruleInit, v.Line, "", "%s: a %s instance takes no initializer; the preset comes from the rung (PT := / PV :=)", v.Name, u)

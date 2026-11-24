@@ -155,7 +155,9 @@ SUB, MUL, DIV, ABS) or, for anything else, a CPT; see
 
 Reading FB outputs: any instance output is addressable as `inst.Pin`
 anywhere in the program that declares the instance — `GE(t2.ET, T#2S)` as
-a contact, `t2.Q` as an operand, in any rung. To capture an output **into a
+a contact, `t2.Q` as an operand, in any rung. Rungs run top to bottom, so
+a rung above the one that calls `t2` reads the value `t2` had at the end
+of the previous scan, and a rung below reads this scan's, as on any PLC. To capture an output **into a
 variable** at the call site, use the standard's output binding:
 `t2:TON(PT := T#5S, ET => Elapsed)` — the one way ladder stores a
 non-BOOL (coils only assign BOOL). `=>` works in ST and FBD calls too.
@@ -270,13 +272,38 @@ details, `type:` forms and `init:` forms (TIME members, arrays).
   are float64. The declared name is kept on the type, so a diagnostic
   says `DINT` or `WORD` for a variable declared that way, and
   [partial access](#bit-operations) knows a `DINT` has 32 bits.
-- **Arithmetic does not wrap at the declared width.** This is deliberate:
-  an `INT` holding 32767 plus 1 is 32768, not -32768 as on a PLC. A silent
-  wrap turns a totaliser or a counter into a wrong number with no fault,
-  and every seam on the tag bus carries the full value anyway. The width
-  is applied where you ask for it: a conversion (`TO_INT`, `DINT_TO_INT`)
-  wraps to the target, as on Codesys. A program that relies on a counter
-  rolling over should convert or `MOD` explicitly.
+- **A store wraps at the declared width; an implicit conversion only
+  widens** ([#782](https://github.com/joyautomation/nautilus/issues/782)).
+  Arithmetic is computed in 64 bits and never wraps on its own, so
+  `d1 + d2` keeps every bit while it is an expression. Storing it into a
+  declared integer keeps that type's low bits, read signed or unsigned as
+  the type is: an `INT` holding 32767 plus 1 is -32768, a `UINT` at 0
+  minus 1 is 65535, as on a PLC. An assignment that would narrow a
+  declared width (`i := d` with `d : DINT`), or store a literal the type
+  cannot hold (`i := 70000`), is a compile error that names the
+  conversion to write (`DINT_TO_INT(d)`, which wraps), as IEC 61131-3
+  converts implicitly only as its table (Figure 11) allows: within the
+  signed, the unsigned or the bit-string family and wider, or an unsigned
+  type into a wider signed one; never signed into unsigned, and never
+  between a bit string and an integer (`d := w` with `w : WORD` needs
+  `WORD_TO_DINT(w)`). Into a REAL only an integer whose every value its
+  24-bit mantissa holds goes implicitly (SINT, INT, USINT, UINT); into an
+  LREAL, up to the 32-bit types; an LREAL never goes into a REAL (`r := d`
+  with `d : DINT` needs `DINT_TO_REAL(d)`). The same rule holds at every place a program stores
+  a value: an assignment, an FB or FUNCTION input, an `=>` output binding,
+  a `FOR` variable's bounds, a declaration's initial value. Store into a
+  `LINT` to keep a total that outgrows 32 bits.
+- **One deviation stays: an expression is computed in 64 bits.** A PLC
+  computes `d1 + d2` of two DINTs in 32 bits, so the sum is already cut
+  when it is compared or converted; nautilus keeps every bit until the
+  store, so `TO_LINT(d1 + d2)` with both at 2000000000 is 4000000000
+  (pinned in `fn-ops`), and `d1 + d2 > 0` is true there.
+- **A value from outside a program's stores lands as written.** A driver's
+  input, a force, a test's `given:` and a value retained from before #782
+  are not cut to the width; the program's next assignment of them is
+  (`out := x` with `x` forced to 70000 stores 4464 into an INT). A write
+  from an operator or an OPC UA client is refused when it does not fit
+  (`SetFieldTypedStrict`).
 - **Signed with unsigned widens** to the narrowest signed type that holds
   both (`INT + UINT` is a `DINT`), as the
   [common type](#operators) rules below say, rather than being refused as
@@ -411,7 +438,7 @@ means the block accepts 2+ inputs (the `+` pin in the FBD editor).
 
 | Name | Arguments | Result | Behavior |
 | --- | --- | --- | --- |
-| `AND`, `OR`, `XOR` | n-ary BOOL (or INT for bitwise) | same | logical on BOOL; bitwise on INT, over all 64 bits (`-8 AND 6` = 0) |
+| `AND`, `OR`, `XOR` | n-ary BOOL (or INT for bitwise) | same | logical on BOOL; bitwise on INT, two's complement (`-8 AND 6` = 0); the result stores into its target's width |
 | `NOT` | 1 BOOL/INT | same | negation on BOOL; bitwise complement on INT (`NOT 0` = -1, `NOT 12` = -13) |
 | `ADD` | n-ary numeric | common type | sum |
 | `SUB` | 2 numeric | common type | difference |
@@ -439,8 +466,8 @@ to without loss, the standard's implicit widening:
 
 The type is what a diagnostic names (`s := d1 + d2` into a STRING says
 "cannot assign DINT to STRING"). It does not cut the value: arithmetic
-never wraps (see [Types](#types)), and `TO_<type>` of an expression reads
-every bit, so `TO_INT(d1 + d2)` with both at 40000 is 14464, the same as
+never wraps until it is stored (see [Types](#types)), and `TO_<type>` of
+an expression reads every bit, so `TO_INT(d1 + d2)` with both at 40000 is 14464, the same as
 `DINT_TO_INT(80000)`. An integer with a REAL is a REAL.
 
 The comparison row is the ladder-relevant one: those six are the
@@ -511,10 +538,12 @@ and words 0..1, so `d.%X32` or `w.16` on a `WORD` is a compile error that
 names the type. Ladder contacts and coils and FBD wires take every form
 (`Alarms.%X3`). Pinned in `lang/conformance/st-partial-access`.
 
-Caveat: the runtime's integers are 64-bit, so rotates and arithmetic
-operate over 64 bits — a `WORD` you think of as 16 bits rotates as a 64-bit
-value. Only partial access, diagnostics and the [conversions](#type-conversions)
-use the declared width.
+Shifts and rotates act on the first operand's declared width (#782): `ROL`
+of a `WORD` at 16#8000 by 1 is 1, `SHL` past 16 bits leaves 0, and
+`ROL(BYTE#1, 9)` is 2. A computed operand keeps its type (`w AND 16#FFFF`
+is a WORD); one with no declared width (a plain literal) is shifted over
+64 bits. `SHR` zero-fills, on an `INT` too, as Codesys does (TIA fills an
+INT with its sign).
 
 ### Strings
 
@@ -536,12 +565,40 @@ clamp to the string instead of faulting.
 
 | Name | Signature | Result | Behavior |
 | --- | --- | --- | --- |
-| `FIRST_SCAN` | `FIRST_SCAN()` | BOOL | TRUE for the whole of the program's first scan after it starts or is downloaded, FALSE from the second scan on. An online edit keeps the program's state, so it is not a start, and neither is a rollback |
+| `FIRST_SCAN` | `FIRST_SCAN()` | BOOL | TRUE for the whole of the program's first scan after it starts or is downloaded, or after a redundant pair's cold takeover (which resets the program's state), FALSE from the second scan on. A hot takeover keeps the state going, so it is not a start; nor is an online edit, a rollback or a leadership resumed in the same term |
 
 `FIRST_SCAN()` is how a program seeds state from the world once: a ladder
 function contact `FIRST_SCAN() { next := Clock.SECOND }`, or
 `IF FIRST_SCAN() THEN … END_IF;` in ST. Each task's program has its own
 first scan. On a Logix controller it is the status flag `S:FS`.
+
+### Redundancy
+
+These are nautilus system functions: they read the state of a [redundant
+pair](/guides/redundancy/). Each answer is latched at the start of the scan
+and holds for the whole of it, separately for each task's program. Outside a
+pair, every flag is FALSE and the count 0. A program, function, function
+block or tag may not be named as one of them; `naut check` says which name
+to change. `FIRST_SCAN` is not reserved: a project that declares its own
+keeps it.
+
+| Name | Signature | Result | Behavior |
+| --- | --- | --- | --- |
+| `TAKEOVER_SCAN` | `TAKEOVER_SCAN()` | BOOL | TRUE for the whole of the first scan after this controller took the lead over from its peer, hot or cold. FALSE on a start, a whole pair's power-up included (its first leadership, before it saw its peer lead) |
+| `HOT_TAKEOVER` | `HOT_TAKEOVER()` | BOOL | TRUE for the whole of the first scan after a hot takeover, one that went on from the peer's state image. `FIRST_SCAN()` is FALSE there: the state goes on |
+| `PEER_READY` | `PEER_READY()` | BOOL | On the leader: TRUE while a takeover by its standby would go hot. The standby is current, on this build and these programs, and no force is held (a takeover drops forces). FALSE on a standby. It is advisory: the pair refreshes it every 50 ms, and the voters learn it from the leader's next renewals, up to a quarter lease later, so a takeover just after it turns TRUE may still be cold |
+| `TAKEOVERS` | `TAKEOVERS()` | DINT | How many takeovers this controller made since it started |
+| `TAKEOVER_HOLD` | `TAKEOVER_HOLD()` | BOOL | TRUE while the [takeover hold](/guides/redundancy/#the-takeover-hold) holds this leader's outputs: nothing goes to the field until the program sets its release tag. FALSE without `redundancy.takeover-hold`. Gate integrators and one-shots on it: they run while the field does not follow |
+
+A takeover's first scan is the place for logic that must notice the change
+of controller, for example resetting a sequence's watchdog or logging the
+event. `IF TAKEOVER_SCAN() AND NOT HOT_TAKEOVER() THEN … END_IF;` runs only
+after a cold takeover, where state restarted. On Logix and Siemens targets
+these functions are constants (FALSE, and 0 for `TAKEOVERS()`): a
+controller there runs no nautilus pair, and its own redundancy status is in
+the vendor's diagnostics, which nautilus does not map. Logic gated on them
+is dead code there, so `naut logix write`, `naut logix deploy` and the
+Siemens writer warn once per project when a program uses one.
 
 ## Type conversions
 
@@ -585,8 +642,8 @@ That is 294 `X_TO_Y` functions, plus:
   16#FFFF. This is what Codesys documents ("the high bytes are lost") and
   what TIA writes (TIA also drops ENO); the standard calls the
   integer↔bit-string ones a binary transfer. Saturating would match none of
-  them. Arithmetic still never wraps (see [Types](#types)); a conversion is
-  the one place the declared width cuts.
+  them. Arithmetic never wraps until it is stored (see [Types](#types)); a
+  conversion and a store are where the declared width cuts.
 - **The argument is read as its own type first.** A variable keeps a 64-bit
   value at run time, so `UINT_TO_DINT(u)` with `u` at -1 sees the UINT a PLC
   would hold, 65535. Pass a `DINT` to `INT_TO_REAL` and it is read as an
@@ -652,6 +709,8 @@ that declares the instance; another task reads one through a tag (see
 | `SR` | `S1: BOOL, R: BOOL` | `Q1: BOOL` | set-dominant latch |
 | `RS` | `S: BOOL, R1: BOOL` | `Q1: BOOL` | reset-dominant latch |
 | `PID` | see [below](#pid-closed-loop-control) | see below | closed-loop control — proportional/integral/derivative with anti-windup and bumpless auto/manual |
+| `READ` | `REQ: BOOL, ID: STRING, VAR_1: STRING`; in-out `RD_1: ANY` | `NDR, ERROR, BUSY: BOOL, STATUS: INT` | read a variable on another device through a channel; see [below](#read-and-write-another-device) |
+| `WRITE` | `REQ, ID, VAR_1, SD_1: ANY` | `DONE, ERROR, BUSY, STATUS` | write a variable on another device; see below |
 | `LOCAL_TIME` | — | `YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE`, `SECOND`, `MILLISECOND`: DINT | the calendar, now: each call reads the runtime's clock once, so the seven outputs are one instant. The names are IEC 61131-3's `SPLIT_DT` outputs. In production the clock is the machine's local time; under `naut test` it is the test's virtual clock, read in UTC (it starts at 2000-01-01 00:00:00), so a test that reads the calendar gives the same answer on every machine |
 
 ## EN/ENO: execution control
@@ -711,6 +770,7 @@ parentheses:
 | `SR` | `S1` | `Q1` |
 | `RS` | `S` | `Q1` |
 | `LOCAL_TIME` | none: it sits on the rail | none: power passes through |
+| `READ`, `WRITE` | `REQ` | none: power passes through, as past a Logix `MSG` |
 | user FUNCTION_BLOCK | `EN`, else the first **BOOL** `VAR_INPUT` the call doesn't bind by name | `ENO`, else the first **BOOL** `VAR_OUTPUT` |
 
 Passing the power pin explicitly in the argument list (`t1:TON(IN := x)`)
@@ -731,6 +791,91 @@ both are meaningful:
   the coils to its right.
 
 A block whose type nothing in the compile declares falls back to `IN`/`Q`.
+
+### READ and WRITE: another device
+
+`READ` and `WRITE` are IEC 61131-5's data-acquisition blocks: a program
+reads or writes one variable on another device when it asks, through a
+**channel** the manifest declares. `ID` names the channel; `VAR_1` is the
+variable's name on the peer, in that channel's own syntax (a Logix tag path
+on a `cip` channel: `Tag`, `Tag.Member`, `Tag[3]`, `Program:Main.Tag`).
+
+```yaml
+channels:
+  - name: line2
+    type: cip          # a Logix controller over EtherNet/IP
+    host: 192.0.2.12
+    slot: 0            # a ControlLogix CPU's slot behind an Ethernet module;
+                       # leave it out for a controller with its own port
+    timeout: 5s        # per request (default)
+```
+
+```iecst
+VAR poll : READ; push : WRITE; END_VAR
+poll(REQ := Step3, ID := 'line2', VAR_1 := 'Line2Status', RD_1 := Line2Status);
+push(REQ := SendNow, ID := 'line2', VAR_1 := 'Setpoints', SD_1 := Setpoints);
+```
+
+In a rung, power is `REQ`: `Step3 poll:READ(ID := 'line2', VAR_1 :=
+'Line2Status', RD_1 := Line2Status)`.
+
+**The scan never waits on the network.** A rising edge on `REQ` posts the
+request and sets `BUSY`; each later call checks on it. The call that sees
+the answer clears `BUSY` and sets `NDR` (READ) or `DONE` (WRITE), or
+`ERROR` and `STATUS`. Then:
+
+- **Outputs hold.** `NDR`, `DONE`, `ERROR` and `STATUS` stay set until
+  the next `REQ` rising edge. That is how a Logix MSG's `DN` and `ER`
+  behave, and it is what logic that times or latches on them expects.
+- **REQ only starts a request.** An edge while `BUSY` is ignored, and
+  `REQ` falling does not cancel a request.
+- **Data lands whole.** `RD_1` is written only by the call that sees a
+  successful reply, all at once, never in part. `WRITE` sends `SD_1` as it
+  was on the `REQ` edge.
+
+Two pins differ from the standard, for the reasons given:
+
+- **`RD_1` is an in-out**, so the variable keeps its value until a reply
+  lands. A plain output would be copied to its target on every call,
+  zeros first.
+- **`BUSY` is added**, as PLCopen's blocks have it.
+
+`RD_1` and `SD_1` take any type: a whole structure, an array or an
+elementary value. An array moves whole, as many elements as it has,
+starting at the element `VAR_1` names. That is the whole peer array when
+`VAR_1` names the array.
+
+**Matching the peer's value.** A peer value lands only when it matches the
+local variable:
+
+- **Members** match by name (case-insensitively), and none may be missing
+  or extra.
+- **Elementary types** must agree: an `INT` is not a `DINT`, though `REAL`
+  and `LREAL` are interchangeable.
+- **Range:** a value the peer's type cannot hold is refused, never
+  truncated.
+- **Layout** of a structure always comes from the peer. A `cip` channel
+  moves it in one Read Tag or Write Tag, as a Logix MSG does, laid out by
+  the template the controller reports. A value too large for one request
+  goes in fragments. nautilus never computes a Logix layout.
+
+**STATUS** is 0 on success. A positive value is the peer's own status
+code; on `cip` that is the CIP general status a Logix MSG puts in `.ERR`
+(4: no such tag, 5: path unknown, …). A negative value is local:
+
+| STATUS | Meaning |
+| --- | --- |
+| −1 | `ID` names no channel (`naut check` catches a constant one) |
+| −2 | the channel could not reach its peer |
+| −3 | no answer within the channel's `timeout:` |
+| −4 | the peer's value does not fit the local variable |
+| −5 | the channel already holds `queue:` requests (default 64) |
+| −6 | the request was lost (a restart while it was in flight) |
+
+**One request at a time per channel.** Each channel works through its
+requests in order on one connection, which opens on the first request and
+reopens after a failure. In the browser playground, channels reach no peer
+and report −2.
 
 ### PID: closed-loop control
 

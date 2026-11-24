@@ -1,0 +1,2185 @@
+package tiadtest_test
+
+import (
+	"fmt"
+	"io/fs"
+	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/joyautomation/nautilus/siemens/tiad"
+	"github.com/joyautomation/nautilus/siemens/tiad/tiadtest"
+)
+
+// These tests read tiad-fake's ITia call log: what reached TIA, on which
+// thread, and when.
+
+func callNames(cs []tiadtest.TiaCall) string {
+	var n []string
+	for _, c := range cs {
+		n = append(n, c.Call)
+	}
+	return strings.Join(n, ",")
+}
+
+func installBench(t *testing.T, c *tiad.Client) {
+	t.Helper()
+	const g = "GSDML-V2.4-Example-Device-20261117.xml"
+	if _, err := c.PutFile(ctx, "gsd/"+g, []byte("<ISO15745Profile/>")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.InstallGSD(ctx, "gsd/"+g); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAgentStartsTIAOnlyWhenNeeded: health, probe and the files cost no
+// trial time, because they never make the ITia (siemens-ide.md §3.4).
+func TestAgentStartsTIAOnlyWhenNeeded(t *testing.T) {
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{})
+	c := p.Client()
+	if _, err := c.Health(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Probe(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.PutFile(ctx, "a.txt", []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.GetFile(ctx, "a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ListFiles(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DeleteFile(ctx, "a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Sessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Refused before TIA: a failing gate, and a bad request.
+	p.SetGates(t, []tiad.Gate{{Name: "licence", State: tiad.GateFailed}})
+	if _, err := c.Open(ctx, "projects/p/p.ap21"); tiad.Kind(err) != tiad.KindGate {
+		t.Fatalf("open with a failed gate: %v", err)
+	}
+	p.SetGates(t, nil)
+	if _, err := c.Open(ctx, "projects/none/none.ap21"); tiad.Kind(err) != tiad.KindNotFound {
+		t.Fatalf("open a missing project: %v", err)
+	}
+	if cs := p.Calls(t); len(cs) != 0 {
+		t.Fatalf("TIA was reached: %s", callNames(cs))
+	}
+	installBench(t, c)
+	if cs := p.Calls(t); callNames(cs) != "start,InstallGsd" {
+		t.Fatalf("calls after the first TIA call = %s, want start,InstallGsd", callNames(cs))
+	}
+}
+
+// TestAgentRunsTIAOnOneSTAThread: every ITia call, from callers on many
+// threads, runs on the one STA thread. TIA opens one project at a time,
+// so each caller waits its turn (busy) for its own.
+func TestAgentRunsTIAOnOneSTAThread(t *testing.T) {
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{})
+	c := p.Client()
+	installBench(t, c)
+	var wg sync.WaitGroup
+	for i := 0; i < 6; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			var s *tiad.Session
+			var err error
+			for try := 0; try < 400; try++ {
+				s, err = c.CreateProject(ctx, "p"+string(rune('a'+i)), tiadtest.BenchStation(), tiadtest.BenchSecrets)
+				if tiad.Kind(err) != tiad.KindBusy {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if _, err := s.Compile(ctx, true, true); err != nil {
+				t.Error(err)
+			}
+			if err := s.Close(ctx); err != nil {
+				t.Error(err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	cs := p.Calls(t)
+	if len(cs) < 6*4 {
+		t.Fatalf("only %d calls: %s", len(cs), callNames(cs))
+	}
+	for _, call := range cs {
+		if call.Thread != cs[0].Thread || !call.STA {
+			t.Fatalf("%s ran on thread %d (STA %v), the first call on %d", call.Call, call.Thread, call.STA, cs[0].Thread)
+		}
+	}
+	if n := strings.Count(callNames(cs), "start"); n != 1 {
+		t.Fatalf("TIA started %d times", n)
+	}
+}
+
+// TestAgentSurvivesATIAFailure: TIA's own failure answers operation_failed
+// with its text, and the TIA thread carries on.
+func TestAgentSurvivesATIAFailure(t *testing.T) {
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{})
+	c := p.Client()
+	installBench(t, c)
+	s, err := c.CreateProject(ctx, "p", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.SetScript(t, tiadtest.Script{Failures: []tiadtest.ScriptedCall{{Call: "Compile", Message: "The license is not valid"}}})
+	_, err = s.Compile(ctx, true, true)
+	if tiad.Kind(err) != tiad.KindOperationFailed || !strings.Contains(err.Error(), "TIA: The license is not valid") {
+		t.Fatalf("a failing TIA call: %v", err)
+	}
+	p.SetScript(t, tiadtest.Script{})
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatalf("the next call after a failure: %v", err)
+	}
+	// A project that fails to create or to open leaves no session behind.
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	p.SetScript(t, tiadtest.Script{Failures: []tiadtest.ScriptedCall{{Call: "CreateProject", Message: "No licence for this CPU"}}})
+	if _, err := c.CreateProject(ctx, "q", tiadtest.BenchStation(), tiadtest.BenchSecrets); tiad.Kind(err) != tiad.KindOperationFailed {
+		t.Fatalf("a failing create: %v", err)
+	}
+	p.SetScript(t, tiadtest.Script{})
+	if q, err := c.CreateProject(ctx, "q", tiadtest.BenchStation(), tiadtest.BenchSecrets); err != nil {
+		t.Fatalf("create after a failed create (a reservation left behind?): %v", err)
+	} else {
+		_ = q.Close(ctx)
+	}
+	p.SetScript(t, tiadtest.Script{Failures: []tiadtest.ScriptedCall{{Call: "OpenProject", Message: "The project is from a newer version"}}})
+	if _, err := c.Open(ctx, s.Project); tiad.Kind(err) != tiad.KindOperationFailed {
+		t.Fatalf("a failing open: %v", err)
+	}
+	p.SetScript(t, tiadtest.Script{})
+	if _, err := c.Open(ctx, s.Project); err != nil {
+		t.Fatalf("open after a failed open (a reservation left behind?): %v", err)
+	}
+}
+
+// TestAgentAnswersWhileTIAIsBusy: a long TIA call blocks only TIA calls.
+func TestAgentAnswersWhileTIAIsBusy(t *testing.T) {
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{})
+	c := p.Client()
+	installBench(t, c)
+	s, err := c.CreateProject(ctx, "p", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.SetScript(t, tiadtest.Script{Delays: []tiadtest.ScriptedCall{{Call: "Compile", MS: 3000}}})
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Compile(ctx, true, true)
+		done <- err
+	}()
+	for deadline := time.Now().Add(10 * time.Second); !strings.HasSuffix(callNames(p.Calls(t)), "Compile"); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the compile never reached TIA")
+		}
+	}
+	begin := time.Now()
+	if _, err := c.Health(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.PutFile(ctx, "b.txt", []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Sessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(begin); d > 1500*time.Millisecond {
+		t.Fatalf("health, files and sessions waited %v for TIA", d)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAgentClosesIdleSessions: a forgotten session is closed, but never
+// one with a call in flight, and the idle clock starts when a call ends.
+func TestAgentClosesIdleSessions(t *testing.T) {
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{}, "TIAD_SESSION_IDLE=1s")
+	c := p.Client()
+	installBench(t, c)
+	s, err := c.CreateProject(ctx, "p", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.SetScript(t, tiadtest.Script{Delays: []tiadtest.ScriptedCall{{Call: "Compile", MS: 1500}}})
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatalf("a call longer than the idle limit: %v", err)
+	}
+	// Half the idle limit after the call: idle since the call ended is
+	// short of the limit; idle since it began is well past it.
+	time.Sleep(500 * time.Millisecond)
+	if ss, _ := c.Sessions(ctx); len(ss) != 1 {
+		t.Fatalf("the session was reaped during or soon after a call: %+v", ss)
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		ss, err := c.Sessions(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ss) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("an idle session is still open: %+v", ss)
+		}
+	}
+	if !strings.HasSuffix(callNames(p.Calls(t)), "CloseProject") {
+		t.Fatalf("the reaper did not close the project in TIA: %s", callNames(p.Calls(t)))
+	}
+	if _, err := s.Compile(ctx, true, true); tiad.Kind(err) != tiad.KindNotFound {
+		t.Fatalf("a reaped session: %v", err)
+	}
+	if _, err := c.Open(ctx, s.Project); err != nil {
+		t.Fatalf("reopen after the reaper: %v", err)
+	}
+}
+
+// TestAgentKeepsSecretsOut: passwords reach neither the log nor the work
+// dir.
+func TestAgentKeepsSecretsOut(t *testing.T) {
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{})
+	c := p.Client()
+	installBench(t, c)
+	sec := tiad.Secrets{WebUsers: map[string]string{"naut": "Web-password-must-not-leak-1"}, Protection: "protection-must-not-leak",
+		FullAccessPassword: "Full-access-must-not-leak-1"}
+	s, err := c.CreateProject(ctx, "p", tiadtest.BenchStation(), sec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyStation(ctx, tiadtest.BenchStation(), sec); err != nil {
+		t.Fatal(err)
+	}
+	// A web user's password set, then one it had refused: neither shows.
+	sec2 := sec
+	sec2.WebUsers = map[string]string{"naut": "Web-password-must-not-leak-2"}
+	if _, err := s.ApplyStation(ctx, tiadtest.BenchStation(), sec2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyStation(ctx, tiadtest.BenchStation(), sec); tiad.Kind(err) != tiad.KindBadRequest {
+		t.Fatalf("a web password the user had: %v, want bad_request", err)
+	} else if strings.Contains(err.Error(), "must-not-leak") {
+		t.Fatalf("an error carries a secret: %v", err)
+	}
+	weak := sec
+	weak.WebUsers = map[string]string{"naut": "weak-must-not-leak"}
+	if _, err := s.ApplyStation(ctx, tiadtest.BenchStation(), weak); err == nil || strings.Contains(err.Error(), "must-not-leak") {
+		t.Fatalf("a weak web password: %v", err)
+	}
+	bad := tiadtest.BenchStation()
+	bad.CPU.Address = "x"
+	if _, err := s.ApplyStation(ctx, bad, sec); err == nil {
+		t.Fatal("a bad station was taken")
+	} else if strings.Contains(err.Error(), "must-not-leak") {
+		t.Fatalf("an error carries a secret: %v", err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitLog(t, p, "DELETE /v1/sessions/"+s.ID+" 200")
+	if strings.Contains(p.Log(), "must-not-leak") {
+		t.Fatalf("the log carries a secret:\n%s", p.Log())
+	}
+	_ = filepath.WalkDir(p.WorkDir, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			if b, _ := os.ReadFile(path); strings.Contains(string(b), "must-not-leak") {
+				t.Errorf("%s carries a secret", path)
+			}
+		}
+		return nil
+	})
+}
+
+// TestAgentTakesOneCallPerSession: while a call is in flight on a
+// session, another call on it is refused (busy), so the session's state
+// only ever changes in call order. A call that needs no session (a GSD
+// install) is not held up beyond waiting its turn on the TIA thread, and a
+// close is always taken.
+func TestAgentTakesOneCallPerSession(t *testing.T) {
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{})
+	c := p.Client()
+	installBench(t, c)
+	s, err := c.CreateProject(ctx, "p", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.SetScript(t, tiadtest.Script{Delays: []tiadtest.ScriptedCall{{Call: "Compile", MS: 2000}}})
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Compile(ctx, true, true)
+		done <- err
+	}()
+	for deadline := time.Now().Add(10 * time.Second); !strings.HasSuffix(callNames(p.Calls(t)), "Compile"); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the compile never reached TIA")
+		}
+	}
+	busy := map[string]func() error{
+		"software": func() error { _, err := s.Software(ctx, tiad.SoftwareRequest{Group: "g"}); return err },
+		"station": func() error {
+			_, err := s.ApplyStation(ctx, tiadtest.BenchStation(), tiadtest.BenchSecrets)
+			return err
+		},
+		"compile": func() error { _, err := s.Compile(ctx, true, true); return err },
+	}
+	for name, call := range busy {
+		if err := call(); tiad.Kind(err) != tiad.KindBusy {
+			t.Errorf("%s on a session with a call in flight: %v, want busy", name, err)
+		}
+	}
+	if r, err := c.InstallGSD(ctx, "gsd/GSDML-V2.4-Example-Device-20261117.xml"); err != nil || !r.AlreadyInstalled {
+		t.Errorf("a call that needs no session: %+v %v", r, err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Software(ctx, tiad.SoftwareRequest{Group: "g"}); err != nil {
+		t.Fatalf("the session after its call: %v", err)
+	}
+	// A close is taken even with a call in flight; it runs after it.
+	go func() {
+		_, err := s.Compile(ctx, true, true)
+		done <- err
+	}()
+	for deadline := time.Now().Add(10 * time.Second); countCalls(p.Calls(t), "Compile") < 2; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the second compile never reached TIA")
+		}
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatalf("close with a call in flight: %v", err)
+	}
+	<-done
+}
+
+// TestAgentKeepsASessionItCouldNotClose: when TIA fails to close a
+// project, the session stays, broken, and can be closed again.
+func TestAgentKeepsASessionItCouldNotClose(t *testing.T) {
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{})
+	c := p.Client()
+	installBench(t, c)
+	s, err := c.CreateProject(ctx, "p", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.SetScript(t, tiadtest.Script{Failures: []tiadtest.ScriptedCall{{Call: "CloseProject", Message: "The project is locked"}}})
+	if err := s.Close(ctx); tiad.Kind(err) != tiad.KindOperationFailed {
+		t.Fatalf("a failing close: %v", err)
+	}
+	if ss, _ := c.Sessions(ctx); len(ss) != 1 {
+		t.Fatalf("the session went away although TIA still holds the project: %+v", ss)
+	}
+	if _, err := s.Compile(ctx, true, true); tiad.Kind(err) != tiad.KindOperationFailed || !tiad.IsFatal(err) || !strings.Contains(err.Error(), "broken") {
+		t.Fatalf("a call on a broken session: %v", err)
+	}
+	if _, err := c.Open(ctx, s.Project); tiad.Kind(err) != tiad.KindBusy {
+		t.Fatalf("open the project of a broken session: %v", err)
+	}
+	p.SetScript(t, tiadtest.Script{})
+	if err := s.Close(ctx); err != nil {
+		t.Fatalf("closing again: %v", err)
+	}
+	if n := countCalls(p.Calls(t), "CloseProject"); n != 2 {
+		t.Fatalf("TIA was asked to close the project %d times, want 2 (the retry must reach TIA)", n)
+	}
+	if ss, _ := c.Sessions(ctx); len(ss) != 0 {
+		t.Fatalf("sessions after the second close: %+v", ss)
+	}
+}
+
+// TestAgentNeverHandsTIAABadGSDML: a GSDML with a DOCTYPE never reaches
+// TIA's importer.
+func TestAgentNeverHandsTIAABadGSDML(t *testing.T) {
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{})
+	c := p.Client()
+	const g = "gsd/GSDML-V2.4-Bad-20261118.xml"
+	if _, err := c.PutFile(ctx, g, []byte(`<!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><x>&e;</x>`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.InstallGSD(ctx, g); tiad.Kind(err) != tiad.KindBadRequest {
+		t.Fatalf("install: %v", err)
+	}
+	if n := countCalls(p.Calls(t), "InstallGsd"); n != 0 {
+		t.Fatalf("TIA's importer got the file %d times", n)
+	}
+}
+
+// downloadReady is tiad-fake with the bench project compiled.
+func downloadReady(t *testing.T, env ...string) (*tiadtest.Process, *tiad.Session) {
+	t.Helper()
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{Targets: []string{"192.0.2.10", "192.0.2.99"}}, env...)
+	c := p.Client()
+	installBench(t, c)
+	s, err := c.CreateProject(ctx, "bench", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	return p, s
+}
+
+func countCalls(cs []tiadtest.TiaCall, name string) int {
+	n := 0
+	for _, c := range cs {
+		if c.Call == name {
+			n++
+		}
+	}
+	return n
+}
+
+// TestAgentRefusesDownloadsBeforeTIA: every refusal the agent can make
+// itself is made before TIA hears of the download.
+func TestAgentRefusesDownloadsBeforeTIA(t *testing.T) {
+	p, s := downloadReady(t)
+	p.SetQuestions(t, []tiad.Question{{ID: tiad.QuestionStopCPU}})
+	refused := []tiad.DownloadRequest{
+		{Address: "192.0.2.77", Software: true, Announced: true}, // not a target
+		{Address: "192.0.2.99", Software: true, Announced: true}, // not the station's CPU
+	}
+	for _, r := range refused {
+		if _, err := s.Download(ctx, r); err == nil {
+			t.Fatalf("%+v was not refused", r)
+		}
+	}
+	if _, err := s.ApplyStation(ctx, tiadtest.BenchStation(tiad.DeviceModule{Slot: 1, Subslot: 1, Module: "M"}), tiadtest.BenchSecrets); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Download(ctx, tiad.DownloadRequest{Decisions: tiad.Decisions{ResetData: tiad.Yes()}, Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true}); tiad.Kind(err) != tiad.KindNotCompiled {
+		t.Fatalf("not compiled: %v", err)
+	}
+	if n := countCalls(p.Calls(t), "Download"); n != 0 {
+		t.Fatalf("TIA heard of %d refused downloads", n)
+	}
+	// A download that does not say whether the CPU starts after loading
+	// is refused before TIA hears of it.
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Download(ctx, tiad.DownloadRequest{Decisions: tiad.Decisions{ResetData: tiad.Yes()}, Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true}); tiad.Kind(err) != tiad.KindDecisionRequired || len(tiad.Questions(err)) != 1 || tiad.Questions(err)[0].ID != tiad.QuestionStartAfter {
+		t.Fatalf("no start-after: %v", err)
+	}
+	if n := countCalls(p.Calls(t), "Download"); n != 0 {
+		t.Fatalf("TIA heard of a download without start-after (%d)", n)
+	}
+	// So is one that loads hardware without the opt-in and the
+	// attestation (#789 hardware gate), on this CPU as on any.
+	hw := tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Hardware: true, Software: true, Announced: true, Decisions: tiad.Decisions{StopCPU: tiad.Yes(), ResetData: tiad.Yes(), StartAfter: tiad.No()}}
+	if _, err := s.Download(ctx, hw); tiad.Kind(err) != tiad.KindDecisionRequired || len(tiad.Questions(err)) != 1 || tiad.Questions(err)[0].ID != tiad.QuestionUnverifiedHardware {
+		t.Fatalf("hardware without the opt-in: %v", err)
+	}
+	hw.Decisions.AcceptUnverifiedHardware = tiad.Yes()
+	if _, err := s.Download(ctx, hw); tiad.Kind(err) != tiad.KindDecisionRequired || !strings.Contains(err.Error(), "attestation") {
+		t.Fatalf("hardware without the attestation: %v", err)
+	}
+	if n := countCalls(p.Calls(t), "Download"); n != 0 {
+		t.Fatalf("TIA heard of a hardware download without the opt-in or the attestation (%d)", n)
+	}
+	// A dry run and an unanswered download reach TIA and load nothing.
+	if _, err := s.Download(ctx, tiad.DownloadRequest{Decisions: tiad.Decisions{ResetData: tiad.Yes()}, Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, DryRun: true, Announced: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Download(ctx, tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true, Decisions: tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.No()}}); tiad.Kind(err) != tiad.KindDecisionRequired {
+		t.Fatalf("unanswered: %v", err)
+	}
+	if n := countCalls(p.Calls(t), "Download"); n != 2 {
+		t.Fatalf("TIA heard of %d downloads, want 2", n)
+	}
+	if l := p.Loaded(t); len(l) != 0 {
+		t.Fatalf("loaded %+v", l)
+	}
+}
+
+// TestAgentSaysWhenTheOutcomeIsUnknown: whenever TIA's side may have
+// loaded the CPU without the agent's approval, or fails once the download
+// was decided, the answer is outcome_unknown: never success, never a
+// plain refusal, and the session stays open so the next step, a compare on
+// it, works.
+func TestAgentSaysWhenTheOutcomeIsUnknown(t *testing.T) {
+	p, s := downloadReady(t)
+	dry := tiad.DownloadRequest{Decisions: tiad.Decisions{ResetData: tiad.Yes()}, Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, DryRun: true, Announced: true}
+	real := tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true, Decisions: tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.No()}}
+	no := real
+	no.Decisions = tiad.Decisions{ResetData: tiad.Yes(), StopCPU: tiad.No(), StartAfter: tiad.No()}
+	yes := real
+	yes.Decisions = tiad.Decisions{StopCPU: tiad.Yes(), ResetData: tiad.Yes(), StartAfter: tiad.No()}
+	stop := []tiad.Question{{ID: tiad.QuestionStopCPU}}
+	cases := []struct {
+		name   string
+		script tiadtest.Script
+		req    tiad.DownloadRequest
+	}{
+		{"loads a dry run", tiadtest.Script{Questions: stop, LoadDespiteCancel: true}, dry},
+		{"loads an unanswered download", tiadtest.Script{Questions: stop, LoadDespiteCancel: true}, real},
+		{"loads a declined download", tiadtest.Script{Questions: stop, LoadDespiteCancel: true}, no},
+		// A dry run TIA asks nothing about cannot be cancelled.
+		{"never asks, dry run", tiadtest.Script{Questions: stop, AskFirst: intp(0)}, dry},
+		{"asks twice", tiadtest.Script{Questions: stop, AskFirst: intp(2)}, yes},
+		// Stop answered yes and written, then a check the request does
+		// not answer: TIA may already have stopped the CPU.
+		{"cancels after an acting answer", tiadtest.Script{Questions: []tiad.Question{{ID: tiad.QuestionStopCPU}, {ID: tiad.QuestionOverwrite}}}, yes},
+		// TIA's side fails plainly (not in doubt) after asking a check:
+		// the agent itself says outcome_unknown.
+		{"fails plainly after a check", tiadtest.Script{CleanCancel: true, Questions: stop, FailAfterDecide: "The connection to the CPU was lost"}, yes},
+		{"fails after an approval", tiadtest.Script{Questions: stop, FailAfterDecide: "The connection to the CPU was lost"}, yes},
+		{"fails after a cancel", tiadtest.Script{Questions: stop, FailAfterDecide: "The connection to the CPU was lost"}, real},
+		{"fails after a dry run", tiadtest.Script{FailAfterDecide: "The connection to the CPU was lost"}, dry},
+		// TIA's side says its download had begun, though nothing was
+		// decided yet (it threw before asking, or a cancel was swallowed).
+		{"fails in doubt before asking", tiadtest.Script{FailInDoubt: "TIA went on after tiad cancelled the download"}, yes},
+	}
+	for _, tc := range cases {
+		p.SetScript(t, tc.script)
+		_, err := s.Download(ctx, tc.req)
+		if tiad.Kind(err) != tiad.KindOutcomeUnknown || tiad.IsFatal(err) || !tiad.OutcomeUnknown(err) || !strings.Contains(err.Error(), "compare before anything else") {
+			t.Errorf("%s: %v, want a non-fatal outcome_unknown", tc.name, err)
+			continue
+		}
+		if tc.name == "cancels after an acting answer" && (strings.Join(tiad.ActingAnswers(err), ",") != "stop-cpu" || !strings.Contains(err.Error(), "TIA may already have stopped the CPU: check its mode and start it")) {
+			t.Errorf("%s: %v (acting %v), want it to name stop-cpu and what to do", tc.name, err, tiad.ActingAnswers(err))
+		}
+		p.SetScript(t, tiadtest.Script{})
+		if _, err := s.CompareWith(ctx, tiadtest.BenchCompare); err != nil {
+			t.Errorf("%s: compare on the same session: %v", tc.name, err)
+		}
+	}
+	// A TIA side that reports a clean cancel after an acting answer
+	// (breaking the ITia contract): the agent itself says outcome_unknown,
+	// naming the answer.
+	p.SetScript(t, tiadtest.Script{CleanCancel: true, Questions: []tiad.Question{{ID: tiad.QuestionStopCPU}, {ID: tiad.QuestionOverwrite}}})
+	_, err := s.Download(ctx, yes)
+	if tiad.Kind(err) != tiad.KindOutcomeUnknown || strings.Join(tiad.ActingAnswers(err), ",") != "stop-cpu" ||
+		!strings.Contains(err.Error(), "at TIA's overwrite check") || !strings.Contains(err.Error(), "check its mode and start it") {
+		t.Fatalf("a clean cancel after an acting answer: %v (acting %v)", err, tiad.ActingAnswers(err))
+	}
+	// A download TIA asks nothing about is approved by the request alone,
+	// and succeeds only on evidence: TIA's result says loaded and an
+	// online compare right after is equal (#789).
+	p.SetScript(t, tiadtest.Script{AskFirst: intp(0)})
+	compares := countCalls(p.Calls(t), "Compare")
+	if r, err := s.Download(ctx, yes); err != nil || !r.Downloaded || !r.CompareEqual || r.HardwareVerified != nil {
+		t.Fatalf("TIA asks nothing, compare equal: %+v %v", r, err)
+	}
+	if n := countCalls(p.Calls(t), "Compare"); n != compares+1 {
+		t.Fatalf("the download compared %d times, want once", n-compares)
+	}
+	// TIA asks nothing and its result says the load failed: in doubt,
+	// never loaded (#1154 review), even if a compare would be equal.
+	p.SetScript(t, tiadtest.Script{AskFirst: intp(0), DownloadState: "Error"})
+	if _, err := s.Download(ctx, yes); tiad.Kind(err) != tiad.KindOutcomeUnknown || !strings.Contains(err.Error(), "TIA's download ended Error") {
+		t.Fatalf("TIA asks nothing, result Error: %v, want outcome_unknown naming it", err)
+	}
+	// A dry run TIA runs without asking never starts the CPU, even when
+	// the request says start-after yes (#1154 review).
+	p.SetScript(t, tiadtest.Script{AskFirst: intp(0)})
+	dryStart := dry
+	dryStart.Decisions = tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.Yes()}
+	if _, err := s.Download(ctx, dryStart); tiad.Kind(err) != tiad.KindOutcomeUnknown {
+		t.Fatalf("a dry run TIA asks nothing about: %v", err)
+	}
+	if l := p.Log(); !strings.Contains(l, "start-after written NoAction") || strings.Contains(l, "start-after written StartModule") {
+		t.Fatalf("a dry run's after-download start-after: want NoAction only:\n%s", l)
+	}
+	// A real download that said start it and then fails in doubt names
+	// start-after: TIA may have started the CPU after loading.
+	start := real
+	start.Decisions = tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.Yes()}
+	p.SetScript(t, tiadtest.Script{AskFirst: intp(0), CompareDiffers: true})
+	if _, err := s.Download(ctx, start); tiad.Kind(err) != tiad.KindOutcomeUnknown || strings.Join(tiad.ActingAnswers(err), ",") != "start-after" || !strings.Contains(err.Error(), "started the CPU") {
+		t.Fatalf("start-after yes, then the compare differs: %v (acting %v)", err, tiad.ActingAnswers(err))
+	}
+	p.SetScript(t, tiadtest.Script{AskFirst: intp(0), CompareDiffers: true})
+	if _, err := s.Download(ctx, yes); tiad.Kind(err) != tiad.KindOutcomeUnknown || !strings.Contains(err.Error(), "the compare right after it differs (PLC_1 different)") {
+		t.Fatalf("TIA asks nothing, compare differs: %v, want outcome_unknown naming it", err)
+	}
+	p.SetScript(t, tiadtest.Script{AskFirst: intp(0), Failures: []tiadtest.ScriptedCall{{Call: "Compare", Message: "the CPU went offline"}}})
+	if _, err := s.Download(ctx, yes); tiad.Kind(err) != tiad.KindOutcomeUnknown || !strings.Contains(err.Error(), "the compare right after it failed") || !strings.Contains(err.Error(), "the CPU went offline") {
+		t.Fatalf("TIA asks nothing, compare fails: %v, want outcome_unknown naming it", err)
+	}
+	p.SetScript(t, tiadtest.Script{})
+	// A TIA failure before anything was decided is a plain failure.
+	p.SetScript(t, tiadtest.Script{Failures: []tiadtest.ScriptedCall{{Call: "Download", Message: "No route to the CPU"}}})
+	if _, err := s.Download(ctx, yes); tiad.Kind(err) != tiad.KindOperationFailed {
+		t.Fatalf("a failure before decide: %v", err)
+	}
+}
+
+// TestAgentAnswersConsistentDownload: #789 walk-past window. A real
+// software download onto a CPU in RUN asks StopModules, then
+// ConsistentBlocksDownload ("Download software to device"). Unanswered,
+// tiad cancels there after the stop it wrote: outcome_unknown naming the
+// check and stop-cpu. Answered yes (consistentDownload), the download
+// loads and succeeds on evidence. Overwrite never answers it.
+func TestAgentAnswersConsistentDownload(t *testing.T) {
+	p, s := downloadReady(t)
+	qs := []tiad.Question{{ID: tiad.QuestionStopCPU}, {ID: tiad.QuestionConsistentDownload, Message: "Download software to device"}}
+	req := tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true,
+		Decisions: tiad.Decisions{StopCPU: tiad.Yes(), ResetData: tiad.Yes(), Overwrite: tiad.Yes(), StartAfter: tiad.Yes()}}
+	p.SetScript(t, tiadtest.Script{Questions: qs})
+	_, err := s.Download(ctx, req)
+	if tiad.Kind(err) != tiad.KindOutcomeUnknown || !strings.Contains(err.Error(), "ConsistentBlocksDownload") ||
+		!strings.Contains(strings.Join(tiad.ActingAnswers(err), ","), "stop-cpu") {
+		t.Fatalf("stop yes, consistent download unanswered: %v (acting %v), want outcome_unknown naming the check and stop-cpu", err, tiad.ActingAnswers(err))
+	}
+	if l := p.Log(); !strings.Contains(l, `consistentDownload=unanswered`) || !strings.Contains(l, `asked=["stop-cpu","consistent-download"] acting=["stop-cpu","start-after"] outcome=outcome_unknown`) {
+		t.Fatalf("the audit must show the unanswered check and only stop (and start-after) acting:\n%s", l)
+	}
+	req.Decisions.ConsistentDownload = tiad.Yes()
+	p.SetScript(t, tiadtest.Script{Questions: qs})
+	if r, err := s.Download(ctx, req); err != nil || !r.Downloaded || !r.CompareEqual {
+		t.Fatalf("stop yes, consistent download yes: %+v %v, want a verified load", r, err)
+	}
+	// A CPU already in STOP: TIA asks consistent-download first, then a
+	// check the request leaves unanswered. The yes was acting, so the
+	// cancel is outcome_unknown naming it, never a clean refusal.
+	p.SetScript(t, tiadtest.Script{Questions: []tiad.Question{{ID: tiad.QuestionConsistentDownload}, {ID: tiad.QuestionIdentificationData}}})
+	_, err = s.Download(ctx, req)
+	if tiad.Kind(err) != tiad.KindOutcomeUnknown || !strings.Contains(strings.Join(tiad.ActingAnswers(err), ","), "consistent-download") ||
+		!strings.Contains(err.Error(), "may already have loaded the software") {
+		t.Fatalf("consistent-download yes, then a refusal: %v (acting %v), want outcome_unknown naming consistent-download", err, tiad.ActingAnswers(err))
+	}
+	p.SetScript(t, tiadtest.Script{Questions: qs})
+	if _, err := s.Download(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if l := p.Log(); !strings.Contains(l, `consistentDownload=yes`) || !strings.Contains(l, `acting=["stop-cpu","consistent-download"] outcome=loaded`) {
+		t.Fatalf("the audit must show consistent-download answered yes, acting, and loaded:\n%s", l)
+	}
+	p.SetScript(t, tiadtest.Script{})
+}
+
+// TestAgentAnswersTheSoftwareLoadFamily: #789 restart window. A real
+// software download onto a CPU in RUN asks StopModules,
+// ConsistentBlocksDownload, then AlarmTextLibrariesDownload, and may ask
+// AllBlocksDownload, UserManagementDownload and LoadIdentificationData.
+// Answered up front, it loads; keeping the CPU's online users is accepted
+// only under a spec whose accessControl is keep, and the passive answers
+// are never named as acting.
+func TestAgentAnswersTheSoftwareLoadFamily(t *testing.T) {
+	p, s := downloadReady(t)
+	qs := []tiad.Question{{ID: tiad.QuestionStopCPU}, {ID: tiad.QuestionConsistentDownload}, {ID: tiad.QuestionAlarmTexts},
+		{ID: tiad.QuestionAllBlocks}, {ID: tiad.QuestionUserManagement}, {ID: tiad.QuestionIdentificationData}}
+	req := tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true,
+		Decisions: tiad.Decisions{StopCPU: tiad.Yes(), ResetData: tiad.Yes(), ConsistentDownload: tiad.Yes(), AlarmTexts: tiad.Yes(), AllBlocks: tiad.Yes(),
+			UserManagementKeepOnline: tiad.Yes(), IdentificationDataLoadNothing: tiad.Yes(), StartAfter: tiad.Yes()}}
+	// The bench spec sets access control: keeping the CPU's users is
+	// refused at that check, after the loading answers were written.
+	p.SetScript(t, tiadtest.Script{Questions: qs})
+	_, err := s.Download(ctx, req)
+	if tiad.Kind(err) != tiad.KindOutcomeUnknown || !strings.Contains(err.Error(), "UserManagementDownload") ||
+		strings.Join(tiad.ActingAnswers(err), ",") != "stop-cpu,consistent-download,alarm-texts,all-blocks,start-after" {
+		t.Fatalf("user management under a spec that sets access control: %v (acting %v)", err, tiad.ActingAnswers(err))
+	}
+	// Keep after fullAccessUser on the same session keeps what tiad set,
+	// not what the project had: still refused (#1159 review).
+	keep := tiadtest.BenchStation()
+	keep.CPU.AccessControl = tiad.AccessKeep
+	if _, err := s.ApplyStation(ctx, keep, tiadtest.BenchSecrets); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	p.SetScript(t, tiadtest.Script{Questions: qs})
+	if _, err := s.Download(ctx, req); tiad.Kind(err) != tiad.KindOutcomeUnknown || !strings.Contains(err.Error(), "UserManagementDownload") {
+		t.Fatalf("keep after fullAccessUser on one session: %v, want user management refused", err)
+	}
+	// A fresh session on the saved project that only ever keeps access
+	// control: keeping the CPU's online users is accepted.
+	if _, err := s.Save(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	project := s.Project
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s, err = p.Client().Open(ctx, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyStation(ctx, keep, tiadtest.BenchSecrets); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	p.SetScript(t, tiadtest.Script{Questions: qs})
+	if r, err := s.Download(ctx, req); err != nil || !r.Downloaded || !r.CompareEqual {
+		t.Fatalf("the whole family answered up front under keep: %+v %v, want a verified load", r, err)
+	}
+	if l := p.Log(); !strings.Contains(l, `alarmTexts=yes allBlocks=yes userManagementKeepOnline=yes userManagementResetToProject=unanswered identificationDataLoadNothing=yes`) ||
+		!strings.Contains(l, `acting=["stop-cpu","consistent-download","alarm-texts","all-blocks"] outcome=loaded`) {
+		t.Fatalf("the audit must name each decision and only the loading answers as acting:\n%s", l)
+	}
+	// The same opened session then sets access control and keeps it
+	// again: the apply set it, so keeping the CPU's users is refused.
+	if _, err := s.ApplyStation(ctx, tiadtest.BenchStation(), tiadtest.BenchSecrets); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyStation(ctx, keep, tiadtest.BenchSecrets); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	p.SetScript(t, tiadtest.Script{Questions: qs})
+	if _, err := s.Download(ctx, req); tiad.Kind(err) != tiad.KindOutcomeUnknown || !strings.Contains(err.Error(), "UserManagementDownload") {
+		t.Fatalf("keep after an apply of fullAccessUser on an opened session: %v, want user management refused", err)
+	}
+	p.SetScript(t, tiadtest.Script{})
+}
+
+// TestAgentNeverCallsAnEmptyCompareEqual: #789. TIA's compare tree is
+// equal only when its root says identical, at least one object below the
+// root was compared, nothing anywhere in it differs, and every program
+// block the project holds is in it, identical. A tree that compares
+// nothing, hides a difference in a folder, or leaves out a block of the
+// project (the stage 3 gate), or a project whose blocks were not read,
+// is not equal:
+// /compare says equal false and names why, and a download TIA reported
+// loaded ends outcome_unknown naming it, and start-after, since TIA may
+// have started the CPU.
+func TestAgentNeverCallsAnEmptyCompareEqual(t *testing.T) {
+	p, s := downloadReady(t)
+	start := tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true,
+		Decisions: tiad.Decisions{StopCPU: tiad.Yes(), ResetData: tiad.Yes(), StartAfter: tiad.Yes()}}
+	// The bench-shaped equal tree passes, both ways.
+	p.SetScript(t, tiadtest.Script{AskFirst: intp(0)})
+	if r, err := s.Download(ctx, start); err != nil || !r.Downloaded || !r.CompareEqual {
+		t.Fatalf("download, bench-shaped equal tree: %+v %v", r, err)
+	}
+	if r, err := s.CompareWith(ctx, tiadtest.BenchCompare); err != nil || !r.Equal || len(r.Differences) != 0 {
+		t.Fatalf("compare, bench-shaped equal tree: %+v %v", r, err)
+	}
+	for _, tc := range []struct{ tree, named string }{
+		{"empty", "PLC_1 nothing compared, Main [OB1] not compared"},
+		{"emptyFolders", "PLC_1 nothing compared, Main [OB1] not compared"},
+		{"folderDiffers", "PLC tags contents differ"},
+		{"irrelevantRoot", "PLC_1 not compared"},
+		{"dropBlock", "Main [OB1] not compared"},
+		{"noBlocks", "no program blocks in the project (or none read)"},
+	} {
+		p.SetScript(t, tiadtest.Script{AskFirst: intp(0), CompareTree: tc.tree})
+		r, err := s.CompareWith(ctx, tiadtest.BenchCompare)
+		var named []string
+		if err == nil {
+			for _, d := range r.Differences {
+				named = append(named, strings.TrimSpace(d.Object+" "+d.State))
+			}
+		}
+		if err != nil || r.Equal || strings.Join(named, ", ") != tc.named {
+			t.Errorf("compare, tree %s: %+v %v, want not equal naming %q", tc.tree, r, err, tc.named)
+		}
+		_, err = s.Download(ctx, start)
+		if tiad.Kind(err) != tiad.KindOutcomeUnknown || !strings.Contains(err.Error(), "the compare right after it differs ("+tc.named+")") ||
+			strings.Join(tiad.ActingAnswers(err), ",") != "start-after" {
+			t.Errorf("download, tree %s: %v (acting %v), want outcome_unknown naming %q and start-after", tc.tree, err, tiad.ActingAnswers(err), tc.named)
+		}
+	}
+	p.SetScript(t, tiadtest.Script{})
+}
+
+// TestAgentSeesTheBlockItSent: #789 stage 3 gate. A download that
+// loaded an imported block succeeds only when the compare right after
+// saw that block, in its user group, identical: the response lists it.
+// A compare that leaves it out names it, on /compare and on a download
+// TIA reported loaded (outcome_unknown, start-after named).
+func TestAgentSeesTheBlockItSent(t *testing.T) {
+	p, s := downloadReady(t)
+	c := p.Client()
+	if _, err := c.PutFile(ctx, "src/Pump.scl", []byte("FUNCTION_BLOCK \"Pump\"\r\nBEGIN\r\nEND_FUNCTION_BLOCK\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Software(ctx, tiad.SoftwareRequest{Group: "nautilus", Sources: []string{"src/Pump.scl"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	start := tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true,
+		Decisions: tiad.Decisions{StopCPU: tiad.Yes(), ResetData: tiad.Yes(), StartAfter: tiad.Yes()}}
+	p.SetScript(t, tiadtest.Script{AskFirst: intp(0)})
+	r, err := s.Download(ctx, start)
+	if err != nil || !r.Downloaded || !r.CompareEqual || strings.Join(r.Blocks, ", ") != "Main [OB1], Pump [FB1]" {
+		t.Fatalf("download of an imported block: %+v %v, want equal listing Main [OB1], Pump [FB1]", r, err)
+	}
+	if cr, err := s.CompareWith(ctx, tiadtest.BenchCompare); err != nil || !cr.Equal || strings.Join(cr.Blocks, ", ") != "Main [OB1], Pump [FB1]" {
+		t.Fatalf("compare after it: %+v %v", cr, err)
+	}
+	p.SetScript(t, tiadtest.Script{AskFirst: intp(0), CompareTree: "dropBlock"})
+	if cr, err := s.CompareWith(ctx, tiadtest.BenchCompare); err != nil || cr.Equal || len(cr.Differences) != 1 || cr.Differences[0].Object != "Pump [FB1]" || cr.Differences[0].State != "not compared" {
+		t.Errorf("compare that leaves the block out: %+v %v, want Pump [FB1] not compared", cr, err)
+	}
+	_, err = s.Download(ctx, start)
+	if tiad.Kind(err) != tiad.KindOutcomeUnknown || !strings.Contains(err.Error(), "the compare right after it differs (Pump [FB1] not compared)") ||
+		strings.Join(tiad.ActingAnswers(err), ",") != "start-after" {
+		t.Errorf("download whose compare leaves the block out: %v (acting %v)", err, tiad.ActingAnswers(err))
+	}
+	p.SetScript(t, tiadtest.Script{})
+}
+
+// TestAgentSaysUnknownWhenTIADiesInsideTheDownload: #789 stage 2. TIA
+// died inside its download call before asking anything, and detaching
+// tiad's handlers from its disposed objects threw too; that second error
+// replaced the first and the agent answered operation_failed. Once TIA's
+// download call was entered the CPU may or may not be loaded, whatever
+// the failure, so the answer is outcome_unknown, dry run or not; before
+// the call, operation_failed naming the failure itself, not the detach.
+// Either way TIA is gone, and with it every project open on it, and the
+// agent starts TIA only once: the answer ends the session (fatal) and
+// names the fix (restart the agent, then compare in a fresh session).
+// From then on every call that needs TIA is refused with that fix, the
+// same session's compare and a new session included, probe shows the tia
+// gate failed, and a close drops the session instead of keeping it broken.
+func TestAgentSaysUnknownWhenTIADiesInsideTheDownload(t *testing.T) {
+	const fix = "Restart the agent, then compare in a fresh session"
+	dry := tiad.DownloadRequest{Decisions: tiad.Decisions{ResetData: tiad.Yes()}, Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, DryRun: true, Announced: true}
+	real := tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true,
+		Decisions: tiad.Decisions{StopCPU: tiad.Yes(), ResetData: tiad.Yes(), StartAfter: tiad.No()}}
+	for _, dies := range []string{"downloading", "preparing"} {
+		for _, req := range []tiad.DownloadRequest{dry, real} {
+			name := fmt.Sprintf("TIA dies %s, dry run %v", dies, req.DryRun)
+			p, s := downloadReady(t)
+			c := p.Client()
+			p.SetScript(t, tiadtest.Script{TiaDies: dies})
+			_, err := s.Download(ctx, req)
+			if dies == "downloading" {
+				if tiad.Kind(err) != tiad.KindOutcomeUnknown || !tiad.OutcomeUnknown(err) || !tiad.IsFatal(err) ||
+					!strings.Contains(err.Error(), "DownloadProvider") || !strings.Contains(err.Error(), fix) {
+					t.Errorf("%s: %v, want a fatal outcome_unknown naming the download's failure and the fix", name, err)
+				}
+			} else if tiad.Kind(err) != tiad.KindOperationFailed || !tiad.IsFatal(err) || !strings.Contains(err.Error(), "DownloadProvider") ||
+				strings.Contains(err.Error(), "ConnectionConfiguration") || !strings.Contains(err.Error(), fix) {
+				t.Errorf("%s: %v, want a fatal operation_failed naming the failure (not the detach) and the fix", name, err)
+			}
+			pr, err := c.Probe(ctx)
+			if g := gate(t, pr, "tia"); err != nil || pr.Usable || g.State != tiad.GateFailed || !strings.Contains(g.Detail, fix) || g.Remedy == "" {
+				t.Errorf("%s: probe %+v %v, want the tia gate failed naming the fix", name, pr, err)
+			}
+			if _, err := s.CompareWith(ctx, tiadtest.BenchCompare); tiad.Kind(err) != tiad.KindGate || !strings.Contains(err.Error(), fix) {
+				t.Errorf("%s: compare on the same session: %v, want refused naming the fix", name, err)
+			}
+			if _, err := c.CreateProject(ctx, "after", tiadtest.BenchStation(), tiadtest.BenchSecrets); tiad.Kind(err) != tiad.KindGate || !strings.Contains(err.Error(), fix) {
+				t.Errorf("%s: a new session: %v, want refused naming the fix", name, err)
+			}
+			if err := s.Close(ctx); err != nil {
+				t.Errorf("%s: close: %v", name, err)
+			}
+			if l, err := c.Sessions(ctx); err != nil || len(l) != 0 {
+				t.Errorf("%s: sessions after the close: %+v %v, want none (not kept broken)", name, l, err)
+			}
+			if l := p.Loaded(t); len(l) != 0 {
+				t.Errorf("%s: a TIA that died loaded %+v", name, l)
+			}
+		}
+	}
+}
+
+// TestAgentRefusesACallQueuedBehindTheOneTIADiedIn: a call that passed
+// the gates while TIA was still alive, then waited on the TIA thread
+// behind the download TIA died in, is refused naming the fix too; it
+// never runs on the dead TIA.
+func TestAgentRefusesACallQueuedBehindTheOneTIADiedIn(t *testing.T) {
+	p, s := downloadReady(t)
+	c := p.Client()
+	p.SetScript(t, tiadtest.Script{TiaDies: "downloading", Delays: []tiadtest.ScriptedCall{{Call: "Download", MS: 1500}}})
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Download(ctx, tiad.DownloadRequest{Decisions: tiad.Decisions{ResetData: tiad.Yes()}, Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, DryRun: true, Announced: true})
+		done <- err
+	}()
+	for deadline := time.Now().Add(10 * time.Second); countCalls(p.Calls(t), "Download") < 1; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the download never reached TIA's side")
+		}
+	}
+	// A call that needs no session (TIA opens one project at a time).
+	_, err := c.InstallGSD(ctx, "gsd/GSDML-V2.4-Example-Device-20261117.xml")
+	if tiad.Kind(err) != tiad.KindGate || !strings.Contains(err.Error(), "Restart the agent") {
+		t.Errorf("a GSD install queued behind the dying download: %v, want refused naming the fix", err)
+	}
+	if err := <-done; tiad.Kind(err) != tiad.KindOutcomeUnknown || !tiad.IsFatal(err) {
+		t.Errorf("the download TIA died in: %v", err)
+	}
+}
+
+// TestAgentDecidesEveryDryRun: #789 stage-2 retry. TIA asks its checks
+// one at a time, with no parent and nothing listing them; the dry run
+// cancelled at the first as "cannot list", which came back
+// outcome_unknown. A dry run now declines at the first check, cleanly:
+// nothing loaded, that one question, marked incomplete, and TIA asked
+// nothing more.
+func TestAgentDecidesEveryDryRun(t *testing.T) {
+	p, s := downloadReady(t)
+	p.SetQuestions(t, []tiad.Question{{ID: tiad.QuestionStopCPU, Message: "The modules are stopped for downloading to device."}, {ID: tiad.QuestionOverwrite}, {ID: tiad.QuestionStartAfter}})
+	r, err := s.Download(ctx, tiad.DownloadRequest{Decisions: tiad.Decisions{ResetData: tiad.Yes()}, Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, DryRun: true, Announced: true})
+	if err != nil || !r.DryRun || !r.Provisional || !r.QuestionsIncomplete || r.Downloaded || len(r.Questions) != 1 || r.Questions[0].ID != tiad.QuestionStopCPU {
+		t.Fatalf("a dry run: %+v %v", r, err)
+	}
+	if l := p.Loaded(t); len(l) != 0 {
+		t.Fatalf("a dry run loaded %+v", l)
+	}
+	log := waitLog(t, p, "outcome=dry-run")
+	if !strings.Contains(log, `asked=["stop-cpu"] acting=[]`) {
+		t.Fatalf("the audit line: want one check asked, nothing acting:\n%s", log)
+	}
+	// Decisions that answer every check yes never make a dry run load.
+	r, err = s.Download(ctx, tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, DryRun: true, Announced: true,
+		Decisions: tiad.Decisions{StopCPU: tiad.Yes(), ResetData: tiad.Yes(), Overwrite: tiad.Yes(), StartAfter: tiad.Yes()}})
+	if err != nil || !r.DryRun || r.Downloaded || len(r.Questions) != 1 {
+		t.Fatalf("a dry run with every check answered yes: %+v %v", r, err)
+	}
+	if l := p.Loaded(t); len(l) != 0 {
+		t.Fatalf("a dry run with every check answered yes loaded %+v", l)
+	}
+}
+
+// TestAgentOpensOneProjectAtATime: TIA opens one project per instance
+// (#616). Two creates racing, with TIA slow: exactly one gets a session,
+// the other is busy naming it; while a closed session's project is still
+// closing in TIA, a create is busy too; once it is closed, one goes
+// through.
+func TestAgentOpensOneProjectAtATime(t *testing.T) {
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{Targets: []string{"192.0.2.10"}})
+	c := p.Client()
+	installBench(t, c)
+	p.SetScript(t, tiadtest.Script{Delays: []tiadtest.ScriptedCall{{Call: "CreateProject", MS: 500}}})
+	type made struct {
+		s   *tiad.Session
+		err error
+	}
+	got := make(chan made, 2)
+	for _, n := range []string{"one", "two"} {
+		go func(n string) {
+			s, err := c.CreateProject(ctx, n, tiadtest.BenchStation(), tiadtest.BenchSecrets)
+			got <- made{s, err}
+		}(n)
+	}
+	var open *tiad.Session
+	var busy error
+	for range 2 {
+		m := <-got
+		switch {
+		case m.err == nil:
+			open = m.s
+		case tiad.Kind(m.err) == tiad.KindBusy:
+			busy = m.err
+		default:
+			t.Fatalf("a racing create: %v", m.err)
+		}
+	}
+	// The loser came while the winner was still opening: it names it,
+	// and offers no close, which a session still opening does not take.
+	if open == nil || busy == nil || !strings.Contains(busy.Error(), "TIA opens one project at a time, and session "+open.ID+" is still opening "+open.Project+": try again once it is open") ||
+		strings.Contains(busy.Error(), "DELETE") {
+		t.Fatalf("racing creates: open %+v, busy %v; want exactly one, the other naming it as still opening", open, busy)
+	}
+	if n := countCalls(p.Calls(t), "CreateProject"); n != 1 {
+		t.Fatalf("TIA created %d projects, want 1", n)
+	}
+	// A close that is slow in TIA: until it ends, nothing else opens.
+	p.SetScript(t, tiadtest.Script{Delays: []tiadtest.ScriptedCall{{Call: "CloseProject", MS: 1500}}})
+	closed := make(chan error, 1)
+	go func() { closed <- open.Close(ctx) }()
+	for deadline := time.Now().Add(10 * time.Second); countCalls(p.Calls(t), "CloseProject") < 1; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the close never reached TIA")
+		}
+	}
+	if _, err := c.CreateProject(ctx, "two", tiadtest.BenchStation(), tiadtest.BenchSecrets); tiad.Kind(err) != tiad.KindBusy || !strings.Contains(err.Error(), "a session is still closing") {
+		t.Fatalf("a create while the last project closes: %v, want busy", err)
+	}
+	if err := <-closed; err != nil {
+		t.Fatal(err)
+	}
+	s, err := c.CreateProject(ctx, "two", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatalf("a create once the close ended: %v", err)
+	}
+	_ = s.Close(ctx)
+}
+
+// waitLog waits for the agent's log to contain want.
+func waitLog(t *testing.T, p *tiadtest.Process, want string) string {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if l := p.Log(); strings.Contains(l, want) {
+			return l
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the log never said %q:\n%s", want, p.Log())
+		}
+	}
+}
+
+// TestAgentAuditsEveryDownload: one line per download, refusals too, with
+// what was asked and decided and what came of it, and secrets only as
+// set or unset (#709).
+func TestAgentAuditsEveryDownload(t *testing.T) {
+	p, s := downloadReady(t)
+	p.SetQuestions(t, []tiad.Question{{ID: tiad.QuestionStopCPU, Message: "TIA text\nmust not be logged"}, {ID: tiad.QuestionPassword}, {ID: tiad.QuestionConfigurationPassword}})
+	req := tiad.DownloadRequest{Address: "192.0.2.10", Software: true, Announced: true,
+		Decisions: tiad.Decisions{StopCPU: tiad.Yes(), ResetData: tiad.Yes(), StartAfter: tiad.No(), TrustCertificate: "evil\naudit download forged"},
+		Secrets:   &tiad.Secrets{Protection: "audit-must-not-leak", ConfigurationPassword: "Audit-must-not-leak-2", FullAccessPassword: tiadtest.BenchFullAccessPassword}}
+	if _, err := s.Download(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	log := waitLog(t, p, "outcome=loaded state=STOP (tia-message)")
+	line := ""
+	for _, l := range strings.Split(log, "\n") {
+		if strings.Contains(l, "audit download") && strings.Contains(l, "outcome=loaded") {
+			line = l
+		}
+	}
+	for _, want := range []string{"address=\"192.0.2.10\"", "dryRun=False", "announced=True", "stopCpu=yes", "startAfter=no",
+		"protection=set", "configurationPassword=set", `asked=["stop-cpu","password","configuration-password"]`, `acting=["stop-cpu"]`, `trustCertificate="evil\naudit download forged"`} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the audit line lacks %s:\n%s", want, line)
+		}
+	}
+	// Exactly one audit line: the newline in a request-supplied name
+	// stays escaped inside its quotes and starts no line of its own.
+	if strings.Count(log, "Z audit download") != 1 || strings.Contains(log, "\naudit download") || strings.Contains(log, "must not be logged") || strings.Contains(log, "audit-must-not-leak") || strings.Contains(log, "Audit-must-not-leak-2") {
+		t.Fatalf("the audit log is forged, carries TIA's text or a secret:\n%s", log)
+	}
+	// A refusal is audited too.
+	if _, err := s.Download(ctx, tiad.DownloadRequest{Decisions: tiad.Decisions{ResetData: tiad.Yes()}, Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.99", Software: true, Announced: true}); err == nil {
+		t.Fatal("a download to another CPU was taken")
+	}
+	waitLog(t, p, "outcome=bad_request")
+}
+
+// TestAgentCarriesTheModeOfADoubtfulDownload: a download that loaded and
+// then ends in doubt (the compare after it differs or fails) still says
+// the CPU's mode TIA's messages gave, labelled as that evidence; one TIA
+// never stopped says none.
+func TestAgentCarriesTheModeOfADoubtfulDownload(t *testing.T) {
+	p, s := downloadReady(t)
+	stop := []tiad.Question{{ID: tiad.QuestionStopCPU}}
+	req := tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true, Decisions: tiad.Decisions{StopCPU: tiad.Yes(), ResetData: tiad.Yes(), StartAfter: tiad.No()}}
+	for _, sc := range []tiadtest.Script{{Questions: stop, CompareDiffers: true}, {Questions: stop, Failures: []tiadtest.ScriptedCall{{Call: "Compare", Message: "the CPU went offline"}}}} {
+		p.SetScript(t, sc)
+		_, err := s.Download(ctx, req)
+		if state, source := tiad.StateOf(err); tiad.Kind(err) != tiad.KindOutcomeUnknown || state != "STOP" || source != tiad.StateFromTIAMessage ||
+			strings.Join(tiad.ActingAnswers(err), ",") != "stop-cpu" {
+			t.Fatalf("%+v: %v (state %q %q)", sc, err, state, source)
+		}
+	}
+	p.SetScript(t, tiadtest.Script{CompareDiffers: true})
+	if _, err := s.Download(ctx, req); tiad.Kind(err) != tiad.KindOutcomeUnknown {
+		t.Fatalf("never stopped: %v", err)
+	} else if state, source := tiad.StateOf(err); state != "" || source != "" {
+		t.Fatalf("never stopped, yet state %q %q", state, source)
+	}
+}
+
+// TestAgentJournalsTheHardwareAttestation: the operator's attestation that
+// stands in for the hardware check (#789 hardware gate) is in the audit
+// line on every outcome: who, what, and when by tiad's clock once it was
+// accepted, each quoted so a request cannot forge a line.
+func TestAgentJournalsTheHardwareAttestation(t *testing.T) {
+	p, s := downloadReady(t)
+	att := &tiad.Attestation{By: "op\naudit download forged", Text: "hardware as intended\r\u2028audit download forged"}
+	req := tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Hardware: true, Software: true, Announced: true,
+		Decisions: tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.No(), AcceptUnverifiedHardware: tiad.Yes()}, Attestation: att}
+	quoted := `by="op\naudit download forged" at=20`
+	text := `text="hardware as intended\r\u2028audit download forged" cpuAccessControl=unset}`
+	auditLine := func(outcome string) string {
+		t.Helper()
+		log := waitLog(t, p, "outcome="+outcome)
+		for _, l := range strings.Split(log, "\n") {
+			if strings.Contains(l, "Z audit download") && strings.Contains(l, "outcome="+outcome) {
+				return l
+			}
+		}
+		t.Fatalf("no audit line with outcome=%s:\n%s", outcome, log)
+		return ""
+	}
+
+	res, err := s.Download(ctx, req)
+	if err != nil || res.Attestation == nil || res.Attestation.By != att.By || res.Attestation.Text != att.Text {
+		t.Fatalf("download: %+v %v", res, err)
+	}
+	line := auditLine("loaded")
+	for _, want := range []string{"hardware=True", "acceptUnverifiedHardware=yes", "attestation={" + quoted + res.Attestation.At[2:], text, "hardwareVerified=false"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the audit line lacks %s:\n%s", want, line)
+		}
+	}
+
+	// A download that ends in doubt after loading hardware journals the
+	// attestation too: that is where it matters most.
+	p.SetScript(t, tiadtest.Script{CompareDiffers: true})
+	if _, err := s.Download(ctx, req); tiad.Kind(err) != tiad.KindOutcomeUnknown {
+		t.Fatalf("compare differs: %v", err)
+	}
+	if line := auditLine(tiad.KindOutcomeUnknown); !strings.Contains(line, "attestation={"+quoted) || !strings.Contains(line, text) {
+		t.Errorf("the outcome_unknown audit line lacks the attestation:\n%s", line)
+	}
+	p.SetScript(t, tiadtest.Script{})
+
+	// A refusal journals what was said, never accepted, so no time.
+	refused := req
+	refused.Decisions.AcceptUnverifiedHardware = nil
+	if _, err := s.Download(ctx, refused); tiad.Kind(err) != tiad.KindDecisionRequired {
+		t.Fatalf("no opt-in: %v", err)
+	}
+	if line := auditLine(tiad.KindDecisionRequired); !strings.Contains(line, `attestation={by="op\naudit download forged" at=unset `+text) || !strings.Contains(line, "acceptUnverifiedHardware=unanswered") {
+		t.Errorf("the refusal's audit line:\n%s", line)
+	}
+	// So does a refusal after the gate passed: tiad accepts the
+	// attestation only once nothing of its own refuses the download.
+	late := req
+	late.Decisions.StartAfter = nil
+	if _, err := s.Download(ctx, late); tiad.Kind(err) != tiad.KindDecisionRequired || !strings.Contains(err.Error(), "startAfter") {
+		t.Fatalf("no start-after: %v", err)
+	}
+	if line := auditLine(tiad.KindDecisionRequired + `:["start-after"]`); !strings.Contains(line, `attestation={by="op\naudit download forged" at=unset `+text) {
+		t.Errorf("the start-after refusal's audit line stamps a time:\n%s", line)
+	}
+	// One over the limit is refused, and journalled by its size only, so
+	// a request cannot flood the journal.
+	// The forged lines start nowhere: every audit line is tiad's own.
+	if n, m := strings.Count(p.Log(), "Z audit download"), strings.Count(p.Log(), "audit download"); n != m-8 {
+		t.Fatalf("%d audit lines and %d mentions (want 8 forged mentions inside quotes):\n%s", n, m, p.Log())
+	}
+	huge := req
+	huge.Attestation = &tiad.Attestation{By: "op", Text: strings.Repeat("flood ", 1000)}
+	status, b := rawPost(t, p, "/v1/sessions/"+s.ID+"/download", huge)
+	if status != http.StatusBadRequest {
+		t.Fatalf("an attestation over the limit: HTTP %d %s", status, b)
+	}
+	if line := auditLine(tiad.KindBadRequest); !strings.Contains(line, `text=<6000 bytes, over the limit>`) || strings.Contains(line, "flood") {
+		t.Errorf("the over-limit attestation's audit line:\n%s", line)
+	}
+}
+
+// TestAgentKeepsTheProtectionPasswordOut: the CPU's protection password
+// goes to TIA and nowhere else.
+func TestAgentKeepsTheProtectionPasswordOut(t *testing.T) {
+	p, s := downloadReady(t)
+	p.SetQuestions(t, []tiad.Question{{ID: tiad.QuestionPassword}})
+	sec := &tiad.Secrets{Protection: "protection-must-not-leak", FullAccessPassword: tiadtest.BenchFullAccessPassword}
+	if _, err := s.Download(ctx, tiad.DownloadRequest{Address: "192.0.2.10", Software: true, Announced: true, Secrets: sec, Decisions: tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.No()}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Download(ctx, tiad.DownloadRequest{Decisions: tiad.Decisions{ResetData: tiad.Yes()}, Address: "192.0.2.10", Software: true, DryRun: true, Announced: true, Secrets: sec}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Save(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	waitLog(t, p, "outcome=dry-run")
+	waitLog(t, p, "POST /v1/sessions/"+s.ID+"/save 200")
+	if strings.Contains(p.Log(), "must-not-leak") {
+		t.Fatalf("the log carries the password:\n%s", p.Log())
+	}
+	_ = filepath.WalkDir(p.WorkDir, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			if b, _ := os.ReadFile(path); strings.Contains(string(b), "must-not-leak") {
+				t.Errorf("%s carries the password", path)
+			}
+		}
+		return nil
+	})
+}
+
+// TestAgentForgetsACompileWhenAChangeFails: a change that fails part-way
+// in TIA leaves the project not downloadable, so a half-applied station
+// or half-imported program never reaches the CPU on the strength of an
+// earlier compile.
+func TestAgentForgetsACompileWhenAChangeFails(t *testing.T) {
+	p, s := downloadReady(t)
+	dl := tiadtest.AcceptHardware(tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Hardware: true, Software: true, Announced: true, Decisions: tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.No()}})
+	fail := func(call string) {
+		t.Helper()
+		p.SetScript(t, tiadtest.Script{Failures: []tiadtest.ScriptedCall{{Call: call, Message: call + " failed part-way"}}})
+	}
+	ok := func() {
+		t.Helper()
+		p.SetScript(t, tiadtest.Script{})
+	}
+	notDownloadable := func(why, want string) {
+		t.Helper()
+		_, err := s.Download(ctx, dl)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: download = %v, want a refusal naming %q", why, err, want)
+		}
+	}
+	if _, err := s.Download(ctx, dl); err != nil {
+		t.Fatalf("the compiled project: %v", err)
+	}
+
+	// A software import that fails.
+	fail("ImportSoftware")
+	if _, err := s.Software(ctx, tiad.SoftwareRequest{Group: "nautilus"}); tiad.Kind(err) != tiad.KindOperationFailed {
+		t.Fatalf("import: %v", err)
+	}
+	ok()
+	notDownloadable("after a failed import", "compile")
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+
+	// A spec part this side cannot configure yet refuses before any
+	// write: the session is as it was, and can still apply and save.
+	p.SetScript(t, tiadtest.Script{CannotApply: "tiad cannot place rack modules yet"})
+	if _, err := s.ApplyStation(ctx, tiadtest.BenchStation(), tiadtest.BenchSecrets); tiad.Kind(err) != tiad.KindOperationFailed ||
+		!strings.Contains(err.Error(), "cannot place rack modules yet") {
+		t.Fatalf("apply of what this side cannot configure: %v", err)
+	}
+	ok()
+	if _, err := s.Download(ctx, dl); err != nil {
+		t.Fatalf("still compiled and downloadable after a refusal before any write: %v", err)
+	}
+	if _, err := s.Save(ctx, false); err != nil {
+		t.Fatalf("save after a refusal before any write: %v", err)
+	}
+
+	// A station that fails to apply: not compiled, and not described by
+	// any spec until one applies.
+	fail("ApplyStation")
+	if _, err := s.ApplyStation(ctx, tiadtest.BenchStation(tiad.DeviceModule{Slot: 1, Subslot: 1, Module: "M"}), tiadtest.BenchSecrets); tiad.Kind(err) != tiad.KindOperationFailed {
+		t.Fatalf("apply: %v", err)
+	}
+	ok()
+	notDownloadable("after a failed apply", "no station spec")
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	notDownloadable("after a failed apply, compiled", "no station spec")
+	// tiad never reuses a CPU an apply left part-way, and never saves
+	// it: the session only closes, unsaved (#789).
+	if _, err := s.ApplyStation(ctx, tiadtest.BenchStation(), tiadtest.BenchSecrets); tiad.Kind(err) != tiad.KindUncleanSession ||
+		!strings.Contains(err.Error(), "close this session without saving") {
+		t.Fatalf("an apply after a failed one: %v", err)
+	}
+	if _, err := s.Save(ctx, false); tiad.Kind(err) != tiad.KindUncleanSession {
+		t.Fatalf("a save after a failed apply: %v", err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s, err := p.Client().CreateProject(ctx, "bench", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notDownloadable("a new project", "compile")
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Download(ctx, dl); err != nil {
+		t.Fatalf("after a good apply and compile: %v", err)
+	}
+
+	// Applying the same spec changes nothing and keeps the compile.
+	if r, err := s.ApplyStation(ctx, tiadtest.BenchStation(), tiadtest.BenchSecrets); err != nil || len(r.Changes) != 0 {
+		t.Fatalf("the same spec again: %+v %v", r, err)
+	}
+	if _, err := s.Download(ctx, dl); err != nil {
+		t.Fatalf("after applying the same spec: %v", err)
+	}
+
+	// A compile that TIA fails, and one with errors, forget the last good
+	// compile.
+	fail("Compile")
+	if _, err := s.Compile(ctx, true, true); tiad.Kind(err) != tiad.KindOperationFailed {
+		t.Fatalf("compile: %v", err)
+	}
+	ok()
+	notDownloadable("after a failed compile", "compile")
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	p.SetCompileResult(t, tiad.CompileResult{Result: "error", Errors: 1})
+	if _, err := s.Compile(ctx, true, true); tiad.Kind(err) != tiad.KindCompileFailed {
+		t.Fatalf("compile with errors: %v", err)
+	}
+	notDownloadable("after a compile with errors", "compile")
+
+	// An upload replaces the program: compile again first.
+	p.SetScript(t, tiadtest.Script{})
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UploadWith(ctx, tiad.UploadRequest{Secrets: tiadtest.BenchLogin}); err != nil {
+		t.Fatal(err)
+	}
+	notDownloadable("after an upload", "no station spec")
+	// The uploaded CPU has no access control (the S2a upload): keep it,
+	// and leave its web server as found.
+	uploaded := tiadtest.BenchStation()
+	uploaded.CPU.AccessControl = tiad.AccessKeep
+	uploaded.WebServer = nil
+	if _, err := s.ApplyStation(ctx, uploaded, tiadtest.BenchSecrets); err != nil {
+		t.Fatal(err)
+	}
+	notDownloadable("after an upload and a spec", "compile")
+}
+
+func intp(i int) *int { return &i }
+
+// TestAgentRefusesADryRunTIACannotCancel: a TIA side that cannot promise a
+// dry run loads nothing (tiad.Openness until S2b) gets no dry run: it is
+// refused before ITia.Download, so nothing reaches the CPU, and no CPU is
+// claimed. A real download still goes ahead.
+func TestAgentRefusesADryRunTIACannotCancel(t *testing.T) {
+	p, s := downloadReady(t)
+	p.SetScript(t, tiadtest.Script{NoDryRun: true})
+	_, err := s.Download(ctx, tiad.DownloadRequest{Decisions: tiad.Decisions{ResetData: tiad.Yes()}, Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, DryRun: true, Announced: true})
+	if tiad.Kind(err) != tiad.KindBadRequest || !strings.Contains(err.Error(), "dry runs are refused") || !strings.Contains(err.Error(), "nothing was sent to the CPU") {
+		t.Fatalf("a dry run TIA cannot cancel: %v, want bad_request: dry runs are refused", err)
+	}
+	if n := countCalls(p.Calls(t), "Download"); n != 0 {
+		t.Fatalf("TIA heard of %d refused dry runs", n)
+	}
+	if r, err := s.Download(ctx, tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true, Decisions: tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.No()}}); err != nil || !r.Downloaded {
+		t.Fatalf("a real download: %+v %v", r, err)
+	}
+}
+
+// TestAgentTrustsACertificateOnlyOnTheUploadsOptIn: a CPU that asks TLS
+// trust going online fails an upload by default, naming the question; with
+// the upload's explicit trustUnverifiedCertificate it is trusted, blindly,
+// and the result and the audit log say so.
+func TestAgentTrustsACertificateOnlyOnTheUploadsOptIn(t *testing.T) {
+	p, s := downloadReady(t)
+	p.SetScript(t, tiadtest.Script{UploadAsksTLS: true})
+	err := s.Upload(ctx)
+	if tiad.Kind(err) != tiad.KindOperationFailed || !strings.Contains(err.Error(), "trust the TLS certificate of PLC_1") || !strings.Contains(err.Error(), "tiad trusts no CPU certificate") {
+		t.Fatalf("an upload a CPU asks TLS trust for, no opt-in: %v, want operation_failed naming the question", err)
+	}
+	// A failed upload leaves the project part-way: no apply, no save,
+	// until an upload goes through (#789).
+	if _, err := s.ApplyStation(ctx, tiadtest.BenchStation(), tiadtest.BenchSecrets); tiad.Kind(err) != tiad.KindUncleanSession {
+		t.Fatalf("an apply after a failed upload: %v", err)
+	}
+	if _, err := s.Save(ctx, false); tiad.Kind(err) != tiad.KindUncleanSession {
+		t.Fatalf("a save after a failed upload: %v", err)
+	}
+	r, err := s.UploadWith(ctx, tiad.UploadRequest{Secrets: tiadtest.BenchLogin, TrustUnverifiedCertificate: true})
+	if err != nil || len(r.TrustedBlindly) != 1 || !strings.Contains(r.TrustedBlindly[0], "trust the TLS certificate of PLC_1") {
+		t.Fatalf("an upload with the opt-in: %+v %v, want the question trusted blindly", r, err)
+	}
+	if r.BlindTrust == nil || r.BlindTrust.Call != "upload" || r.BlindTrust.Session != s.ID {
+		t.Fatalf("the upload's blind trust: %+v, want the record this upload set", r.BlindTrust)
+	}
+	line := waitLog(t, p, "audit upload")
+	for _, want := range []string{"address=\"192.0.2.10\"", "trustUnverifiedCertificate=yes", "trustedBlindly=[\"trust the TLS certificate of PLC_1"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the audit line lacks %s:\n%s", want, line)
+		}
+	}
+	// The upload that went through cleans the session.
+	if _, err := s.Save(ctx, false); err != nil {
+		t.Fatalf("a save after an upload went through: %v", err)
+	}
+	// Its CPU, named, is kept with its IO device, and the download's
+	// audit line journals the device.
+	st := tiadtest.BenchStation()
+	st.Profinet = nil
+	st.CPU.ConfigurationProtection = tiad.ProtectKeep
+	st.CPU.AccessControl = tiad.AccessKeep
+	st.WebServer = nil
+	if _, err := s.ApplyStation(ctx, st, tiadtest.BenchSecrets); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	// The trusted upload left TIA's instance trusting: a download rides
+	// on it, so it is refused before anything reaches the CPU until it
+	// says decisions.acceptBlindTrust yes.
+	dl := tiadtest.AcceptHardware(tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Hardware: true, Software: true, Announced: true,
+		Decisions: tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.No(), KeptDevices: []string{"io-device-up"}}})
+	if _, err := s.Download(ctx, dl); tiad.Kind(err) != tiad.KindDecisionRequired || tiad.BlindTrustOf(err) == nil || tiad.BlindTrustOf(err).Call != "upload" {
+		t.Fatalf("a download in the instance the upload trusted: %v, want decision_required naming the upload's trust", err)
+	}
+	if l := p.Loaded(t); len(l) != 0 {
+		t.Fatalf("a refused download loaded: %+v", l)
+	}
+	// Refused by the agent's own check, before the pin, the claim and TIA:
+	// the audit line names the question.
+	refused := lastLine(waitLog(t, p, "audit download"), "audit download")
+	for _, want := range []string{`asked=["blind-trust"]`, `outcome=decision_required:["blind-trust"]`, "acceptBlindTrust=unanswered", `blindTrust={since="`} {
+		if !strings.Contains(refused, want) {
+			t.Errorf("the refused download's audit line lacks %s:\n%s", want, refused)
+		}
+	}
+	dl.Decisions.AcceptBlindTrust = tiad.Yes()
+	if _, err := s.Download(ctx, dl); err != nil {
+		t.Fatal(err)
+	}
+	line = lastLine(waitLog(t, p, "outcome=loaded"), "audit download")
+	for _, want := range []string{`kept=["io-device-up" profinetName="io-device-up" address="192.0.2.30"]`, `keptDevices=["io-device-up"]`, "acceptBlindTrust=yes",
+		`blindTrust={since="`, `call="upload" session="s1" address="192.0.2.10" questions=["trust the TLS certificate of PLC_1`} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the download's audit line lacks %s:\n%s", want, line)
+		}
+	}
+}
+
+// TestAgentBackstopsATrustGivenAfterTheCheck: the blind-trust check runs
+// again on the TIA thread, where trust is recorded, so a download whose
+// first check passed is refused if trust was given before its TIA work
+// item ran, before anything is archived or TIA's download is called. No
+// request can do that since the agent holds one session at a time, so a
+// test seam (TestSeams, never in a release build) gives the trust there.
+func TestAgentBackstopsATrustGivenAfterTheCheck(t *testing.T) {
+	p, s := downloadReady(t)
+	p.SetScript(t, tiadtest.Script{SeamTrustBeforeDownload: true})
+	_, err := s.Download(ctx, tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true, Decisions: tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.No()}})
+	b := tiad.BlindTrustOf(err)
+	if tiad.Kind(err) != tiad.KindDecisionRequired || b == nil || b.Call != "test seam" || !strings.Contains(err.Error(), "TIA's download was not called") || tiad.DeployIDOf(err) != "" {
+		t.Fatalf("a download whose trust came after its check: %v %+v, want decision_required naming that trust", err, b)
+	}
+	line := lastLine(waitLog(t, p, `outcome=decision_required:["blind-trust"]`), "audit download")
+	for _, want := range []string{`asked=["blind-trust"]`, `outcome=decision_required:["blind-trust"]`, `blindTrust={since="`, `call="test seam"`} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the backstop's audit line lacks %s:\n%s", want, line)
+		}
+	}
+	if n := countCalls(p.Calls(t), "Download") + countCalls(p.Calls(t), "Archive"); n != 0 {
+		t.Fatalf("TIA's archive or download was called %d times, want 0", n)
+	}
+	if l := p.Loaded(t); len(l) != 0 {
+		t.Fatalf("loaded %+v", l)
+	}
+}
+
+// TestAgentKeepsATrustingInstanceWhileASessionIsReserved: the retire of a
+// TIA instance that trusted blindly waits for no session to be left, a
+// reserved one included: a create racing the close would open on that
+// instance. A test seam (never in a release build) reserves one between
+// the close and the retire check; the instance stays, still trusting, and
+// is retired at the next close with no session left.
+func TestAgentKeepsATrustingInstanceWhileASessionIsReserved(t *testing.T) {
+	p, s := downloadReady(t)
+	p.SetScript(t, tiadtest.Script{FingerprintAsksTLS: true})
+	if _, err := s.Fingerprint(ctx, tiad.FingerprintRequest{Secrets: tiadtest.BenchLogin, TrustUnverifiedCertificate: true}); err != nil {
+		t.Fatal(err)
+	}
+	p.SetScript(t, tiadtest.Script{FingerprintAsksTLS: true, SeamReserveBeforeRetire: true})
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := countCalls(p.Calls(t), "retire"); n != 0 || strings.Contains(p.Log(), "audit blind-trust retired") {
+		t.Fatalf("retired %d times with a session reserved:\n%s", n, p.Log())
+	}
+	p.SetScript(t, tiadtest.Script{FingerprintAsksTLS: true})
+	c := p.Client()
+	s2, err := c.CreateProject(ctx, "again", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s2.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s2.Download(ctx, tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true, Decisions: tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.No()}}); tiad.Kind(err) != tiad.KindDecisionRequired || tiad.BlindTrustOf(err) == nil {
+		t.Fatalf("a download in the instance that was kept: %v, want the trust still gating it", err)
+	}
+	if err := s2.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := countCalls(p.Calls(t), "retire"); n != 1 {
+		t.Fatalf("retired %d times once no session was left, want 1", n)
+	}
+}
+
+// TestAgentKeepsACreateItCouldNotCloseUp: a create TIA refuses the station
+// of is closed again; when that close fails too, TIA may still hold the
+// project, so the session stays, broken, and a later create is busy
+// naming it, never let through to replace another project's directory
+// while TIA refuses it (#1186 review). Closed again, it goes.
+func TestAgentKeepsACreateItCouldNotCloseUp(t *testing.T) {
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{})
+	c := p.Client()
+	installBench(t, c)
+	p.SetScript(t, tiadtest.Script{Failures: []tiadtest.ScriptedCall{{Call: "ApplyStation", Message: "the station is refused"}, {Call: "CloseProject", Message: "the close is refused"}}})
+	if _, err := c.CreateProject(ctx, "a", tiadtest.BenchStation(), tiadtest.BenchSecrets); tiad.Kind(err) != tiad.KindOperationFailed || !strings.Contains(err.Error(), "the station is refused") {
+		t.Fatalf("a create whose station and close fail: %v", err)
+	}
+	ss, err := c.Sessions(ctx)
+	if err != nil || len(ss) != 1 {
+		t.Fatalf("sessions after it: %+v %v, want the one kept", ss, err)
+	}
+	p.SetScript(t, tiadtest.Script{})
+	if _, err := c.CreateProject(ctx, "b", tiadtest.BenchStation(), tiadtest.BenchSecrets); tiad.Kind(err) != tiad.KindBusy ||
+		!strings.Contains(err.Error(), "session "+ss[0].ID+" has projects/a/a.ap21 open, and closing it failed: close it again") {
+		t.Fatalf("a create while the kept one is open: %v, want busy naming it", err)
+	}
+	if err := ss[0].Close(ctx); err != nil {
+		t.Fatalf("closing the kept session again: %v", err)
+	}
+	s, err := c.CreateProject(ctx, "b", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatalf("a create once it is closed: %v", err)
+	}
+	_ = s.Close(ctx)
+}
+
+// TestAgentRetiresAfterAFailedCreate: a create that raced a close kept a
+// trusting instance up (the retire guard); when that create fails, no
+// session is left, so the instance is retired then, not left trusting
+// with no close to come.
+func TestAgentRetiresAfterAFailedCreate(t *testing.T) {
+	p, s := downloadReady(t)
+	p.SetScript(t, tiadtest.Script{FingerprintAsksTLS: true})
+	if _, err := s.Fingerprint(ctx, tiad.FingerprintRequest{Secrets: tiadtest.BenchLogin, TrustUnverifiedCertificate: true}); err != nil {
+		t.Fatal(err)
+	}
+	p.SetScript(t, tiadtest.Script{SeamReserveBeforeRetire: true})
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := countCalls(p.Calls(t), "retire"); n != 0 {
+		t.Fatalf("retired %d times with a session reserved", n)
+	}
+	p.SetScript(t, tiadtest.Script{Failures: []tiadtest.ScriptedCall{{Call: "CreateProject", Message: "No licence for this CPU"}}})
+	if _, err := p.Client().CreateProject(ctx, "again", tiadtest.BenchStation(), tiadtest.BenchSecrets); tiad.Kind(err) != tiad.KindOperationFailed {
+		t.Fatalf("a failing create: %v", err)
+	}
+	if n := countCalls(p.Calls(t), "retire"); n != 1 {
+		t.Fatalf("retired %d times after the failed create left no session, want 1", n)
+	}
+}
+
+// lastLine is the last line of log that holds want.
+func lastLine(log, want string) string {
+	var last string
+	for _, l := range strings.Split(log, "\n") {
+		if strings.Contains(l, want) {
+			last = l
+		}
+	}
+	return last
+}
+
+// TestAgentJournalsTheFingerprintRead: every read is audited, refusals
+// too, with each item TIA returned (quoted, so none forges a line), what
+// it trusted, and the instance's trust before and after; a later compare
+// says it rode on that trust. A read refused before TIA never reaches it.
+func TestAgentJournalsTheFingerprintRead(t *testing.T) {
+	p, s := downloadReady(t)
+	p.SetFingerprint(t, tiadtest.FingerprintScript{AsksTLS: true})
+	if _, err := s.Fingerprint(ctx, tiad.FingerprintRequest{Secrets: tiadtest.BenchLogin}); tiad.Kind(err) != tiad.KindOperationFailed {
+		t.Fatalf("a read without the opt-in: %v", err)
+	}
+	line := lastLine(waitLog(t, p, "audit fingerprint"), "audit fingerprint")
+	for _, want := range []string{"trustUnverifiedCertificate=no", "trustedBlindly=[]", "blindTrustBefore=none blindTrust=none", "items=[]", "outcome=operation_failed"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the refused read's audit line lacks %s:\n%s", want, line)
+		}
+	}
+	if _, err := s.Fingerprint(ctx, tiad.FingerprintRequest{Secrets: tiadtest.BenchLogin, TrustUnverifiedCertificate: true}); err != nil {
+		t.Fatal(err)
+	}
+	log := waitLog(t, p, "outcome=ok")
+	if !strings.Contains(log, "audit blind-trust set call=fingerprint read session=s1") {
+		t.Errorf("the trust must be journalled when it is given:\n%s", log)
+	}
+	line = lastLine(log, "audit fingerprint")
+	for _, want := range []string{"trustUnverifiedCertificate=yes", `trustedBlindly=["trust the TLS certificate of PLC_1`,
+		"blindTrustBefore=none blindTrust={since=", `"Hardware"="fake-hardware-0"`, `"DownloadId"="fake-download-0"`} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the trusted read's audit lacks %s:\n%s", want, line)
+		}
+	}
+	p.SetFingerprint(t, tiadtest.FingerprintScript{Items: []tiad.FingerprintItem{{Identifier: "Hardware", Value: "x\n2026-01-01T00:00:00Z audit forged"}}})
+	if _, err := s.Fingerprint(ctx, tiad.FingerprintRequest{Secrets: tiadtest.BenchLogin}); err != nil {
+		t.Fatal(err)
+	}
+	if l := p.Log(); strings.Contains(l, "\n2026-01-01T00:00:00Z audit forged") || !strings.Contains(l, `"Hardware"="x\n2026-01-01T00:00:00Z audit forged"`) {
+		t.Errorf("an item's value must be quoted in the audit line:\n%s", l)
+	}
+	if !strings.Contains(p.Log(), "blindTrustBefore={since=") {
+		t.Errorf("a read riding on earlier trust must say so:\n%s", p.Log())
+	}
+	if _, err := s.CompareWith(ctx, tiadtest.BenchCompare); err != nil {
+		t.Fatal(err)
+	}
+	if line := lastLine(waitLog(t, p, "audit compare"), "audit compare"); !strings.Contains(line, `blindTrust={since="`) || !strings.Contains(line, `call="fingerprint read"`) {
+		t.Errorf("a compare in the trusting instance must journal the trust it rides on:\n%s", line)
+	}
+	// Refused before TIA: no ReadFingerprint call.
+	before := 0
+	for _, c := range p.Calls(t) {
+		if c.Call == "ReadFingerprint" {
+			before++
+		}
+	}
+	status, b := rawPost(t, p, "/v1/sessions/"+s.ID+"/fingerprint", map[string]any{"address": "192.0.2.10"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("a read with an unknown field: HTTP %d %s", status, b)
+	}
+	after := 0
+	for _, c := range p.Calls(t) {
+		if c.Call == "ReadFingerprint" {
+			after++
+		}
+	}
+	if after != before {
+		t.Errorf("a refused read reached TIA's side: %d ReadFingerprint calls, want %d", after, before)
+	}
+	// Refusals before TIA are journalled too.
+	if l := lastLine(waitLog(t, p, "outcome=bad_request"), "audit fingerprint"); !strings.Contains(l, "outcome=bad_request") {
+		t.Errorf("a bad request's read was not journalled:\n%s", p.Log())
+	}
+	st := tiadtest.BenchStation()
+	st.CPU.Address = "192.0.2.77"
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s3, err := p.Client().CreateProject(ctx, "unlisted", st, tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s3.Fingerprint(ctx, tiad.FingerprintRequest{Secrets: tiadtest.BenchLogin}); tiad.Kind(err) != tiad.KindTargetRefused {
+		t.Fatalf("a read from an unlisted CPU: %v", err)
+	}
+	if l := lastLine(waitLog(t, p, "outcome=target_refused"), "audit fingerprint"); !strings.Contains(l, `address="192.0.2.77"`) {
+		t.Errorf("a refused read's audit line must name the address:\n%s", l)
+	}
+}
+
+// TestAgentRecordsTheTrustAtTheCheck: a download journals and reports the
+// blind trust it was checked against on the TIA thread, never one a later
+// call gave while it ran: here its own post-load fingerprint read trusts,
+// after the check (TIA opens one project at a time, so no other session's
+// call can). The deploy record keeps both: blindTrust none, and the
+// instance's trust after the read in blindTrustAfter.
+func TestAgentRecordsTheTrustAtTheCheck(t *testing.T) {
+	p, s := downloadReady(t)
+	p.SetScript(t, tiadtest.Script{FingerprintAsksTLS: true})
+	r, err := s.Download(ctx, tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true, Decisions: tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.No()},
+		Fingerprint: &tiad.FingerprintRequest{TrustUnverifiedCertificate: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.BlindTrust != nil || r.Deploy == nil || r.Deploy.BlindTrustAfter == nil || r.Deploy.BlindTrustAfter.Call != "fingerprint read" {
+		t.Fatalf("the download reports %+v, deploy %+v: want the trust at its check (none), and the read's after it", r.BlindTrust, r.Deploy)
+	}
+	if l := lastLine(waitLog(t, p, "outcome=loaded"), "audit download"); !strings.Contains(l, "blindTrust=none") {
+		t.Errorf("the download's audit line must journal the trust at its check (none):\n%s", l)
+	}
+	lines := journalLines(t, p.DeploysDir)
+	if o := lines[len(lines)-1]; o["kind"] != "outcome" || o["blindTrust"] != nil || o["blindTrustAfter"] == nil {
+		t.Errorf("the outcome line: %+v, want blindTrust null and blindTrustAfter set", o)
+	}
+}
+
+// TestAgentCountsAFailedTrustingUploadAsTrust: an upload that took the
+// opt-in and failed inside TIA's side may have left TIA trusting, so the
+// instance counts it as trust: a later online call reports it, on an
+// unknown question.
+func TestAgentCountsAFailedTrustingUploadAsTrust(t *testing.T) {
+	p, s := downloadReady(t)
+	p.SetScript(t, tiadtest.Script{Failures: []tiadtest.ScriptedCall{{Call: "Upload", Message: "the upload failed"}}})
+	if _, err := s.UploadWith(ctx, tiad.UploadRequest{Secrets: tiadtest.BenchLogin, TrustUnverifiedCertificate: true}); tiad.Kind(err) != tiad.KindOperationFailed {
+		t.Fatalf("a failing upload with the opt-in: %v", err)
+	}
+	cmp, err := s.CompareWith(ctx, tiadtest.BenchCompare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := cmp.BlindTrust
+	if b == nil || b.Call != "upload" || len(b.Questions) != 1 || !strings.HasPrefix(b.Questions[0], "unknown:") {
+		t.Fatalf("a compare after a failed trusting upload: %+v, want it riding on an unknown trust", b)
+	}
+}
+
+// TestAgentJournalsTheUserManagementReset: #789 stage 4. The audit line
+// says what came of a user-management reset the request asked: refused
+// before TIA (the attestation unstamped), allowed but never asked by TIA,
+// or given and by which route; and what the attestation said of the
+// CPU's access control, only ever as one of its words.
+func TestAgentJournalsTheUserManagementReset(t *testing.T) {
+	const bench, other = "192.0.2.10", "192.0.2.99"
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{Targets: []string{bench, other}})
+	s := tiadtest.UploadedKeep(t, p, other)
+	um := tiad.Question{ID: tiad.QuestionUserManagement, Message: "Delete user management data and disable access control in runtime", Detail: "UserManagementDownload"}
+	line := func(outcome string) string {
+		t.Helper()
+		log := waitLog(t, p, "outcome="+outcome)
+		var last string
+		for _, l := range strings.Split(log, "\n") {
+			if strings.Contains(l, "Z audit download") && strings.Contains(l, "outcome="+outcome) {
+				last = l
+			}
+		}
+		if last == "" {
+			t.Fatalf("no audit line with outcome=%s:\n%s", outcome, log)
+		}
+		return last
+	}
+	want := func(l string, parts ...string) {
+		t.Helper()
+		for _, w := range parts {
+			if !strings.Contains(l, w) {
+				t.Errorf("the audit line lacks %s:\n%s", w, l)
+			}
+		}
+	}
+
+	// Refused before TIA: never uploaded from there, nothing attested.
+	// tiad read the project, and neither went online nor called TIA's
+	// download.
+	p.SetScript(t, tiadtest.Script{Questions: []tiad.Question{um}})
+	before := p.Calls(t)
+	if _, err := s.Download(ctx, tiadtest.ResetLoad(other)); tiad.Kind(err) != tiad.KindDecisionRequired {
+		t.Fatalf("no route: %v", err)
+	}
+	after := p.Calls(t)
+	for call, want := range map[string]int{"ReadCpu": 1, "Download": 0, "Identify": 0} {
+		if n := countCalls(after, call) - countCalls(before, call); n != want {
+			t.Errorf("a refused reset called TIA's %s %d times, want %d", call, n, want)
+		}
+	}
+	want(line(tiad.KindDecisionRequired+`:["user-management"]`), "userManagementResetToProject=yes", "at=unset", "cpuAccessControl=unset}", "userManagementReset=refused", `asked=["user-management"] acting=[]`)
+
+	// Given by the attestation route, and acting.
+	att := tiadtest.ResetLoad(other)
+	att.Attestation.CPUAccessControl = tiad.AttestCPUAccessDisabled
+	if res, err := s.Download(ctx, att); err != nil || res.UserManagementReset != tiad.ResetRouteAttestation {
+		t.Fatalf("attested: %+v %v", res, err)
+	}
+	l := line("loaded")
+	want(l, "cpuAccessControl=disabled}", "userManagementReset=given:attestation", `acting=["user-management"`)
+	if strings.Contains(l, "at=unset") {
+		t.Errorf("an accepted attestation is stamped:\n%s", l)
+	}
+
+	// Allowed, but TIA never asked: no reset is claimed.
+	p.SetScript(t, tiadtest.Script{Questions: []tiad.Question{{ID: tiad.QuestionStopCPU}}})
+	if _, err := s.Download(ctx, att); err != nil {
+		t.Fatal(err)
+	}
+	want(line("loaded"), "userManagementReset=allowed:attestation", `acting=["stop-cpu"`)
+
+	// A word outside the vocabulary is refused and journalled as invalid,
+	// never as sent.
+	odd := tiadtest.ResetLoad(other)
+	odd.Attestation.CPUAccessControl = "off\naudit download forged"
+	if status, b := rawPost(t, p, "/v1/sessions/"+s.ID+"/download", odd); status != 400 {
+		t.Fatalf("an odd word: HTTP %d %s", status, b)
+	}
+	want(line(tiad.KindBadRequest), "cpuAccessControl=invalid}", "userManagementReset=unset")
+	if n, m := strings.Count(p.Log(), "Z audit download"), strings.Count(p.Log(), "audit download"); n != m {
+		t.Errorf("a forged audit line: %d of %d", n, m)
+	}
+}
+
+// TestAgentResetsAtTIAsCheckOnlyOnItsEvidence (#789 option 1): what the
+// agent journals when a reset let before TIA meets TIA's check. A CPU
+// that asked credentials refuses the attestation route even when tiad
+// answered them no and TIA went on (refused-at-check, no reset given,
+// nothing loaded); the logon route is given once tiad logged on.
+func TestAgentResetsAtTIAsCheckOnlyOnItsEvidence(t *testing.T) {
+	const bench = "192.0.2.10"
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{Targets: []string{bench}})
+	c := p.Client()
+	installBench(t, c)
+	um := tiad.Question{ID: tiad.QuestionUserManagement, Message: "Delete user management data and disable access control in runtime", Detail: "UserManagementDownload"}
+	line := func(outcome string) string {
+		t.Helper()
+		log := waitLog(t, p, "outcome="+outcome)
+		var last string
+		for _, l := range strings.Split(log, "\n") {
+			if strings.Contains(l, "Z audit download") && strings.Contains(l, "outcome="+outcome) {
+				last = l
+			}
+		}
+		if last == "" {
+			t.Fatalf("no audit line with outcome=%s:\n%s", outcome, log)
+		}
+		return last
+	}
+	// Access control on: a station tiad made, loaded over a CPU attested
+	// off.
+	s, err := c.CreateProject(ctx, "bench", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	p.SetScript(t, tiadtest.Script{Questions: []tiad.Question{um}})
+	on := tiadtest.AcceptHardware(tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: bench, Hardware: true, Software: true, Announced: true,
+		Decisions: tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.Yes(), UserManagementResetToProject: tiad.Yes()}})
+	on.Attestation.CPUAccessControl = tiad.AttestCPUAccessDisabled
+	if res, err := s.Download(ctx, on); err != nil || res.UserManagementReset != tiad.ResetRouteAttestation {
+		t.Fatalf("turning access control on: %+v %v", res, err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := tiadtest.RestoreSession(t, p)
+	loads := len(p.Loaded(t))
+
+	// Attested off, no password: the CPU asks credentials, tiad answers
+	// no, TIA goes on to its check. The attestation is contradicted: no
+	// reset, the download in doubt (a refusal going online), nothing
+	// loaded.
+	p.SetScript(t, tiadtest.Script{Questions: []tiad.Question{um}, OnlineGoesOn: true})
+	off := tiadtest.ResetLoad(bench)
+	off.Attestation.CPUAccessControl = tiad.AttestCPUAccessDisabled
+	off.Secrets = nil
+	_, err = r.Download(ctx, off)
+	if tiad.Kind(err) != tiad.KindOutcomeUnknown || slices.Contains(tiad.ActingAnswers(err), tiad.QuestionUserManagement) {
+		t.Fatalf("attested off over a CPU that asked credentials: %v (acting %v)", err, tiad.ActingAnswers(err))
+	}
+	l := line(tiad.KindOutcomeUnknown)
+	if !strings.Contains(l, "userManagementReset=refused-at-check:attestation") {
+		t.Errorf("the audit line lacks the refusal at TIA's check:\n%s", l)
+	}
+	if !strings.Contains(p.Log(), "audit user-management-reset address=\"192.0.2.10\" route=attestation refused when TIA asked") {
+		t.Errorf("no audit line for the refusal at TIA's check:\n%s", p.Log())
+	}
+	if n := len(p.Loaded(t)); n != loads {
+		t.Fatalf("a refused reset loaded: %d loads, want %d", n, loads)
+	}
+
+	// The restore by the logon route: given, journalled.
+	p.SetScript(t, tiadtest.Script{Questions: []tiad.Question{um}})
+	restore := tiadtest.ResetLoad(bench)
+	restore.Attestation.CPUAccessControl = tiad.AttestCPUAccessEnabled
+	if res, err := r.Download(ctx, restore); err != nil || res.UserManagementReset != tiad.ResetRouteLogon {
+		t.Fatalf("the restore: %+v %v", res, err)
+	}
+	if l := line("loaded"); !strings.Contains(l, "userManagementReset=given:logon") || !strings.Contains(l, "cpuAccessControl=enabled}") {
+		t.Errorf("the restore's audit line:\n%s", l)
+	}
+}
+
+// TestAgentRetiresTheInstanceThatTrustedBlindly (#789 D1): closing the
+// last session retires a TIA instance that trusted a CPU's certificate
+// blindly, the next call starts a new one, and the agent clears its
+// record only once that one exists; an instance that trusted nothing is
+// never retired.
+func TestAgentRetiresTheInstanceThatTrustedBlindly(t *testing.T) {
+	p, s := downloadReady(t)
+	c := p.Client()
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s, err := c.CreateProject(ctx, "bench", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, r := countCalls(p.Calls(t), "start"), countCalls(p.Calls(t), "retire"); n != 1 || r != 0 {
+		t.Fatalf("an instance that trusted nothing: %d starts, %d retires, want 1 and 0", n, r)
+	}
+	p.SetFingerprint(t, tiadtest.FingerprintScript{AsksTLS: true})
+	if _, err := s.Fingerprint(ctx, tiad.FingerprintRequest{Secrets: tiadtest.BenchLogin, TrustUnverifiedCertificate: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n, r := countCalls(p.Calls(t), "start"), countCalls(p.Calls(t), "retire"); n != 1 || r != 1 {
+		t.Fatalf("closing the last session on the trusting instance: %d starts, %d retires, want 1 and 1 (no new instance until a call needs one)", n, r)
+	}
+	log := waitLog(t, p, "audit blind-trust retired")
+	if strings.Contains(log, "audit blind-trust cleared") {
+		t.Fatalf("the record was cleared before a new instance existed:\n%s", log)
+	}
+	s, err = c.CreateProject(ctx, "bench", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countCalls(p.Calls(t), "start"); n != 2 {
+		t.Fatalf("%d starts after the retire, want 2", n)
+	}
+	waitLog(t, p, "audit blind-trust cleared")
+	if cmp, err := s.CompareWith(ctx, tiadtest.BenchCompare); err != nil || cmp.BlindTrust != nil {
+		t.Fatalf("a compare in the new instance: %+v %v, want no trust", cmp, err)
+	}
+}
+
+// TestAgentTreatsARetireItCannotProveAsTIAGone: a retire that cannot
+// show TIA's process exited leaves an instance that may still hold the
+// trust, so every TIA call is refused, naming the fix, and no new
+// instance starts.
+func TestAgentTreatsARetireItCannotProveAsTIAGone(t *testing.T) {
+	p, s := downloadReady(t)
+	c := p.Client()
+	p.SetScript(t, tiadtest.Script{FingerprintAsksTLS: true, Failures: []tiadtest.ScriptedCall{{Call: "retire", Message: "the process had not exited"}}})
+	if _, err := s.Fingerprint(ctx, tiad.FingerprintRequest{Secrets: tiadtest.BenchLogin, TrustUnverifiedCertificate: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.CreateProject(ctx, "bench", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if tiad.Kind(err) != tiad.KindGate || !strings.Contains(err.Error(), "could not be retired") || !strings.Contains(err.Error(), "Restart the agent") {
+		t.Fatalf("a call after a retire that failed: %v, want the tia gate naming the failed retire and the fix", err)
+	}
+	if n := countCalls(p.Calls(t), "start"); n != 1 {
+		t.Fatalf("%d starts, want no new instance after a retire that failed", n)
+	}
+	if strings.Contains(p.Log(), "audit blind-trust cleared") || strings.Contains(p.Log(), "audit blind-trust retired") {
+		t.Fatalf("a failed retire was journalled as done:\n%s", p.Log())
+	}
+}
+
+// TestAgentRetiresAfterTheReaper: a trusting instance whose last session
+// the idle reaper closed is retired too.
+func TestAgentRetiresAfterTheReaper(t *testing.T) {
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{Targets: []string{"192.0.2.10"}}, "TIAD_SESSION_IDLE=1s")
+	c := p.Client()
+	installBench(t, c)
+	s, err := c.CreateProject(ctx, "bench", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.SetFingerprint(t, tiadtest.FingerprintScript{AsksTLS: true})
+	if _, err := s.Fingerprint(ctx, tiad.FingerprintRequest{Secrets: tiadtest.BenchLogin, TrustUnverifiedCertificate: true}); err != nil {
+		t.Fatal(err)
+	}
+	waitLog(t, p, "closed idle session")
+	waitLog(t, p, "audit blind-trust retired")
+	if n := countCalls(p.Calls(t), "retire"); n != 1 {
+		t.Fatalf("%d retires after the reaper closed the last session, want 1", n)
+	}
+}
+
+// TestAgentBoundsARetire: TIA's Dispose has no bound of its own, so a
+// retire still running after TIAD_RETIRE_WATCH counts as TIA gone: the
+// tia gate says why, and when the retire returns late it is still not
+// journalled as done, and no new instance starts.
+func TestAgentBoundsARetire(t *testing.T) {
+	p, s := downloadReady(t, "TIAD_RETIRE_WATCH=300ms")
+	c := p.Client()
+	p.SetScript(t, tiadtest.Script{FingerprintAsksTLS: true, Delays: []tiadtest.ScriptedCall{{Call: "retire", MS: 2000}}})
+	if _, err := s.Fingerprint(ctx, tiad.FingerprintRequest{Secrets: tiadtest.BenchLogin, TrustUnverifiedCertificate: true}); err != nil {
+		t.Fatal(err)
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close(ctx) }()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		pr, err := c.Probe(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, g := range pr.Gates {
+			if g.Name == "tia" && g.Blocks() && strings.Contains(g.Detail, "had not returned 300ms later") {
+				found = true
+			}
+		}
+		if found {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the tia gate never named the stuck retire: %+v", pr.Gates)
+		}
+	}
+	if err := <-closed; err != nil {
+		t.Fatalf("the close the retire followed: %v", err)
+	}
+	if _, err := c.CreateProject(ctx, "bench", tiadtest.BenchStation(), tiadtest.BenchSecrets); tiad.Kind(err) != tiad.KindGate {
+		t.Fatalf("a call after a retire the watch gave up on: %v, want the tia gate", err)
+	}
+	if n := countCalls(p.Calls(t), "start"); n != 1 {
+		t.Fatalf("%d starts, want no new instance", n)
+	}
+	if strings.Contains(p.Log(), "audit blind-trust retired") {
+		t.Fatalf("a retire the watch gave up on was journalled as done:\n%s", p.Log())
+	}
+}
+
+// TestAgentJournalsTheInstanceLogon (#789 P1 fallback): what the agent
+// journals for the instance-logon route. The compare after load A logs on
+// and records the evidence; the restore, asked no credentials by a TIA
+// that kept the logon, is given by route instance-logon, naming the
+// evidence; the password reaches neither the log nor any line.
+func TestAgentJournalsTheInstanceLogon(t *testing.T) {
+	const bench = "192.0.2.10"
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{Targets: []string{bench}})
+	c := p.Client()
+	installBench(t, c)
+	um := tiad.Question{ID: tiad.QuestionUserManagement, Message: "Delete user management data and disable access control in runtime", Detail: "UserManagementDownload"}
+	s, err := c.CreateProject(ctx, "bench", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	p.SetScript(t, tiadtest.Script{Questions: []tiad.Question{um}, KeepsLogon: true})
+	on := tiadtest.AcceptHardware(tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: bench, Hardware: true, Software: true, Announced: true,
+		Decisions: tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.Yes(), UserManagementResetToProject: tiad.Yes()}})
+	on.Attestation.CPUAccessControl = tiad.AttestCPUAccessDisabled
+	if res, err := s.Download(ctx, on); err != nil || res.UserManagementReset != tiad.ResetRouteAttestation {
+		t.Fatalf("turning access control on: %+v %v", res, err)
+	}
+	waitLog(t, p, `audit instance-logon recorded call=download compare session=`+s.ID+` address="192.0.2.10"`)
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := tiadtest.RestoreSession(t, p)
+	restore := tiadtest.ResetLoad(bench)
+	restore.Attestation.CPUAccessControl = tiad.AttestCPUAccessEnabled
+	if res, err := r.Download(ctx, restore); err != nil || res.UserManagementReset != tiad.ResetRouteInstanceLogon {
+		t.Fatalf("the restore on the instance's logon: %+v %v", res, err)
+	}
+	log := waitLog(t, p, "userManagementReset=given:instance-logon")
+	if !strings.Contains(log, `audit user-management-reset address="192.0.2.10" route=instance-logon: the download asked no credentials before TIA's check, and this TIA instance holds an equal compare that logged on with the request's password (since=`) ||
+		!strings.Contains(log, "call=download compare session="+s.ID+")") {
+		t.Errorf("no audit line naming the evidence the reset rested on:\n%s", log)
+	}
+	if !strings.Contains(log, `audit instance-logon forgotten address="192.0.2.10": a download to it ran in TIA`) {
+		t.Errorf("the restore's load did not forget the evidence:\n%s", log)
+	}
+	if strings.Contains(log, tiadtest.BenchFullAccessPassword) {
+		t.Fatalf("the log carries the Full access password:\n%s", log)
+	}
+}
+
+// TestAgentForgetsTheInstanceLogonAfterACancelThatActed: a TIA that ends
+// a cancelled download cleanly, loading nothing, after an acting answer
+// (stop-cpu) leaves the CPU in doubt, so the instance-logon evidence goes
+// and the restore after it is refused at TIA's check.
+func TestAgentForgetsTheInstanceLogonAfterACancelThatActed(t *testing.T) {
+	const bench = "192.0.2.10"
+	p := tiadtest.StartProcess(t, fakeBin(t), tiadtest.Config{Targets: []string{bench}})
+	c := p.Client()
+	installBench(t, c)
+	um := tiad.Question{ID: tiad.QuestionUserManagement, Message: "Delete user management data and disable access control in runtime", Detail: "UserManagementDownload"}
+	stop := tiad.Question{ID: tiad.QuestionStopCPU, Message: "stop the CPU", Detail: "StopModules"}
+	s, err := c.CreateProject(ctx, "bench", tiadtest.BenchStation(), tiadtest.BenchSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	p.SetScript(t, tiadtest.Script{Questions: []tiad.Question{um}, KeepsLogon: true})
+	on := tiadtest.AcceptHardware(tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: bench, Hardware: true, Software: true, Announced: true,
+		Decisions: tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.Yes(), UserManagementResetToProject: tiad.Yes()}})
+	on.Attestation.CPUAccessControl = tiad.AttestCPUAccessDisabled
+	if res, err := s.Download(ctx, on); err != nil || res.UserManagementReset != tiad.ResetRouteAttestation {
+		t.Fatalf("turning access control on: %+v %v", res, err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := tiadtest.RestoreSession(t, p)
+	restore := tiadtest.ResetLoad(bench)
+	restore.Attestation.CPUAccessControl = tiad.AttestCPUAccessEnabled
+	p.SetScript(t, tiadtest.Script{Questions: []tiad.Question{stop, {ID: tiad.QuestionAlarmTexts}}, KeepsLogon: true, CleanCancel: true})
+	if _, err := r.Download(ctx, restore); tiad.Kind(err) != tiad.KindOutcomeUnknown || !slices.Contains(tiad.ActingAnswers(err), tiad.QuestionStopCPU) {
+		t.Fatalf("a restore TIA ends cleanly after stop-cpu: %v (acting %v)", err, tiad.ActingAnswers(err))
+	}
+	p.SetScript(t, tiadtest.Script{Questions: []tiad.Question{um}, KeepsLogon: true})
+	_, err = r.Download(ctx, restore)
+	if tiad.Kind(err) != tiad.KindDecisionRequired || !strings.Contains(tiad.Questions(err)[0].Message, tiad.ResetNoLogon) {
+		t.Fatalf("the restore after a cancel that acted: %v", err)
+	}
+}
+
+// TestAgentKeepsASessionUnusableWhenAnImportFailsAfterReplacing: TIA
+// replaced a block outside the group and then the import failed. The
+// agent still compares the blocks outside the group, so the session is
+// never saved or downloaded; a failure that changed nothing outside the
+// group leaves it usable (Fable review on the ownership PR, #789).
+func TestAgentKeepsASessionUnusableWhenAnImportFailsAfterReplacing(t *testing.T) {
+	p, s := downloadReady(t)
+	c := p.Client()
+	if _, err := c.PutFile(ctx, "src/Main.scl", []byte("FUNCTION_BLOCK \"naut_Main\"\nBEGIN\nEND_FUNCTION_BLOCK\n")); err != nil {
+		t.Fatal(err)
+	}
+	// A failure that changed nothing: the session stays usable.
+	p.SetScript(t, tiadtest.Script{Failures: []tiadtest.ScriptedCall{{Call: "ImportSoftware", Message: "ImportSoftware failed part-way"}}})
+	if _, err := s.Software(ctx, tiad.SoftwareRequest{Group: "nautilus", Sources: []string{"src/Main.scl"}}); tiad.Kind(err) != tiad.KindOperationFailed {
+		t.Fatalf("a failed import: %v", err)
+	}
+	p.SetScript(t, tiadtest.Script{})
+	if _, err := s.Software(ctx, tiad.SoftwareRequest{Group: "nautilus", Sources: []string{"src/Main.scl"}}); err != nil {
+		t.Fatalf("an import after a failure that changed nothing: %v", err)
+	}
+	// A failure after TIA replaced Main: unusable.
+	p.SetScript(t, tiadtest.Script{ImportReplacesForeign: true, Failures: []tiadtest.ScriptedCall{{Call: "ImportSoftware", Message: "ImportSoftware failed part-way"}}})
+	if _, err := s.Software(ctx, tiad.SoftwareRequest{Group: "nautilus", Sources: []string{"src/Main.scl"}}); tiad.Kind(err) != tiad.KindOperationFailed || !strings.Contains(err.Error(), "failed part-way") {
+		t.Fatalf("a failed import that replaced Main: %v", err)
+	}
+	p.SetScript(t, tiadtest.Script{})
+	if _, err := s.Save(ctx, false); tiad.Kind(err) != tiad.KindUncleanSession {
+		t.Fatalf("a save after it: %v, want unclean_session", err)
+	}
+	if _, err := s.Software(ctx, tiad.SoftwareRequest{Group: "nautilus", Sources: []string{"src/Main.scl"}}); tiad.Kind(err) != tiad.KindUncleanSession {
+		t.Fatalf("an import after it: %v, want unclean_session", err)
+	}
+	if _, err := s.Compile(ctx, true, true); err != nil {
+		t.Fatal(err)
+	}
+	dl := tiad.DownloadRequest{Secrets: tiadtest.BenchDownloadSecrets(), Address: "192.0.2.10", Software: true, Announced: true, Decisions: tiad.Decisions{ResetData: tiad.Yes(), StartAfter: tiad.Yes()}}
+	if _, err := s.Download(ctx, dl); tiad.Kind(err) != tiad.KindUncleanSession {
+		t.Fatalf("a download after it: %v, want unclean_session", err)
+	}
+	if l := p.Loaded(t); len(l) != 0 {
+		t.Fatalf("loaded %+v", l)
+	}
+}
+
+// TestAgentKeepsASessionUnusableWhenAnOBStepFails: once the agent deleted
+// or imported a cyclic interrupt OB, a failure after it (the OB's import,
+// or the sources' import) leaves the session unusable, even with nothing
+// outside the group changed: the OB may be gone or an empty stub (Fable
+// review on #1219).
+func TestAgentKeepsASessionUnusableWhenAnOBStepFails(t *testing.T) {
+	ob := "ORGANIZATION_BLOCK \"naut_OB_main\"\nVERSION : 0.1\nBEGIN\nEND_ORGANIZATION_BLOCK\n"
+	srcs := []string{"src/Main.scl", "src/OB.scl"}
+	for _, tc := range []struct {
+		why, call string
+		first     int // the cycle of a first, clean import (0: none)
+	}{
+		{"the OB's import fails after its delete", "ImportBlock", 100},
+		{"the sources' import fails after the OB's", "ImportSoftware", 0},
+	} {
+		t.Run(tc.call, func(t *testing.T) {
+			p, s := downloadReady(t)
+			c := p.Client()
+			for path, body := range map[string]string{"src/Main.scl": "FUNCTION_BLOCK \"naut_Main\"\nBEGIN\nEND_FUNCTION_BLOCK\n", "src/OB.scl": ob} {
+				if _, err := c.PutFile(ctx, path, []byte(body)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.first > 0 {
+				if _, err := s.Software(ctx, tiad.SoftwareRequest{Group: "nautilus", Sources: srcs, OBs: []tiad.CyclicOB{{Name: "naut_OB_main", Number: 30, CycleMS: tc.first}}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			p.SetScript(t, tiadtest.Script{Failures: []tiadtest.ScriptedCall{{Call: tc.call, Message: tc.call + " failed part-way"}}})
+			_, err := s.Software(ctx, tiad.SoftwareRequest{Group: "nautilus", Sources: srcs, OBs: []tiad.CyclicOB{{Name: "naut_OB_main", Number: 30, CycleMS: 50}}})
+			if tiad.Kind(err) != tiad.KindOperationFailed || !strings.Contains(err.Error(), "failed part-way") {
+				t.Fatalf("%s: %v", tc.why, err)
+			}
+			p.SetScript(t, tiadtest.Script{})
+			if _, err := s.Save(ctx, false); tiad.Kind(err) != tiad.KindUncleanSession {
+				t.Fatalf("%s: a save after it = %v, want unclean_session", tc.why, err)
+			}
+		})
+	}
+}

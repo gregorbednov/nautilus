@@ -1,0 +1,977 @@
+# Test plan: the redundant controller pair and its witness
+
+Status: **plan, nothing built yet.** It covers the design in [redundancy.md](redundancy.md)
+(#710) and the clients that follow the active controller (#716). Part of #725.
+Scope: every redundancy behaviour, tested thoroughly once it is implemented. The maintainer
+asked for exactly that on 2026-11-17.
+
+---
+
+## 0. Principles
+
+- **Invariants, not examples.** Every test checks the same short list of oracles (§2), all the
+  time, not only at the end of a case.
+- **The tests must have teeth.** For every safety rule in the design, a deliberately broken
+  build has to make the suite fail (§3.3). A broken build that still passes means the suite has
+  a hole, and that hole blocks the release.
+- **Every random run is replayable.** A seed and the fault schedule go into every report, and
+  one command reruns that case.
+- **Numbers come with their environment.** Every published time names the lease, the scan
+  period, the standby I/O mode, hot or cold, the hardware, the network and N.
+- **Each fault is injected at every layer it can be.** The simulation proves the protocol. The
+  containers prove the real binary on a real network stack. The bench proves real power, real
+  NICs, real clocks and real flash.
+
+## 1. Tiers and where they run
+
+| Tier | What runs | Where | When |
+|---|---|---|---|
+| **T1 Unit** | `quorum` voter, candidate and lease. Stream frame encoding and apply. The journal. Manifest validation. | `go test`, GitHub-hosted | every PR |
+| **T2 Simulation** | The real `quorum` and stream code on a deterministic discrete-event simulator: virtual clock per node (with rate skew), simulated network (cut, one-way, delay, loss, reorder), simulated disk (fsync latency, EIO, ENOSPC, torn writes), simulated I/O. The exhaustive partition matrix plus seeded random schedules. | `go test`, GitHub-hosted | every PR: the matrix plus 2,000 seeds. Nightly: 200,000 seeds and the mutation checks. |
+| **T3 Containers** | Real `naut run` ×2 and `naut witness`, a field-device recorder (§2.1), an HMI client and an OPC UA client, each in its own network namespace or incus container on one host. Faults come from nftables, tc netem, SIGKILL, SIGSTOP, cgroup `cpu.max`, dm-delay and size-limited tmpfs. | self-hosted rig runner (privileged); a smoke subset in network namespaces on GitHub-hosted (sudo) | PRs that touch `quorum`, `runtime` takeover or `cmd/naut` redundancy: the smoke subset. Nightly: the full catalogue. Weekly: the percentile run. Weekly: the 24 h soak. |
+| **T4 Bench** | Two ARM64 controllers and a witness box, deployed with `tools/deploy`, a real field device and a recorder. Real power pulls, cable pulls, the optional dedicated A–B cable, real clocks. | the bench, **only with the maintainer's OK** | before each milestone is called done; numbers for the guide; the 72 h soak before the redundancy guide ships |
+
+**CI wiring.** The workflow files are owned by separate CI work, so this plan requests the
+jobs rather than writing them. They are:
+
+- a T3 smoke job on PRs, with a path filter;
+- the nightly and weekly jobs on the rig runner.
+
+**Kubernetes mode** keeps its existing `leader` tests, which must stay green and unchanged. The
+pair adds no behaviour to it.
+
+## 2. The oracles (checked continuously in T2, T3 and T4)
+
+| # | Invariant | How T2 checks it | How T3 checks it | How T4 checks it |
+|---|---|---|---|---|
+| **I1** | **At most one writer, ever.** No two gates are open at the same instant. | global virtual time | Gate transitions are logged with `CLOCK_MONOTONIC`. Containers on one host share the kernel clock, so the logs merge onto one timeline. | the field recorder (I2), the authority here |
+| **I2** | **The device sees one writer at a time.** After a write from B, no write from A arrives until A leads again in a later term. | simulated device | recorder | recorder |
+| **I2-PN** | **One PROFINET station on the wire.** At no instant do two MACs answer DCP for the station name or send RT frames for it. The PLC logs no duplicate name or duplicate address. | simulated segment | the segment tap | the tap, plus the PLC's diagnostic buffer |
+| **I3** | **No write leaves any output path through a closed gate, or after its send deadline.** That covers every row of design §3.4: drivers, READ/WRITE channels, Sparkplug host and edge, PROFINET, the floating IP. Keep-alives count. | a hook on each path | recorder + gate log for field paths; an MQTT observer for Sparkplug; the segment tap for PROFINET | same |
+| **I4** | Terms only rise at every voter. No two controllers ever lead in the same term. | voter state | voter files, `/api/cluster` | same |
+| **I5** | **A sequence never continues from a stale image.** A hot takeover happens only on a current image with a matching build hash. Everything else is cold, with the alarm. | stream state | takeover log + alarm | same |
+| **I6** | **Liveness.** With a healthy majority, connected I/O and live scans, a leader exists within the formula bound (design §4.5). | after each fault heals, a leader within the bound | `/api/cluster` polled on all three, plus the recorder's first write | recorder's first write |
+| **I7** | No flapping. One fault causes at most one takeover. A healed fault causes none, unless the I/O-health rule calls for one. | term changes per fault | term changes in the gate logs | same |
+| **I8** | **Audit before effect.** No override opens a gate without a journal record that was fsynced first. | ordering of the simulated disk ops: fsync completes before the gate opens | the journal record carries its fsync-complete monotonic time; compared with the gate log; crash injection between the two | journal against the recorder's first write |
+| **I9** | A standby holds no field session where its driver's rule says none (design §4.4), and writes nothing anywhere. | simulated device sessions | recorder's session log, by peer address | same |
+| **I10** | Across a hot takeover, retained values go back by at most the **image age**: one stream interval on a crash, up to `hot-max-age` on an isolation (design §4.2). A cold takeover reports how far back it went. | stream state | the harness writes setpoints through the API with timestamps, then reads them on the new leader | same |
+
+### 2.1 The field recorder
+
+The recorder is the arbiter for I2, I3 and I9 in T3 and T4.
+
+- **What it is.** A Modbus TCP slave and an OPC UA server, built on the core `modbus/slave`
+  and `opcua/server` packages. Every write and every session open and close is logged with the
+  peer's address, the register or node and the value, timestamped on the recorder's clock.
+- **What it is not.** It is test-harness code. It does not change `virtdev`.
+- **Plant behaviour.** Where a test needs plant behaviour behind the recorder (a tank that
+  fills, a counter that counts), it uses `virtdev`'s plant model through its public API. A
+  write-log hook inside `virtdev` itself would be requested from its owners, not added here.
+- **PROFINET.** For a PROFINET device under redundancy (#790), the "device" being recorded is
+  the IO controller.
+  - **The controller.** T3 runs the PROFINET package's controller side (#723), or the simulated
+    segment of #790's tests until that exists, on a Linux bridge between the containers. T4 uses
+    the bench PLC.
+  - **The tap.** A tap on the segment logs every DCP answer, every LLDP frame and every RT frame
+    for the station, with its source MAC.
+  - **ARP.** The tap logs ARP replies for the station's address.
+- **Device watchdogs.** The recorder also models a comm watchdog: no write for X ms makes its
+  outputs go to hold-last or fail-safe, per configuration. That lets the lone-survivor
+  behaviour be asserted at the device.
+
+## 3. Split-brain proofs (I1–I4)
+
+### 3.1 The exhaustive partition matrix (T2, every PR)
+
+**Links.** There are five links: {A–B, A–W, B–W, A–I/O, B–I/O}. The stream link counts as
+its own link when it is configured.
+
+**What is enumerated.** For every ordered pair of links (X, Y), and for each heal order:
+
+- cut X, then Y, then heal in each of the two orders;
+- each cut as both-ways and as each one-way direction;
+- each event placed at eight phases of the lease renewal cycle (k·lease/8), so that a cut
+  lands before, during and after a renewal.
+
+**What each case checks:** I1–I7, plus the expected end state (which controller leads, hot or
+cold, which alarms).
+
+**What each case reports:** a timeline of detect, fence, elect, inputs ready and first output.
+
+### 3.2 Seeded random schedules (T2)
+
+These are random sequences of every fault in §5, and they may overlap: up to three at once,
+with random durations from 0.1·lease to 10·lease. That is 2,000 seeds on every PR and 200,000
+nightly. A failing seed gets minimised to the shortest schedule that still fails, then added
+to the matrix as a named regression case.
+
+**As built (PR 2b, `quorum/sim`).**
+- **The simulator.** Virtual time is in integer nanoseconds, and clock rates are integer ppm, so a seed replays identically on amd64 and arm64. Every message goes through the real codec.
+- **The oracles** are judged on exact intervals after each run:
+  - **I1:** gate intervals, mapped through each node's clock history.
+  - **The lease oracle:** while a gate is open, two counted voters hold running promises to that controller. It is judged from a ledger of every grant a real `Voter` emitted.
+  - **The ledger rule:** no voter grants inside a running promise to another.
+  - **I2:** a simulated device.
+  - **I4:** per voter, and per term led.
+  - **I6:** the bound is 3.5 leases after the last heal. On top of the §4.5 takeover, a leader that lapses just after the heal backs off two leases, and a late duplicate of a renewal can hold a standby off one lease past its arrival.
+  - **I7:** changes of gate holder.
+  - **Steady state:** once settled, one unbroken holder, every counted voter backing it, and no vote term moving. Every safety oracle passed while a stuck standby churned the terms, which is why this oracle exists.
+- **The matrix** runs 1,728 cases, with expectations from a connectivity rule that is independent of the protocol: with two of three vote links cut, the fully-up link decides the leader.
+- **The seeds.** `go test ./quorum/sim` runs seeds 1–2000. `QUORUM_SEEDS=N` runs 1–N, and `QUORUM_SEEDS=a-b` runs a range. `QUORUM_SEED=k ... -run '^TestSeeds$' -v` runs one seed with its trace. Every failure prints that line and a shrunk schedule as a Go literal.
+- **The clone seeds (#1029 layer 2).** `TestCloneSeeds` runs schedules from their own generator (`cloneFaults`): one vote link cut both ways, and a MAC-spoofed clone of A or B (slots `CA`, `CB`, under the original's name, booted from a copy of its disk) around then, once the pair has settled (from 6 s), sometimes with a delay or a skew within the rules. Every oracle but I7 is on (the lease may pass between the original and its clone while both run, never to both at once), the liveness ones from when the cut and the clone are gone. `TestCloneRaceSeeds` runs the clone races #1029 step 1 closes, each to 0 with every oracle but I7: a clone booted with its original, or running while the original or its peer restarts or the leader goes unhealthy, plus rich schedules (a clone with one to three of a cut, restart, unhealthy controller, delay or loss). `QUORUM_CLONE_RACE_SEEDS=<n>` sets runs per case (default 300; nightly 20,000). `quorum/sim/dupname_test.go` pins each step-1 mechanism with a schedule where it alone stands between the pair and two leaders. Cuts that keep a voter from hearing both copies (the splits, and the #1094 review's shapes, where the overlap can start as a cut heals) are gated since the 3c-1 confirmed-duplicate mark: `TestCloneSplitNoTwoLeaders` (every oracle but I7, 200 seeds per shape; `QUORUM_CLONE_SPLIT_SEEDS=<n>` for more) and `TestCloneSplitVoterRestarts` (one or both of the other voters restarting inside the split), and `TestCloneSplitSingleRestarts` (every split shape × each member restarting once; `QUORUM_CLONE_RESTART_SEEDS=<n>`, 100 in CI); `TestMeasureCloneSplitDoubleRestarts` measures two restarts (`QUORUM_MEASURE_DOUBLE_RESTART=<n>`). The sim delivers the peer's vote requests to a running clone too (`sendPeerVote`, #1113 review); `Options.PeerNeverReachesClone` restores the old model for comparison. The "mark" oracle fails any run with no Clone fault in which a voter marks a name, in every seed suite. Since 3c-2 the copy that is not the incumbent makes itself a spare: the sim writes its flag through the node's disk (a crash before the write leaves it held, and it decides again) and silences it once the write is durable, and a restart reads the flag. The "spare" oracle fails a run where both copies of a name go spare, or (with no clone) any copy does, in every seed suite; the steady oracle accepts the stated cost (`spareCost`: a voter that marked the leader's name backs it no more once a copy of it went spare). The gates are in `quorum/sim/spare_test.go`: a clone beside a settled pair goes spare within `spareBound` and the original never; late frames of a restart make no spare (eight delays); the incumbent restarting or dying while the spare runs; the decision under a split; every split shape clears to a full steady state by the clear-duplicate command (by restarts before 3c-3b); the flag written before silence; a failed flag write retried (`DiskFail` across the decision). Since the #1133 review: a lossy original never goes spare (`TestALossyOriginalNeverGoesSpare`, 30 to 80% loss), an original restarting after the mark stays a member (`TestAnOriginalRestartingAfterTheMarkStaysAMember`), and late frames to both voters up to a lease make no spare (`TestLateFramesToBothVotersUpToALeaseMakeNoSpare`); `spareCost` excuses only a voter that has not restarted since its mark. The driver: `quorum/node/spare_test.go` (a newer state format refused and left alone; a spare starts silent whatever its box; silent only once the flag is written; a failed write leaves the held copy; a spare sends nothing; `Unspare`), and the rig (`cmd/naut/pairbox_test.go`): a spoofed clone beside the leader becomes a spare and stays one across its restart, the original restarting beside its spare stays a member, and the real box made a spare recovers by the guide's steps (without step 2 it re-adopts but never leads: the marks hold it). `TestMeasureSpare` (`QUORUM_MEASURE_SPARE=1`, `QUORUM_MEASURE_SPARE_ONLY=<substring>`) prints the PR's table; `QUORUM_SPARE_SEEDS=<n>` sets the gates' runs (default 100). Since 3c-3a the operator's clear-duplicate command: the sim's `Clear` fault clears one member's marks (with `ClearGuarded`, its own voter's guard; with `ClearPreflight`, the command's all-or-nothing check over A, B and W first; `Record.Clears`). `quorum/sim/clear_test.go`: `TestAClearWhileTheCopyRunsBehindASplitIsRefused` (early splits, the copy live: every clear refused, no two leaders; asking each member alone, `clear_per_member`, gives two leaders) and `TestAPartialClearAfterTheCopyStopsIsNeverWorse` (the copy stopped, the clear reaching one or two members: no two leaders, and a second clear after the heal restores every oracle). `TestMeasureClear` (`QUORUM_MEASURE_CLEAR=1`, `_N`, `_ONLY`) prints the PR's table, the restart clear and two ablations included. The driver: `quorum/node/clear_test.go` (every member cleared and the hold freed without a restart; a silent member refuses the whole command; a copy heard refuses it; a member re-checks its own voter). The server's audit table has the route's rows (accepted, no credential, no attestation, refused, incomplete), `TestClearDuplicateAsksForAFreshPassword` and `TestAStandbyWithNoLeaderAnswersClearDuplicate`; the rig drives `naut redundancy` end to end (`TestTheClearCommandClearsAMarkWithoutARestart`). Since 3c-3b marks are durable (`quorum/durable_test.go`): a mark, its boots and the retired boots survive the voter's restart through the file format; the incumbent is named again only on a new frame; a failing mark write holds no renewal; a hold ends only on the marking boot's word or a later clear's generation (a wiped voter, a voter that forgot the mark, a copy from an older disk can't end it, the clear does); a retired boot's reply counts nothing and marks. The driver: `TestAClearFreesAHoldWhenAMemberIsRestoredFromABackup` (the clear's generation goes above every member's and every hold's) and the loopback `TestAMarkSurvivesARestartAndTheClearEndsIt`. The sim: `VoterBoot` is the candidate's nonce, as in the node (`Options.VoterBootApart` for the old model); `Record.MarksRestored`, `MarkWritesLost`, `MarkedAtEnd`; `spareCost` excuses a voter that read its mark back (`forgotAfter`). `TestACopyPausedOrHungAtTheClearIsMarkedWhenItReturns` (paused, hung, hung scans; `TestMeasurePausedAtTheClear`, `QUORUM_MEASURE_PAUSED=1`) and `TestRestartedVotersKeepTheMarkAndTheIncumbent` gate it; `TestTheFsyncWindowKeepsRulesIAndII` is rules (i) and (ii)'s sim pin now that a restart keeps the mark, and `TestASplitWithASpareClearsByTheCommand` replaces the restart clear. `TestMeasureDurable` (`QUORUM_MEASURE_DURABLE=<cells>`, `QUORUM_MEASURE_N`) prints the PR's tables. Since 3c-3c, commissioning and the spare's way back: the sim's `FromSpare` fault is the operator's `recommission --from-spare` on a spare (both other voters checked and cleared keeping no boot, the spare's file wiped, the restart at heal; `Record.FromSpares`; a copy it makes the member takes the original's address, `tookAddress`); the "spare" oracle no longer counts a copy an operator's from-spare made the member. `quorum/sim/fromspare_test.go`: `TestFromSpareNeverMakesTwoLeaders` (the real box or the copy as the spare; the incumbent off, switched back on, cut, paused, frozen or hung at the command, returning with and without a split: 0 two leaders; refused in every run beside a hung incumbent; the replacement takes over when its peer dies once the incumbent is really off) and `TestMeasureFromSpare` (`QUORUM_MEASURE_FROMSPARE=<seeds>`, the PR's table). The driver: `quorum/node/commission_test.go` (commission on a new pair, refused on a commissioned one and without every member; the floor's evidence is every member's terms; recommission refuses no floor, a floor at the evidence and another incarnation, then re-commissions; a box-changed controller needs `--box-replaced`; from-spare only on a spare, refused while either other voter hears the name, done with the incumbent gone: its boot retired, the file moved aside, re-adoption after the restart; no write after the move; the check keeps no boot while clear-duplicate's still refuses it). The server's audit table has both routes' rows, and `TestAStandbyWithNoLeaderAnswersClearDuplicate` covers them; the rig (`cmd/naut/commissioncmd_test.go`) drives `naut redundancy new-pair`, `commission`, `recommission` (evidence, then the floor) and `recommission --from-spare` end to end, the copy switched back on after it refused as fenced (it went spare before 3c-3c-1b). Since 3c-3c-1b, the adoption-generation fence: the `FromSpare` fault fences the name at the peer, then at the witness (Value `FromSpareWitnessUnfenced`: the witness's fence fails, an INCOMPLETE command; `FromSpareRec.Fence`), and every driver, the sim's included, ignores a fenced frame but for its refusal. `TestFromSpareNeverMakesTwoLeaders` gates every cell, the eight where the incumbent is switched back on straight into a split too (two leaders in every run before 1b), plus the voters restarting between the command and its return (`fence_volatile`), a member's file lost after the command (the peer wiped; the witness rebuilt, then the peer wiped: `fence_not_learned`), the incumbent dead re-adopting with its proposal durable (`fence_plus_one`), the old box wiped while off, and the incomplete command (the incumbent leads with the witness once the peer dies, the stated cost; `fence_hold_ignores_witness`). `fence_requests_off`, `fence_replies_off`, `fence_witness_unset`, `fence_unnoted` and `fenced_still_campaigns` turn sim cells red. The handshake's paths over the fence are pinned exactly in `quorum/fence_test.go` (a receiver that adopted first with its Ack lost, a peer's proposal far above its generation, `fence_peer_own_gen_only`; an old box re-proposing over it; an old disk dead re-adopting, its proposal dropped unanswered, `fenced_propose_answered`, the replacement told the fence by the peer alone, `fence_unproposed`; a second `--from-spare` above the first, `fence_ignores_previous`; only a voter that lost its state learns fences, and a wiped peer takes no State from the old box after the witness's reply, `fence_not_learned`, `fence_adopt_off`; a proposal taken only by the boot it addresses and re-sent at once, `propose_any_echo`, `propose_resent_at_look`), with the format-8 file, the refusal and the old box's hold. `TestMeasureSwitch` (`QUORUM_MEASURE_SWITCH=<seeds>`) times witness rebuilds with and without A-B loss, for the before and after. The driver: `quorum/node/fence_test.go` (the old box on its old disk refused at both, `redundancy.superseded`, never leading; a both-lost recommission after a from-spare adopts above the witness's fence, `recommission_under_fence`; a witness that can't write its clear ends the command INCOMPLETE, `dup_answered_before_write`; a member whose disk is slow, inside two seconds, still completes the clear: the wait for the write has a 2 s floor, not a share of the lease, and the controller's call waits it out (`TestAClearWaitsOutASlowDisk`, `dup_wait_lease_scaled`, #1329); a fence only on a pair controller's name, `fence_any_name`). The simulator's handshake hears a copy an operator made the member as the peer (`World.fromPeer`; before, such a pair never switched to a rebuilt witness). Since 3c-3c-2b, D1 (the old box wiped while off, back beside the replacement): `TestAWipedOldBoxBesideItsReplacementIsMarked` gates every D1 cell (`d1Fams`: the old box at the witness alone for an eighth of a lease to two, then the peer's side of a split a lease after it is back or at the move, the replacement leading or not, and the mirror, the replacement cut from the witness) at 0 two leaders; the residual cells (`wLead`, the stated boundary in design §3.1) are measured only (`TestMeasureD1`, `QUORUM_MEASURE_D1=<seeds>`, the PR's table). `TestALostStateRestartReadoptsWithinTwoLeasesUnmarked` bounds rule P's cost (a controller that lost its file re-adopts within two leases of coming back, and no voter marks it; `TestMeasureLostStateReadopt`, `QUORUM_MEASURE_READOPT=<seeds>`, prints the guide's numbers). The driver: `quorum/node/d1_test.go` (a lost-state restart's adoption probes reach the peer with their sequence, unmarked; the wiped old box beside its replacement marked at the peer and the witness, never re-adopting; recommission on it refused while the witness hears the replacement, and on a just-restarted witness's word, done once the replacement is stopped). The new pair's plain vouch: `oplog/freshpair_test.go` (the restart before the first catch-up, then the plain vouch; each of the four conditions failing alone refuses it, naming which) and the rig's `TestPairANewPairsPlainVouchNeedsNoAcceptLoss`. Under `-race` the spare and split gates run a fifth and a quarter of their seeds (`raceOn`): the race job is for data races; the plain job and the nightly keep their counts, and the from-spare gate runs in the nightly.
+- **The runtime:** about 7 s, or 46 s under `-race` (the handshake, the longer switch-fault runs and the named cases).
+- **Excluded by name:**
+  - F22b, a frozen controller clock, which must breach I1;
+  - skew beyond ρ, which must breach I1 at some phase;
+  - **the two-of-three case** (design §3.1, the costs; `Record.TwoOfThreeLost`): a controller's file lost while its peer's committed witness incarnation dies (the witness wiped, or an adopted second copy gone) before it re-commissions, or both controllers uncommissioned at once (#710 B2, witness intact or not). It needs an operator, so I6, I7 and steady state are excused; I1, I2, I4, the lease and the ledger are not, because the lost controllers wait for the operator instead of re-commissioning at a floor that may miss their terms (design §3.1). The seed runner logs and counts the case (990 of 200,000, 0.50%, since B2; 777 before), `TestExcusedShare` bounds its share, `TestTwoOfThreeLostTeeth` checks it fires on that case and on nothing else, and every named case asserts it was not excused, except those built as the case: `TestTwoOfThreeWaitsForTheOperator`, `TestBothLostWaitForTheOperatorInTheSim` (the #1016 review's shape: red on I2 under `both_lost_recommission`, "B wrote term 7 after term 8"), and the operator cases below. `TestTwoOfThreeWaitsForTheOperator` builds the case with terms the peer never saw, and asserts I2 and I4 in it.
+- **#976 is closed** (H2), and since #710 B2 two lost controller files **wait for the operator** even with the witness intact: the named cases (`TestRegression976TwoLostControllerFiles`, `TestRegressionBothUncommissionedStray`, `TestRegression976WitnessUnreachable`, livelock seed 1653) each run the operator's command (a `Recommission` fault, which the generator never draws) and, through `operatorRecovers`, assert no adoption before it, the alarm on both controllers, every safety oracle, and both counting the witness with a leader at the end. They are red under `both_lost_recommission` (H2's automatic recovery). The floor's own sim case is `TestFloorCarriesTheUnseenTerm`; the generator doesn't cap lost controller files.
+
+### 3.3 Mutation checks (T2, nightly; required to pass before each milestone)
+
+Each mutation below is a build tag that breaks one rule of the design. Each one **must** make
+this plan's §3.1 or §3.2 (or the §6/§8 cases for its milestone) fail, and the test names which
+case caught it. A mutation joins the nightly run in the PR that builds the rule it breaks.
+
+| Mutation | Rule it breaks | From PR |
+|---|---|---|
+| no clock-rate margin ρ on the leader's lease | design §3.1, the leader's own clock | 2 |
+| a restarted voter grants at once | design §3.1, the restart wait | 2 |
+| a voter answers before its fsync | design §3.1, fsync before answer | 2 |
+| the leader times its lease from the reply, not the request | design §3.1 | 2 |
+| the gate is judged on the elector's tick, not when it is read | design §3.2 | 3a (`gate_on_tick`) |
+| a new leader applies alarm state before its `oplog` catch-up (as built: a synced takeover restores its own retain instead of the log's alarm view, `alarm_view_ignored`) | design §1, `oplog` | 3b-2c |
+| an acknowledged alarm back to normal proposes no ack-clear, so a takeover pre-acknowledges a new occurrence (`ack_clear_off`) | design §1, occurrences | 3b-2c |
+| a takeover restores the view over a re-leading replica's frozen engine (`engine_not_reset`) | design §1, takeovers reset the engine | 3b-2c (#1033 review) |
+| the alarm log judges the engine from the lease on, before the takeover restored the view: Reconcile clears every carried ack while the takeover waits for inputs (`reconcile_before_restore`) | design §1, takeovers reset the engine | 3b-2c (#1033 CI) |
+| a late substitute start a lapse entry names is carried out (`lapse_ignored`; a runner row since 3b-2c) | design §1 | lapse |
+| the log's leader asks its peers one after another, so a silent peer holds up every write and a takeover's catch-up by its call timeout (`replicate_sequential`) | design §1, three replicas | 3b-4a |
+| a replica that admits by name (the witness) takes replication from any member (`admit_skipped`) | design §1, the witness follows its vote; §8.1 case 6 | 3b-4a |
+| an unsynced replica (lost log, rebuilt, another identity) counts toward a commit or a catch-up (`unsynced_counted`) | design §1, only a synced replica counts | 3b-4a |
+| a log lost under the held mark comes back empty and counting (`log_loss_silent`) | design §1, a lost log is seen | 3b-4a |
+| a follower marks itself synced from a leader that is not synced (`synced_by_unsynced_leader`) | design §1, only a synced replica counts | 3b-4a |
+| a resend or a catch-up read carries the whole log in one body, so a rebuilt replica is never filled (`resend_unchunked`) | design §1, the witness re-copies the log | 3b-4a |
+| a leader not caught up for its term heartbeats or resends, or a follower pulls from it, so an earlier term's leftover replaces an entry a later term committed (`unsynced_leader_writes`) | design §1, nothing leaves an unsynced leader | 3b-4a (#1050 review) |
+| a peer still short of the leader's log after the resend rounds counts as having stored the entry (`behind_counted`) | design §1, only a synced replica counts | 3b-4a (#1050 review) |
+| a follower marks itself synced from a request that proves its log only below the commit index (`synced_before_commit`) | design §1, only a synced replica counts | 3b-4a (#1050 review) |
+| an unsynced leader counts its own log in its catch-up (`unsynced_self_counted`) | design §1, only a synced replica counts | 3b-4a (#1050 review) |
+| an unsynced standby campaigns over a reachable, synced peer that may campaign (`campaign_ignores_sync`) | design §1, an unsynced controller leads for control | 3b-4b |
+| an unsynced leader whose catch-up failed never hands over to a synced, able peer (`unsynced_leader_keeps_lead`) | design §1, an unsynced controller leads for control | 3b-4b |
+| a leader yields again within 10 minutes (`yield_undamped`) | design §1, the yield is damped | 3b-4b |
+| a leader yields to a peer that may not campaign (unhealthy scans) (`yield_ignores_may`) | design §1, the yield needs an able peer | 3b-4b |
+| a leader yields to a synced peer that can't sync the others (`yield_ignores_can_sync`) | design §1, the yield needs a peer that can sync | 3b-4b (#1053) |
+| a yield ends at the lease's due end though a late grant moved it (`yield_until_due`) | design §1, the yield holds until the lease is over | 3b-4b |
+| a new replica's mark is written after its log file (`mark_after_log`) | design §1, logs from before marks | 3b-4b |
+| the term lives in memory only, so a lost log takes a deposed leader's replication and its word that the log is synced (`term_not_persisted`) | design §1, the mark keeps the term | 3b-4b (#1050 review carry) |
+| a marked replica takes replication while its own election names no leader (`unnamed_leader_admitted`) | design §1, only a synced replica counts | 3b-4b |
+| a vouch is taken over a lost log, a silent peer or a later log (`vouch_unchecked`) | design §1, a vouch starts a pair | 3b-4b |
+| a vouched log catches up alone at every leadership (`vouch_alone_kept`) | design §1, a vouch starts a pair | 3b-4b |
+| a vouched catch-up overrides a copy outside what the person accepted (`accept_loss_blanket`) | design §1, a person accepts a loss | 3c-3c-2a |
+| a log synced by the normal path keeps its acceptance (`accept_kept_after_sync`) | design §1, a person accepts a loss | 3c-3c-2a |
+| a lost log is vouched for without `--accept-lost-log` (`lost_log_vouch_unchecked`) | design §1, a person accepts a loss | 3c-3c-2a |
+| a synced copy alone is granted the one-shot without `--accept-loss` (`synced_alone_without_accept`) | design §1, a person accepts a loss | 3c-3c-2a |
+| an override starts no new history, so the overridden copy counts when it returns (`history_not_bumped`) | design §1, the log history | 3c-3c-2a |
+| the new history is recorded after the copy is synced for its term (`history_after_write`) | design §1, the log history | 3c-3c-2a |
+| a copy at a lower history counts (`history_lower_counted`) | design §1, the log history | 3c-3c-2a |
+| a forked copy counts and is replicated to (`history_fork_counted`); a catch-up over an accepted fork starts no new history (`fork_resolved_without_bump`) | design §1, the log history (fork) | 3c-3c-2a |
+| a superseded copy keeps and replays its log at its start (`superseded_not_reset`), takes replication before it (`superseded_takes`), or holds the higher history in memory only (`supersede_not_durable`) | design §1, the log history | 3c-3c-2a |
+| a leader that hears a higher history while replicating commits what it stored (`history_moved_commits`) | design §1, the log history | 3c-3c-2a |
+| a peer's log at a lower or forked history is one to defer and yield to (`lower_history_peer_synced`); a higher history in the hello is not learnt (`hello_history_ignored`) | design §1, the log history | 3c-3c-2a |
+| a superseded controller restarts itself while leading, before the other leads synced at the new history, with no supervisor, or a second time (`restart_while_leading`, `restart_peer_unchecked`, `restart_unsupervised`, `restart_loops`) | design §1, ruling 20d | 3c-3c-2a |
+| the witness's copy waits for a restart to take a newer history (`witness_supersede_waits`) | design §1, the log history | 3c-3c-2a |
+| a takeover restores a superseded log's substitutes (`retained_stale_ignored`); its restart leaves them in the retain store (`stale_retained_kept`) | design §1, ruling 20d | 3c-3c-2a |
+| a vouched catch-up overrides with every other copy silent (`override_all_silent`) | design §1, a person accepts a loss (i) | 3c-3c-2a |
+| the superseded verdict takes the log's lock, so a takeover and a commit deadlock (`stale_under_lock`) | design §1, the log history | 3c-3c-2a (#1177 review) |
+| "vouch again" is a no-op while a one-shot is pending (`vouch_again_noop`); a no-op vouch takes any digest (`noop_digest_unchecked`); a vouch on a leader caught up for its term waits for its next term (`vouch_keeps_term_synced`) | design §1, a person accepts a loss | 3c-3c-2a (#1177 review) |
+| a start after a superseded log keeps the retain store's acks and shelves (`stale_retained_alarms_kept`) | design §1, the log history | 3c-3c-2a (#1177 review) |
+| a vouch's one-shot whose spend can't be written stays armed in memory (`spend_failure_keeps_alone`) | design §1, a vouch starts a pair (spent) | 3c-3c-2a (#1177 CI) |
+| a vouch's one-shot and acceptance survive a restart (`accept_survives_reboot`) | design §1, a person accepts a loss | 3c-3c-2a (#1177, naut-lead) |
+| a controller that learns it is superseded runs the old history's substitutes until a takeover (`superseded_lead_keeps_substitutes`), or keeps its acks and shelves (`superseded_alarms_kept`) | design §1, the log history | 3c-3c-2a |
+| an uncommissioned boot's adoption probe carries no sequence (`adopt_probe_unseq`) or reaches the witness only (`adopt_probe_witness_only`), so a wiped old box beside its replacement is never marked where it later leads | design §3.1, D1 | 3c-3c-2b |
+| a commissioned controller takes an uncommissioned peer boot's re-adoption while its voter hears another live boot of the name (`peer_takes_beside_live`) | design §3.1, D1 | 3c-3c-2b |
+| recommission goes ahead while a voter hears another live boot of this controller's name (`recommission_beside_live`) | design §3.1, D1 | 3c-3c-2b |
+| a new pair's plain vouch after a restart before its first catch-up needs `--accept-loss` (`empty_pair_needs_accept`); the plain vouch skips its conditions (`empty_pair_unchecked`); a second identity change before a copy synced forgets the first one's set-aside log (`set_aside_forgotten`) | design §1, a person accepts a loss | 3c-3c-2b (#1207 review) |
+| recommission's live-copy check skips a witness that does not answer it (`live_check_witness_skipped`) | design §3.1, D1 | 3c-3c-2b (#1207 review) |
+| an unsynced log reads writable, so a write ends "outcome unknown" instead of a certain refusal (`unsynced_log_writes`) | design §1, read-only until synced | 3b-4b |
+| the witness's copy admits replication from any member (`witness_log_unbound`) or at any term (`witness_log_term_unbound`) | design §1, the witness follows its vote; §8.1 case 6 | 3b-4b |
+| the leader counts the witness's copy at any incarnation (`witness_log_any_incarnation`) | design §1, F15 | 3b-4b |
+| the pair's log leaves the witness out (`witness_not_a_replica`) | §8.1 cases 1 and 7 | 3b-4b |
+| a leader whose term is unsynced is caught up only by a write (`log_sync_not_retried`) | design §1, the leader retries its catch-up | 3b-4b |
+| an entry of any size is proposed, so one stored can't be read back or fetched (`entry_unbounded`) | design §1 | 3b-4a (#1050 review) |
+| `Liveness` ignores a loop between scans (the behaviour before #858) | design §3.2, starvation | 3 |
+| a standby's gated ticks don't count as on schedule | design §3.2, starvation | 3 |
+| the in-sync mark is not persisted | design §3.3 | 4 |
+| a stream frame of an older term is applied | I5 | 4 |
+| the standby's shadow applies an image of an older (term, seq) (`shadow_older_image_applied`), or keeps its frames and position after this controller led (`shadow_kept_after_leading`); images are numbered by a scan count an online edit resets (`image_seq_from_scans`) | I5, design §4.1 | S1a (#710) |
+| a frame is applied to a program of another layout (`shadow_layout_unchecked`); a task an image did not apply keeps offering the older frame (`shadow_stale_frame_kept`) | I5, design §4.1 | S1a (#710) |
+| an image's checksum is neither written nor checked (`image_crc_unchecked`); images over the size limits are made and read (`image_size_unbounded`) | F31, design §4.1 | S1a (#710) |
+| the scan's frame copy does more than copy values (`image_copy_in_scan_encodes`) | design §4.1, guard (a) | S1a (#710) |
+| the standby takes the leader's acks, shelves, flood or substitutes from an image (`stream_carries_log_intent`) | design §1 (the log owns them), §4.1 | S1a (#710) |
+| an image carries the inputs or outputs (`image_tags_carry_io`), only the tags a program writes and not an operator's (`image_tags_written_only`), a forced tag's forced value (`image_tag_forced_value`), or the retained tags twice (`image_tags_retained_twice`) | design §4.1, the carried tags | S2a (#710) |
+| a task's tags are copied when the image is taken, not with its frame at the end of the same scan (`image_tags_at_take`) | design §4.1, one instant | S2a (#710) |
+| a task's image names no running source (`image_source_unhashed`); the shadow applies the tags of a leader that carries another set (`shadow_tags_layout_unchecked`) | I5, design §4.1 | S2a (#710) |
+| a leader sends its newest image format to a standby that reads only an older one (`stream_format_ignored`) | design §4.1, rolling update | S2a (#710) |
+| hot takeover with no image-age check, or with hot-max-age 0 (`hot_no_age_check`) | I5, design §4.2 | S2b (#710) |
+| hot takeover on an image with a different build hash (`hot_build_unchecked`) | I5 | S2b (#710) |
+| hot takeover with a task running another source than the image's (`hot_source_unchecked`), or some tasks installed and the rest reset (`hot_partial_tasks`) | I5, design §4.2 | S2b (#710) |
+| a hot takeover installs the frames but not the carried tags (`hot_globals_not_carried`) | design §4.1, the carried tags | S2b (#710) |
+| the timers stay on the old leader's clock (`hot_timer_not_rebased`), do not count the image's age and the inputs wait (`hot_age_not_elapsed`), or a fast task's are carried from its own copy, losing the time it ran on before a slow task's (`hot_rebase_per_task`) | design §4.2 step 4 | S2b (#710) |
+| mutant: a hot takeover makes FIRST_SCAN() TRUE, also on a standby that never led (`hot_first_scan_true`); the rule is FALSE | #710 (b): a hot takeover is no start | (b1) (#710) |
+| a takeover sets no TAKEOVER_SCAN()/HOT_TAKEOVER() and counts nothing (`takeover_unmarked`); the flags outlast the first scan (`takeover_flag_kept`) or a step-down into a same-term resume (`takeover_flag_survives_step_down`); a new pair's first leadership counts as a takeover (`every_acquisition_a_takeover`) | #710 (b) system functions | (b1) (#710) |
+| PEER_READY() ignores what the pair sets (`peer_ready_never_set`), is TRUE while the leader holds forces (`peer_ready_ignores_forces`), or with a standby on another build (`ack_other_build`), or keeps a restarted standby's earlier ack (`ack_kept_across_reconnect`) | #710 (b): "a takeover now would be hot" | (b1) (#710) |
+| a flush that ends late (`hot_late_flush_installs`) or fails on anything but an unreadable own store (`hot_failed_flush_installs`) still goes hot | design §4.2 | S2b (#710) |
+| a READ/WRITE ticket of the old controller survives a hot takeover (`hot_ticket_carried`) | design §4.2 | S2b (#710) |
+| a takeover over an unreadable own store loads the image's retained values before its checks and keeps them when one fails (`hot_retain_before_checks`); an input is carried across a hot takeover (`image_tags_carry_io`, through `TestHotTakeoverGoesOnFromTheImage`) | Q3 ruling, design §4.1 | S2b (#710) |
+| a hot takeover over an unreadable own store does not warn that its retained values are only in memory, or a failed save clears it (`retain_memory_only_forgotten`) | Q3 ruling | S2b (#710) |
+| the cold-takeover warning stays after a standby follows again (`hot_cold_condition_never_clears`) | naut-lead ruling | S2b (#710) |
+| a discounted voter's reply vouches for a hot takeover (`discounted_vouches`) | naut-lead S5 on #1345 | S2c-3 (#710) |
+| a campaign's grant hides the asker's earlier-boot epoch (`prior_boot_overwritten`, `own_record_after_grant`); the hand-back's floor leaves out this controller's earlier leaderships (`handback_own_record_ignored`) or counts a voter whose records don't cover it (`handback_unknown_counts`) | design §4.3, the hand-back | S2c-3 (#710) |
+| a peer's retain file older than the floor (`handback_peer_file_unjudged`), with no stream position (`handback_empty_file_good`), or a peer that could not lead (`handback_ineligible_peer`) or handed back itself (`handback_peer_guard_off`) is handed the lead | design §4.3, the hand-back | S2c-3 (#710) |
+| a controller hands back again within the guard's window (`handback_guard_off`), forgets the guard on a restart (`handback_guard_volatile`), or trusts a hand-back time in the future (`handback_future_held`) | design §4.3, crash loop | S2c-3 (#710) |
+| the hand-back waits long for a silent peer (`handback_long_deadline`); a controller that handed back keeps renewing (`handback_keeps_renewing`) | design §4.3, the times | S2c-3 (#710) |
+| a failed hand-back arms the guard (`handback_guard_kept_on_failure`); the floor takes one voter's grant for a leadership (`handback_floor_max_only`); a failed store read is forgotten once a hand-back closes the gate (`handback_store_bad_forgotten`), or after a restart that finds the emptied file (`handback_restart_empty_trusted`) | Fable on S2c-3 | S2c-3 (#710) |
+| a takeover asks for a hand-back with its store readable (`handback_on_readable_store`) or when it will go hot (`handback_when_hot`); a takeover from a hand-back raises no condition (`handback_taken_unalarmed`) | design §4.3 | S2c-3 (#710) |
+| the gate is checked once per batch, not before each send (as `hw/base.go` did) | design §3.4 | 3b-3a (`gate_per_batch`) |
+| a command queued under one term of the lease is sent after the replica lost it and won it again | design §3.4, `io.SendGate` term | 3b-3a (`old_term_sent`, #1040 review) |
+| a send split into requests (Write Tag Fragmented) reads the gate once, not before each request | design §3.4, every request | 3b-3b-2 (`fragments_unchecked`) |
+| a Modbus write queued or requeued under one term is sent after the replica lost the lease and won it again | design §3.4 | 3b-3a (`old_term_kept`, #1040 review) |
+| an SNMP SET is retransmitted after a lost answer, so an action-valued object runs twice | design §3.4, every datagram | 3b-3a (`set_retried`, #1040 review) |
+| a send with no deadline | design §3.4 | 3b-3a (`send_no_deadline`) |
+| no fence margin (the gate closes at lease expiry) | design §3.4 | 3b-3a (`no_fence_margin`) |
+| sockets closed with FIN, not RST, on fence | design §3.4, RST on fence | 3b-3a (`fence_fin`) |
+| the peer listener trusts a Host instead of requiring the peer token | design §6.1 | 3a (`peer_host_trusted`) |
+| a peer token under 32 characters keys peer TLS (`peer_tls_short_token`); a peer listener asks for no client certificate (`peer_tls_server_any_client`); a peer call accepts any server key (`peer_tls_client_any_server`) | design §6.1, peer TLS | peer TLS PR 1 (#710) |
+| a pair and a witness run plain HTTP unless peer TLS is asked for (`peer_tls_default_off`); the log's calls ignore peer TLS (`peer_tls_log_plain`) | design §6.1, peer TLS | peer TLS PR 1 (#710) |
+| a voter that speaks the other protocol, or holds another key, raises nothing (`peer_tls_mismatch_unnamed`) | design §6.1, mismatches are named | peer TLS PR 1 (#710) |
+| a standby names the leader's tag API as the peer's host at its OWN port (`peer_api_guessed`); the announced API is outside the hello's MAC (`peer_api_unbound`); a peer announcing this controller's own API is proxied to (`peer_api_self`) | design §6.1, the tag API addresses | proxy API address (#710 demo finding 1) |
+| a standby's forward waits for the leader's response headers without a deadline (`leader_headers_unbounded`), over plain HTTP and server.tls | design §6.1, the tag API addresses | proxy API address (#710 demo finding 1) |
+| a hello with no verified answer is retried only a whole interval later (`hello_retry_slow`); a peer's new boot or a link coming up asks for no hello (`hello_not_asked_again`) | design §6.1, the tag API addresses | hello retry (#1120) |
+| a member's peer listener binds every interface (`peer_bind_wildcard`); a peer port whose address is not up yet refuses the start (`peer_bind_gives_up`); a `peers:` name that binds to loopback is served (`peer_bind_loopback_taken`) | design §6.2, in `naut run` | peer TLS PR 1 (#1230 review) |
+| a peer TLS handshake has no bound of its own, so a silent peer holds a connection per call (`peer_tls_handshake_unbounded`) | design §6.1, bounded handshakes | peer TLS PR 1 (#1230 review) |
+| a lease refusal stays raised after the voter takes the lease again (`lease_mismatch_never_clears`); a refusal given and one received share one report, so a pair whose leases differ flaps (`lease_refusal_one_way`); a voter's restart wait, which still takes the lease it refuses after, clears it (`lease_clear_on_wait`); a voter's refusal raises no condition (`lease_condition_dropped`); the witness refusing the pair's lease raises no system alarm (`witness_lease_no_alarm`); naut check says nothing of a lease under 1 s (`lease_check_unwarned`) | design §2, three headers (lease refusals) | 1 s default lease (#710) |
+| the standby's proxy drops or rewrites the client's Host or token | design §6.1 | 3 |
+| no back-off after a lease lapses unconfirmed | design §3.1, one-way partitions | 2 |
+| grants accepted from any witness incarnation | design §3.1, the witness incarnation | 2 |
+| a grant counted toward a request it doesn't answer (matched by term, not id) | design §3.1, request ids | 2 |
+| a new incarnation's grants counted with no quiet period | design §3.1, the witness incarnation | 2 (handshake) |
+| an incarnation adopted without the term floor | I4 | 2 (handshake) |
+| a proposer keeps counting the old incarnation while its proposal is in flight | design §3.1, forward only | 2 (handshake) |
+| a proposal adopted whatever its generation (a late or earlier-boot one splits the pair) | design §3.1, generations | 2 (handshake) |
+| the driver reports a write durable before it is on disk, so a grant leaves ahead of its fsync | design §3.1, fsync before answer; §6.2 | 3a |
+| the state file is rewritten in place, so a crash mid-write tears it | design §6.2 | 3a |
+| the boot nonce is the same at every start | design §3.1, request ids; §6.2 | 3a |
+| a voter grants a request whose lease outlives its own promise | design §6.2 | 3a |
+| the witness draws a new incarnation over a state file it can't read, without `--rebuild` | design §6.2 | 3a |
+| a voter restarted with a shorter lease waits only that one, inside a promise made under the longer | design §6.2 | 3a (review) |
+| a voter's failed state write is reported durable (controller; witness) | design §3.1, fsync before answer | 3a (review) |
+| the gate stays open for unhealthy scans or after `Release` | design §3.2 | 3a (review) |
+| a voter's state isn't locked to one process (controller; witness) | design §6.2 | 3a (review) |
+| a voter takes a vote that jumps the terms (controller; witness) | design §6.2 | 3a (review) |
+| a longer lease after a restart isn't written before an unchanged grant | design §6.2 | 3a (re-review) |
+| the term-jump cap is 2^20, so an isolated controller is refused for good | design §6.2 | 3a (re-review) |
+| the client-token answer binds no names or direction | design §6.1 | 3a (review) |
+| a controller campaigns while its own voter is in its restart wait | design §3.1, the restart wait | restart hold |
+| a voter grants a name under another boot nonce while that name's promise runs (two processes as one member) | design §2, §6.2 | 3b-1 (review); since #1029 step 1 the name refusal (`dup_name_ignored`), which covers it whole |
+| a controller starts over a state file another member, or another pair, wrote | design §2, §6.2 | 3b-1 (review, `state_owner_unchecked`) |
+| a controller campaigns while its peer's hello names another configuration of the pair | design §2 (F30) | 3b-2b (`config_differs_campaigns`) |
+| two processes behind the peer's name (nonces N1, N2, N1 at the hello) raise nothing | design §2 (F30) | 3b-2b (`hello_duplicate_unseen`) |
+| the credential check's MAC leaves the digest out, so different users files read as the same | design §6.1, credential set (#708) | credential digest (`creds_unbound`) |
+| a controller votes from a state file written on another box (a cloned disk; red in both #1029 shapes end to end) | design §2, #1029 | #1029 layer 1 (`box_unchecked`) |
+| a voter ignores the promises other voters relay, so a MAC-spoofed clone of the leader wins the voter its original is cut from (red in all three shapes end to end and in `TestCloneSeeds`) | design §2, #1029 | #1029 layer 2 (`relay_ignored`) |
+| a voter grants a name while that name's own voter is heard promised to another controller: a MAC-spoofed clone of the standby, the leader cut from the witness (shape 3) | design §2, #1029 | #1029 layer 2 (`relay_voter_rule_off`) |
+| a voter relays its promise to its own candidate, so a clone's self-grant reaches the other voters | design §2, #1029 | #1029 layer 2 (`relay_self_promise`) |
+| a heard promise is held only for its time left, without the clock-rate margin | design §2, #1029 | #1029 layer 2 (`relay_no_margin`) |
+| a refusal in the clock-rate margin after a heard promise counts as a duplicate (a fast real restart raises a false alarm) | design §2, #1029 | #1029 layer 2 (`relay_tail_counted`) |
+| a standby doesn't probe the witness every look, so neither hears the other's promise while no campaign runs (red in shapes 2 and 3 and in `TestCloneSeeds`) | design §2, #1029 | #1029 layer 2 (`standby_no_probe`) |
+| a controller's voter never hears the promise a reply relays (red in shape 1) | design §2, #1029 | #1029 layer 2 (`reply_relay_dropped`) |
+| a voter's new promise to the other controller reaches the witness only at the next look, so a clone wins the witness in that window | design §2, #1029 | #1029 layer 2 (`relay_not_pushed`) |
+| a voter grants a name it hears under two live boots (red in all four clone races, the rich clone schedules and `TestStandbyProbesItsPeerSoTheCloneIsSeen`) | design §2, #1029 step 1 | #1029 step 1 (`dup_name_ignored`) |
+| a duplicated name's running promise is refused too, so a clone of a healthy leader costs a takeover (`TestCloneOfTheLeaderCostsNoTakeover`) | design §2, #1029 step 1 | #1029 step 1 (`dup_refuses_incumbent`) |
+| a candidate counts a grant from a voter its own voter knows is duplicated (`TestDuplicatedVoterBacksNoLease`) | design §2, #1029 step 1 | #1029 step 1 (`dup_voter_counts`) |
+| a voter doesn't relay a name it sees duplicated (`TestDupRelayStopsTheWitnessGrantingAClone`) | design §2, #1029 step 1 | #1029 step 1 (`dup_not_relayed`) |
+| a standby probes the witness only, so a standby cut from it is seen by no voter beside its clone (`TestStandbyProbesItsPeerSoTheCloneIsSeen`, the clone races) | design §2, #1029 step 1 | #1029 step 1 (`standby_probes_witness_only`) |
+| a voter yields its own round to a request it then refuses (`TestNoYieldToARequestTheVoterRefuses`) | design §2, #1029 step 1 | #1029 step 1 (`yield_before_refusal`) |
+| a relayed promise counts a conflict as a duplicate up to receipt + left, so a restart on a slow link raises a false alarm (`TestASingleRestartRaisesNoDuplicate`) | design §2, #1029 step 1 | #1029 step 1 (`dup_strict_ignores_delay`) |
+| rule (b) counts a duplicate for a relay from the very boot it refuses, a reordered frame (`TestRuleBCountsOnlyAnotherBoot`, `TestASingleRestartRaisesNoDuplicate`) | design §2, #1029 step 1 | #1029 step 1 (`rule_b_counts_own_boot`) |
+| a voter grants a term it granted to one boot of a name to another boot of it, so one term goes to two processes (`TestATermIsNotGrantedToAnotherBoot`, `TestATermGoesToOneBootOfAName`) | design §2, #1029 step 1 | #1029 step 1 (`same_term_other_boot`) |
+| a voter's grant nonce isn't reloaded at start, so a restarted voter gives a term to a second boot of a name (`TestATermStaysOneBootsAcrossARestart`) | design §2, #1029 step 1 | #1094 review (`grant_nonce_volatile`) |
+| a refused campaign whose own voter's grant came back after the refusal waits out a whole lease (a stale relay then costs a takeover a lease; red in `TestStaleRelayEndsAndTheStandbyLeads`) | design §4.5, R | #1029 layer 2 (`retry_after_refusal_only`) |
+| no switch hold-off: a stray copy answering on and off switches the pair every lease | design §3.1, when a switch is proposed | 2 (handshake) |
+| a restarted controller counts its adopted incarnation at once (no quiet period owed) | design §3.1, the quiet period | 2 (handshake) |
+| a lost controller takes an `Adopt` sent before its restart (a stale floor) | design §3.1, boots | 2 (handshake) |
+| a switch proposed with the peer unheard | design §3.1, when a switch is proposed | 2 (handshake) |
+| a generation bump that keeps the incarnation ends a quiet period still owed (a restart's) | design §3.1, the quiet period | 2 (handshake) |
+| an `Adopt` sent to an earlier boot of this controller counts as hearing the peer | design §3.1, boots | 2 (handshake) |
+| a reply in the quiet period isn't counted as heard, so a restart backs off two leases | design §3.1, heard, not counted | 2 (handshake) |
+| both uncommissioned, a proposal of an incarnation no longer answering is kept (the pair waits for ever) | design §3.1, strays | 2 (handshake) |
+| a controller that lost its file grants before it re-commissions (#976) | design §3.1, a controller that lost its state file | 2 (handshake) |
+| a proposal leaves an adoption waiting for its write to count on a later write (#1014 review) | design §3.1, nothing counts while a proposal is in flight | 2 (handshake) |
+| a write counts an adoption while a proposal is pending (#1014 review) | design §3.1, nothing counts while a proposal is in flight | 2 (handshake) |
+| a failed adoption write leaves the hold-off measured from boot | design §3.1, when a switch is proposed | 2 (handshake) |
+| leases timed on `CLOCK_MONOTONIC`, which stops across a suspend | design §3.1, clocks | 2 |
+| the override opens the gate before its journal fsync | I8 | 5 |
+| the override survives hearing a peer | design §7 | 5 |
+
+**The runner (2c).** Every PR-2 rule has a switch in package `quorum`. It exists only in a
+build with the `quorum_mut` tag, and `QUORUM_MUT=<name>` turns one on; a normal build compiles a
+constant false, so the checks cost nothing. `go run ./tools/quorum-mutants` does the following:
+- it runs `go test ./quorum/...` once per mutation;
+- it requires the named tests to go red;
+- it counts a build or setup failure as a failure, and says so when a test panicked (which
+  hides the tests after it);
+- it checks the baseline (the tag on, no mutation) is green first;
+- it prints a Markdown table and exits non-zero on any survivor.
+
+Its own table test checks those verdicts, and that every mutation in `quorum/mut_on.go` has a
+row. All 17 are caught, in about 50 s. The handshake adds eight (`no_quiet`, `no_floor`,
+`count_while_pending`, `no_adopt_gen`, `no_holdoff`, `restart_counts_at_once`, `no_adopt_echo`,
+`switch_without_peer`): T1 catches each in H1, and the sim cases join them in H2. H2 adds five
+more: four for holes found while driving the handshake in the sim (`bump_cuts_quiet`,
+`peer_from_any_adopt`, `quiet_reply_unheard`, `stale_pending_kept`, removed in #710 B2 with the rule it
+pinned), and `uncommissioned_grants`,
+#976's own rule, which H1 tested in T1 only. naut-lead's review of #1014 added three
+(`propose_keeps_commit`, `count_over_pending`, `holdoff_from_boot`). The first two are belt and
+braces, so each alone closes the failed-write split brain and is pinned by a test of its own
+invariant; the scenario tests go red only with both removed. The two-of-three PR (#710 (B))
+adds two: `uncommissioned_takes_switch` (a lost controller takes its peer's switch, not only
+its committed incarnation; T1 and `TestTwoOfThreeWaitsForTheOperator`) and
+`proposal_floor_volatile` (a proposal's floor isn't written with it, so a restart re-sends it
+lower; T1 only). B2 adds three: `both_lost_recommission` (both uncommissioned, the pair
+re-commissions on its own: T1 with the review's case, and the both-lost sim cases),
+`alarm_on_heard` (an incarnation that answered still raises the alarm; T1) and
+`recommission_any_floor` (an operator's floor at or below the known one is taken; T1).
+
+**The handshake in the simulator (H2).** The sim drives `quorum.Adoption` as PR 3 will:
+`Adopt` over A–B (every link fault applies), witness replies to `OnWitness`, `OnPeer` for every
+other peer message, the probe to the witness, controller writes through `Adoption.Persisted`.
+What each controller counts is kept as ground truth, apart from the candidate's bookkeeping,
+by the design's rules (a restart owes the quiet period; a proposal counts nothing; an adoption
+counts at once only what was counted). The lease, hostile and steady checks judge each witness
+grant by what its grantee counted when it arrived. The generator adds the **switch fault**
+(F15b) on its own random stream, so other seeds keep their schedules: a second copy up from 0,
+which one controller reaches while the real witness is cut from it. A switch-fault run's steady
+state is judged from a lease after its last adoption, which must come within the hold-off cap
+(33 leases) of the last heal. Named cases (`quorum/sim/handshake_test.go`):
+- **The must-fail quiet period (F15b switch).** A leads on {A, W}; B reaches only W2 and loses
+  every request from A (a `Cut` that drops one frame kind), so it proposes W2 while A's lease
+  runs. With the quiet period, I1 holds and a W2 grant reached B inside it when it would have
+  made B's majority (the DECISIVE guard). Red under `no_quiet` (I1).
+- **The term floor.** B leads term 17, which A never saw (B→A votes are lost, the handshake isn't);
+  the witness is rebuilt, the pair adopts it, and B dies. A leads above 17. Red under `no_floor`
+  (I2: term 2 after 17).
+- **F15**, the rebuilt witness adopted by both, each counting it a lease after its write; with B
+  down it is not adopted and nobody leads until B is back.
+- **A late proposal from the peer's earlier boot** (a `Replay` fault) is refused after the pair
+  moved on. Red under `no_adopt_gen`.
+- **The flapping stray:** a copy answering A 4 s in every 8 makes at most three switches in 12
+  windows. Red under `no_holdoff`.
+
+The first 200,000-seed run with the handshake failed 42 seeds, none on safety:
+- **36** were switch-fault runs whose return to the real witness waited out the hold-off (the
+  settle-aware steady window above);
+- **3** were a real liveness hole: both controllers uncommissioned, each pending a proposal the
+  other can't take, stuck after the stray was gone. Fixed then (`stale_pending_kept`); since
+  #710 B2 the pair waits for the operator instead (`TestRegressionBothUncommissionedStray`);
+- **3** are now excused: the two-of-three rule was widened a second time, to judge the peer's
+  *committed* incarnation (a peer pending a switch counts nothing, yet the lost controller can
+  only re-adopt what it committed, here dead). They are in `TestTwoOfThreeLostTeeth`.
+
+Then the 200,000 seeds pass (283 s), 777 of them excused as the two-of-three case.
+
+**The two-of-three case waits for the operator (#710 (B)).** An uncommissioned controller now
+adopts only a re-adoption of its peer's committed incarnation (design §3.1), so the case's
+excuse drops I2 and I4 (§3.2). Measured without the rule (unchanged code, and again under
+`uncommissioned_takes_switch` with the stricter I4 below): asserting I2 and I4 in the 777
+excused seeds broke none, because no random schedule has the lost controller lead a term its
+peer never saw. So the case is built by hand: `TestTwoOfThreeWaitsForTheOperator` keeps B down
+while A, paused three times, leads terms 5 to 8 on {A, W}; then A's file is lost and the witness
+rebuilt; B comes back and proposes the switch. A must refuse, stay uncommissioned and raise the
+alarm. Under `uncommissioned_takes_switch` A takes the switch at B's floor and leads term 8 again.
+I4 now catches that too: besides a term led by two controllers, it flags a term one controller
+leads before and after its own restart (a restarted candidate always campaigns above its durable
+promise, so only a lost file brings a term back). The 200,000 seeds pass with the stricter I2/I4
+(288 s, the same 777 excused). Seed 57197 now also asserts that B never re-commissions after its
+file loss and raises the alarm. The residual the rule leaves (design §3.1: a stray copy adopted
+with its ack lost, then lost with the controller's file) is pinned in T1 as
+`TestKnownGapPendingStray`, which flips when it is closed; since B2 the peer that takes such a
+re-adoption raises `EventReadoptOverSwitch` (`TestReadoptOverSwitchRaisesAnEvent`).
+With B2 the 200,000 seeds pass again (267 s): 0 failing, 990 excused (the both-lost runs now
+wait for the operator, so they join the case; I2 and I4 asserted in all of them).
+
+Also named: `TestRegression976WitnessUnreachable` (both files lost with the witness cut off:
+without #976's own rule the pair elects itself below a term already led; red under
+`uncommissioned_grants`; since B2 it waits for the operator's command), `TestLateAdoptToAnEarlierBootInTheSim` (a
+replayed `Adopt` to A's earlier boot after B died; red under `peer_from_any_adopt`) and
+`TestSettleOracle`. Steady state from the last adoption applies to every run where a second copy
+answers through a mirror: the switch fault, and the generator's older stray-copy fault.
+
+**The first 200,000-seed nightly (#998)** failed 20 seeds on main (78d234e8), all liveness or
+steady state, none safety. They are named cases in `quorum/sim/nightly_test.go`, in four classes:
+1. **A liveness bug, 8 seeds.** A voter the majority needs fsyncs in 1.6–1.9 s, so a won lease
+   had less left than a look and lapsed before its first renewal. Fixed by renewing at once on
+   winning (design §3.1; switch `renew_on_look`).
+2. **Beyond the documented link rule, 7 seeds.** The witness is wiped and the A–B link has a
+   0.86–0.96 s one-way delay, so takeovers may flap (F21). Every other oracle holds. The
+   generator now caps a delay fault at base + jitter + fault ≤ lease/4.
+3. **A lost controller file, 3 seeds.** The controller lost its accepted incarnation, so the
+   witness can't back it (#976).
+4. **A witness file torn by a crash mid-write, 2 seeds.** That is a rebuilt witness, not yet
+   counted.
+
+For classes 3 and 4, steady state was judged on A and B alone when the record showed a node
+restarting from an unreadable file. H2 flipped it back: the witness must back the leader in
+every lost-file case but the two-of-three case (§3.2). Seed 57197 of class 1 is now that case
+(B's file and the witness both lost) and has its own test.
+
+**Where each is caught.**
+- **Targeted sim cases (`quorum/sim/targeted_test.go`)** catch three rules the matrix and the
+  seeds miss:
+  - a voter answering before its fsync: a crash inside a slow fsync lets one term be led twice
+    (I4, I2);
+  - a grant matched by term, not request id: late grants stretch a lease past the witness's
+    promise (the lease oracle);
+  - the lapse back-off, removed or cut to one lease: a one-way leader must send nothing for two
+    leases after its lapse.
+- **Four liveness rules are caught only in T1** (`quorum/standby_test.go`): renewals seen when
+  refused (#973), `Candidate.Observe`, a retry that moves the look (#979), and, since H2, the
+  yield: both livelock seeds now re-adopt the witness and elect with three voters. With the re-term,
+  the yield and timers armed at `NextLook`, the simulator elects without them in every schedule
+  tried (200 two-voter cold starts included). They stay as defence in depth, and the lockstep
+  T1 harness, with instant delivery and 10 ms steps, pins each.
+- **The two-lease lapse back-off still pays (design §3.1).** With perfect clocks, #979 makes F9
+  take 3.5–3.7 s with one lease or two. With clocks skewed within ρ it does not: over 160 F9
+  schedules per delay, the worst takeover at 1–100 ms is 6.4–6.9 s with one lease and 3.9–4.3 s
+  with two. `TestTargetedOneWayLeaderSkewed` (A 0.5% slow, B 0.25% fast) was red with one lease
+  at 6.43 s. Since the restart hold moved its first election (#1021 review), it no longer
+  reaches that phase, and `TestTargetedOneWayLeaderBacksOff` and T1 pin the back-off. Its cost
+  stays the double fault. The sweep's numbers are from before the hold.
+- **Long links flap (F21, measured, not failed).** The same F9 sweep at a 2 s lease, with the
+  worst one-way delay counted as delay plus jitter:
+
+  | worst one-way delay | flapping runs (of 160) | worst takeover |
+  |---|---|---|
+  | 450 ms (lease/delay 4.4) | 0 | 4.8 s |
+  | 525 ms (3.8) | 0 | 4.9 s |
+  | 600 ms (3.3) | 1 | 6.5 s |
+  | 750 ms (2.7) | 9 | 7.1 s |
+  | 825 ms (2.4) | 18 | 7.4 s |
+
+  At 900 ms (about lease/2.2), 54 runs flap, taking over up to three times. **The rule: lease ≥ 4
+  × the worst one-way vote-link delay.** The guide states it, and `naut check` warns when a
+  configured lease is below it for a declared link latency (the guide and config PR, on the
+  #710 plan). The seeds keep delays within lease/4.
+- **Loss on the sole vote path flaps (F20, measured above 3%).** Seed 260567 (an extra sample
+  on #999) wipes the witness, so A–B carries every majority, and drops 27% of A–B both ways: a
+  renewal round fails about half the time, a lease spans only three or four rounds, and
+  takeovers flap. No lease protocol keeps I7 there. `TestMeasureSolePathLoss` measures it: the
+  witness cut off from both controllers, p% loss on A–B both ways for 10 leases (the generator's
+  longest fault), on 20,000 seeded networks, disks and clocks per rate, at a 2 s lease:
+
+  | loss each way | windows with a takeover | with a second takeover (an I7 breach) |
+  |---|---|---|
+  | 1% | 5 | 0 |
+  | 2% | 38 | 0 |
+  | 3% | 114 | 0 |
+  | 4% | 252 | 1 |
+  | 5% | 484 | 4 |
+  | 10% | 2,969 | 156 |
+  | 27% | 14,074 | 5,357 |
+
+  **The rule: on a sole vote path, I7 is claimed up to 3% loss each way**: in the simulator,
+  no second takeover in 20,000 ten-lease windows at 1–3% (first at 4%); one takeover is the
+  loss fault's own. That is a measurement with a thin margin, not a proof, and T3/T4 are to
+  confirm it. If a 3% nightly seed ever breaches I7, the cap drops to 2%. Above the bound,
+  takeovers are measured, not guaranteed. The guide states it. The
+  generator caps loss at 3% on a link whose third voter the schedule also faults (down, paused,
+  its disk, or a link to it), and still draws 1–30% elsewhere. Seed 260567 stays a named case
+  (`TestNightlyBeyondRuleLoss`): I7 is excluded, and every other oracle, safety included, is
+  asserted.
+
+**What the sim catches on its own** (with the cases that go red):
+- no ρ: 32 seeds and the skew test;
+- the lease timed from the reply: 2 seeds and the skew test;
+- a restarted voter granting at once: 23 seeds and named cases;
+- grants from any incarnation: 16 seeds and named cases;
+- a promise of half a lease: 256 matrix cases and 137 seeds;
+- no re-term: 704 matrix cases and 144 seeds;
+- no yield: the livelock regressions and one seed.
+
+A formal model (TLA+ or PlusCal of the vote protocol, checked by TLC) is **optional**. It gets
+decided after PR 2, from what the simulation finds.
+
+### 3.4 Between the check and the send
+
+A `quorumtest` build tag puts a controllable pause hook on every output path in design §3.4,
+at three points:
+
+1. after the gate check and before the deadline is computed;
+2. after the deadline is set and before the send;
+3. right before the send system call.
+
+Each case sweeps pauses of 0.1, 0.5, 1 and 2 × lease, in T2 and T3. The hooks live in
+`internal/fence` (`fence.Pause`); T2 runs them on every PR on Modbus over a real socket
+(`TestModbusPauseBetweenCheckAndSend`, from 3b-3a; the other paths with 3b-3b), and a pause
+there is judged against the send's budget, which is what the lease multiples come to:
+
+- **At points 1 and 2,** nothing may leave late (I3).
+- **At point 3, with pauses shorter than `m_fence`,** nothing may leave late either: the fence
+  margin covers them (design §3.4). This is the case that proves the margin.
+- **At point 3, with pauses longer than `m_fence`,** the stated residual: at most **one frame
+  per sending goroutine** can reach the device late, by no more than the pause minus the
+  margin. The case is an expected one: it measures both the count and the lateness. A late
+  frame breaks I1, I2 and I3 alike, so it is excluded from those three by name, and only for the
+  measured count and lateness.
+
+### 3.5 The same proofs on real processes (T3, T4)
+
+I1–I3 are asserted from gate logs and from the recorder during every T3 and T4 case. For T3
+that means the full fault catalogue (§5) nightly. For T4 it means each bench session.
+
+## 4. Takeover time: definition and measurement
+
+### 4.1 Events
+
+Every event is timestamped on one clock: the host's `CLOCK_MONOTONIC` in T3, the recorder's
+clock in T4.
+
+| Event | Meaning |
+|---|---|
+| `t0` | the fault was injected (by the harness) |
+| `t_fence` | the old leader's gate closed (its log; not observable at power loss) |
+| `t_elect` | the new leader's lease was granted |
+| `t_inputs` | the new leader's inputs are live (#786) |
+| `t_out` | **the first write from the new leader reaches the recorder** |
+| `t_gap_start` | the last write from the old leader reaches the recorder |
+| `t_hmi`, `t_ua` | the first fresh value at the HMI client and at the OPC UA client after the takeover |
+| `t_pn_dcp`, `t_pn_ar`, `t_pn_valid` | PROFINET: the new leader's first DCP answer, its AR established, and the first cycle with valid data both ways (taken from the tap) |
+
+### 4.2 What gets published
+
+- **Takeover time** `= t_out − t0`.
+- **Output gap** `= t_out − t_gap_start`. This is what a device's watchdog sees, so it is what
+  sets a safe watchdog time.
+- **Client recovery**: `t_hmi − t0` and `t_ua − t0`.
+- **PROFINET re-establishment**: `t_pn_valid − t0`, reported as a separate figure with its
+  breakdown: lease, the PLC's retry phase, DCP, connect, first valid cycle. It is part of the
+  takeover time for any project with a PROFINET device, and the guide publishes it on its own
+  line with the PLC's AR watchdog and update-time settings.
+- The breakdown for each case, with every term of the design's formula (§4.5): `L_rem`, the ρ
+  margin, the campaign delay `C`, the vote round with fsync, any restarted-voter wait `W_r`,
+  the inputs wait `I` (and whether it hit the cap), the first scan `S` and the output set `O`.
+  An I/O-health handover also reports its hold-off.
+
+### 4.3 Method
+
+- **The fault time is random**, uniform over the renewal cycle and the scan period, so that
+  the injection does not alias with the renew ticker.
+- **Sample sizes.** T3: N ≥ 200 per cell. T4: N ≥ 30 per cell for power pulls and N ≥ 100 for
+  process kills and cable pulls.
+- **Cells.**
+  - fault type: power loss or SIGKILL, hang, partition from both, I/O loss;
+  - lease: 1 s, 2 s, 4 s;
+  - standby I/O: polling, or no session;
+  - takeover: hot or cold;
+  - stream link: plant network or dedicated cable (T4).
+- **Statistics:** p50, p90, p99 and max, plus the formula's bound for the cell. With N = 200,
+  p99 is the second-largest sample; the report says so rather than overstate it.
+- **Budget.** A T3 cell whose p99 exceeds the formula bound by more than one scan plus 10% fails
+  the weekly run.
+- **Where the numbers go.** The published table in the redundancy guide uses T4 numbers only.
+  T3 numbers are labelled containers.
+
+## 5. Failure-injection catalogue
+
+Each row is run in T2 where it can be simulated, in T3 where a container can inject it, and in
+T4 where only hardware can.
+
+| # | Fault | Injection | Expected | T2 | T3 | T4 |
+|---|---|---|---|---|---|---|
+| F1 | **Power loss, leader** | T3: `incus stop --force` (no orderly stop). T4: cut its supply. | The standby takes over after the lease, hot if in sync. Outputs are resent. | ✓ | ✓ | ✓ |
+| F2 | Power loss, standby | as F1 | Nothing changes for the plant. "Standby lost" alarm. | ✓ | ✓ | ✓ |
+| F3 | Process kill (SIGKILL), leader or standby | `kill -9` | as F1 / F2 | ✓ | ✓ | ✓ |
+| F4 | Orderly stop (SIGTERM, `systemctl stop`) | signal | The leader releases its lease, and the standby takes over before a lease would expire. | ✓ | ✓ | ✓ |
+| F5 | **Process pause** (SIGSTOP) for 0.25, 0.5, 1, 1.5 and 3 × lease | `kill -STOP/-CONT` | Below the fence: it resumes the same term, with no takeover. Above it: it fences, and on CONT it writes nothing (apart from the residual of design §3.4, which F35 measures) and comes back as standby. Sockets are closed with RST. | ✓ | ✓ | ✓ |
+| F6 | Hung scan (logic that never returns; a blocking driver call) | the existing nested-loop trigger | #621: the gate closes at lease/2, then takeover. A hung standby does not campaign. | ✓ | ✓ | |
+| F6b | **Leader starved between scans** (#858): its scan loop gets no CPU after a scan ends, while the elector's goroutine still runs | T2: the loop's ticks stop. T3: a `quorumtest` hook that blocks the loop between `end()` and the next `begin()`, plus a real case: the task pinned with `cpu:` and a SCHED_FIFO hog on the same core | `Liveness` flags it within `B = StallBound(period, lease/2)`. The elector stops renewing, and the gate closes within `B + lease/4 + lease/2` of the **first missed slot** (a slow task isn't late before its slot comes due). B takes over after the lease, with no overlap (I1). Rerun with the standby starved, which doesn't campaign, and with a healthy standby ticking but not scanning, which still acquires. | ✓ | ✓ | ✓ (FIFO hog: only with the #836 safeguards in place and the maintainer's explicit OK, never pinned to a vendor runtime's core; no RT load runs on a bench controller otherwise) |
+| F7 | Starved elector (CPU throttled to 1–5%) | cgroup `cpu.max` | The gate is judged when read, so it closes on time. I1 holds. | ✓ | ✓ | |
+| F8 | **Partition A–B**, both directions | nftables | W renews the leader. The stream stops, and the standby is marked out of sync. | ✓ | ✓ | ✓ (cable pull) |
+| F9 | One-way cuts: A→B, B→A, **leader→voters only** (it can send but not receive) and voters→leader only | nftables, one direction | A–B one way: as F8, no flapping. A leader that can send but not receive fences at the end of its lease, backs off for two leases (design §3.1), and B is elected before it is back: within 4.6 s of the cut at a 2 s lease, with clocks skewed within ρ (6.4–6.9 s at worst with a one-lease back-off; `TestTargetedOneWayLeaderSkewed`). The accepted cost, measured too: with the standby down, a full-lease witness blip leaves the pair leaderless 4.0 s (2.0 s with one lease). A leader that can receive but not send fences, and B is elected. | ✓ | ✓ | |
+| F10 | **Leader cut from the witness** | nftables | A+B are a majority, so nothing changes. "Witness unreachable" alarm. | ✓ | ✓ | ✓ |
+| F11 | Standby cut from the witness | nftables | No change. Alarm. | ✓ | ✓ | ✓ |
+| F12 | **Leader isolated from B and W** | nftables | The leader fences at the end of its lease. B+W elect B, which takes over hot or cold. When it is healed, A returns as standby, writes nothing, and resyncs. | ✓ | ✓ | ✓ |
+| F13 | Witness down | stop it | No change. Alarm: "one more failure stops control". | ✓ | ✓ | ✓ |
+| F14 | Witness restart, state file kept | restart | No change. | ✓ | ✓ | ✓ |
+| F15 | Witness restart **without** its state file (HA-cluster reschedule) | wipe the file and restart; T3 also runs it as a pod on a kind cluster | It comes back as a new incarnation and grants nothing for one lease, and no double grant happens. It counts only after A and B adopt it together over the A–B link, and only once the quiet period (one lease after adoption) has passed; the adoption raises both voters to the higher of their promised terms (design §3.1). It re-copies the whole `oplog` from the leader, and no committed ack is lost while both controllers are up (§8.1). Rerun with one controller down: the rebuilt witness is not adopted, and the survivor behaves as F16 or F17. | ✓ | ✓ | |
+| F15b | **Two witness copies at once**: the old pod on a partitioned node and its rescheduled copy, or a force-deleted pod, with the A–B link cut | T2: two incarnations. T3: kind, a StatefulSet with the node's network cut, then a force-delete. | I1 holds. Neither controller accepts the new incarnation without the other's concurrence (design §3.1). Kubernetes starts no second StatefulSet pod until the node is confirmed gone. **The switch case:** A leads on the old copy, B's promise to A has lapsed, and the pair adopts a second copy that has been up for hours. I1 holds because of the quiet period; the same case with the quiet period removed must break I1 (the handshake PR's mutation). | ✓ | ✓ | |
+| F16 | Witness + standby down | stop both | With one voter of three left, the leader has no majority, so it fences at the end of its lease. The no-quorum alarm is raised, and the device watchdogs act. | ✓ | ✓ | ✓ |
+| F17 | Witness + leader down | stop both | The standby has no majority: it stays standby, raises no-quorum, and offers the override. | ✓ | ✓ | ✓ |
+| F18 | Both controllers down, witness up; restart in each order, at each delay | stop and start | The first controller back forms a majority with the witness and leads. It takes over hot only on a current image. If it was the out-of-sync standby, or the mark is unknown, it takes over cold with the alarm (decision 4). The second joins as standby and resyncs. | ✓ | ✓ | ✓ |
+| F19 | **Cold start of all three**, in all six orders, with start offsets from 0 to 2 × lease | start | Exactly one leader. No write before the election (I1, I3). | ✓ | ✓ | ✓ |
+| F20 | **Flapping links**: each link toggled with periods of lease/4, lease/2, lease and 2 × lease, at 50% duty, for 5 min | nftables loop; netem loss 1–30% | I1 holds. Takeovers stay within the I7 bound, and the hold-off stops ping-pong. **Loss on the sole vote path** (the third voter out, so one link carries every majority): I7 is claimed up to **3% loss each way**: in the simulator, no second takeover in 20,000 ten-lease windows at 1–3% (first at 4%); T3/T4 to confirm. Above it, takeovers are measured, not guaranteed; every other oracle still holds (§3.3, the loss rule). Where the third voter is counted, loss up to 30% is covered. | ✓ | ✓ | ✓ (scripted switch port, if the switch allows) |
+| F21 | Latency and jitter: 1 ms to lease/2 delay, with ±50% jitter and reordering | tc netem | I1 holds. Delay near lease/2 may cost renewals: that is measured and the guide gets a minimum lease per link latency. | ✓ | ✓ | |
+| F22 | **Clock-rate skew**: ±0.1%, ±0.5%, ±1% (= ρ) between any two voters | T2: per-node clock rate. T3: a `quorumtest` build tag that scales the elector's monotonic clock (containers share one kernel clock). | I1 holds up to ρ. At 2× ρ, T2 shows where the margin breaks, and the guide states the limit. | ✓ | ✓ | |
+| F22b | **Stopped leader clock**: a VM paused or live-migrated, a host suspend | T2: the leader's clock frozen while others run. T3: `incus pause` of a VM leader for 0.5–3 × lease, and a guest suspend. | **Host suspend:** safe, because leases run on `CLOCK_BOOTTIME`. **VM pause:** an expected I1 breach, measured. The guide lists pausable or migratable VMs as unsupported for controllers (design §3.1). The resumed leader writes, so the case is excluded from I1, I2, I2-PN and I3 by name. | ✓ | ✓ | |
+| F23 | Wall-clock steps: ±1 h jumps, NTP slewing | T3: the pair in two incus VMs, `date -s` in one. T4: `date -s` on one box. | No effect: only monotonic durations are used. The VMs share no monotonic clock, so the recorder (I2) arbitrates I1 here. | ✓ | ✓ | ✓ |
+| F24 | **Slow disk**: fsync at 10 ms, 100 ms, lease/2 and over lease, on the voter state, retain and the journal | T2: simulated disk. T3: a dm-delay device in the rig VM. | A voter whose fsync has not finished has not answered, so the grant is late but never early. A slow retain save does not stall the scan. **Liveness bound:** a lease won renews at once with no write (design §3.1), so the pair keeps a leader while fsync stays under about `lease(1−ρ) − 2·RTT` (1.9 s at a 2 s lease). Slower, a voter the majority needs can't grant in time, and no lease is won while it is needed (measured, not failed). | ✓ | ✓ | |
+| F25 | Disk full, EIO | T3: a size-limited tmpfs; T2: injected | A voter that cannot persist does not grant. Alarm. The leader's fate follows from the votes. | ✓ | ✓ | |
+| F26 | Torn state files: the voter file, retain and the journal truncated at every byte offset | T2, and T1 for the decoders | The torn tail is dropped, and a voter that cannot read its state waits one lease. | ✓ | | |
+| F27 | **I/O lost on the leader only** (#626) | nftables leader↔recorder | On a polled device, the leader hands over after the hold-off, because the standby is strictly better (design §3.2), and the standby's inputs are already live. On a no-session device (EtherNet/IP, IO-Link, OptoMMP with a watchdog), nothing hands over: a driver fault is raised, and the recorder's watchdog trips. | ✓ | ✓ | ✓ |
+| F28 | I/O lost on both, and I/O flapping | as F27 | No handover ping-pong. Alarm. | ✓ | ✓ | |
+| F29 | Stream link only cut (dedicated cable) | nftables / cable pull | Votes continue over the plant network, and the standby is marked out of sync. | ✓ | ✓ | ✓ |
+| F30 | Misconfiguration: peer lists differ, two processes claim `a`, wrong token, one witness with two pairs of one name | start | Refused at start with a message that names the conflict. | ✓ | ✓ | |
+| F31 | Hostile or broken messages: a replayed old grant, an old-term stream frame, a corrupted frame, a wrong build hash | T2/T1 injection | Refused. A frame that fails its checksum triggers a full resync. | ✓ | | |
+| F32 | **PROFINET device handover** (#790): F1, F3, F4, F6 and F12 on a project with `profinet-device` and the floating IP | as those rows, plus the segment tap | One station at a time (I2-PN). The address moves before the new leader's first DCP answer. `t_pn_*` is measured. | ✓ | ✓ | ✓ (bench PLC, two hosts on the bench LAN) |
+| F33 | **PROFINET with the old leader frozen**: SIGSTOP for longer than the lease, then SIGCONT | `kill -STOP/-CONT` | While frozen, the old box still holds the address, so the address-conflict effect on `T_pn` is measured. **After SIGCONT, the old leader sends no RT, DCP or LLDP frame at all**: its sender must read the gate before sending, not only on its next 200 ms look. | ✓ | ✓ | ✓ |
+| F34 | PROFINET under redundancy **without** a floating IP | `naut check` / load | Refused, with a message that names the floating IP. | | ✓ | |
+| F34b | PLCnext under `redundancy:` | T1 unit test: load / `naut check` | Refused for now, with a message saying why (design §3.4); `TestPlcnextRefusedUnderRedundancy` (#832) covers it until the driver is gated. A T1 test, so no tier is ticked. | | | |
+| F35 | **A pause between the check and the send** on every output path | the §3.4 hook | As §3.4: no late send at points 1 and 2, and the residual measured at point 3. | ✓ | ✓ | |
+| F36 | A single-client device still held by a frozen old leader | SIGSTOP the leader while it holds the only session | The new leader's inputs wait lasts until the device's session timeout, or the #786 cap. If the wait gives up, the takeover stays hot, with Bad-quality inputs and the alarm (design §4.2). | ✓ | ✓ | |
+
+## 6. The state stream (I5, I10)
+
+### 6.1 Fidelity
+
+On a hot takeover, the new leader picks up exactly where the image left off. The ground truth
+comes from the recorder and the plant model. Every check below runs under two faults:
+
+- **Crash.** The **old** leader is killed at a random point, so the image age is about one
+  stream interval.
+- **Isolation (F12).** The old leader keeps scanning and writing, unseen, until its lease ends,
+  so the image age is about `lease + campaign delay`. The test checks three things:
+  - the standby measures the image age and reports it;
+  - the takeover is hot when the age is within `hot-max-age` and cold when the bound is set
+    lower;
+  - the effects of the window are bounded. Actions the old leader took inside it can repeat,
+    and input pulses that came and went inside it are missed. The test asserts the counts of
+    both against the plant's ground truth.
+
+**What carries over:**
+
+- **SFC:** the active step from the image, and the step's elapsed time within the image age.
+- **TON / TOF / TP:** elapsed time within the image age. No timer restarts from zero.
+- **CTU / CTD** against a device-side count of real edges: the controller's count never ends
+  ahead of the device's. It lags by no more than the pulses inside the re-run window
+  (design §4.2).
+- **Retained setpoints:** one written N ms before the fault is present on the new leader for
+  every N above the image age. Below that, it is lost silently, as the design states, and the
+  test counts it.
+- **Alarm acks and shelves**, under the same rule.
+- **`VAR RETAIN`:** carried.
+- **PID integrator continuity:** measured, not claimed.
+- **Forces are dropped.** Every output is sent once (#600/#606), as seen by the recorder.
+- **Order:** inputs wait, then the first scan, then the full output set. The recorder sees no
+  output before the first scan.
+- **#786 gives up** (F36): the takeover stays hot, inputs carry Bad quality, and the alarm is
+  raised.
+
+### 6.2 Staleness
+
+- **Stream lag**, from the leader's scan end to the standby's apply: a histogram, p50/p99/max,
+  for small, medium and large frames (the example projects, plus a synthetic project with 10k
+  tags and 500 FB instances).
+- **Bandwidth** for each frame-size class and stream rate, sharing a loaded plant link. An
+  iperf flood competes with it, to show that votes on their own connection still renew on time.
+- **The image-age bound.** An image just inside the bound gives a hot takeover. One just
+  outside gives cold plus the alarm, and the alarm names the staleness.
+- **Stream cut, then leader death:** cold takeover plus the alarm (decision 4).
+
+### 6.3 Resync
+
+Each of these leads to a full frame and then a return to deltas:
+
+- the standby restarts;
+- the base of a delta has been lost;
+- a frame fails its checksum;
+- the leader changes (new term).
+
+## 7. Rolling update and cold handover
+
+Each case is run with `tools/deploy` (#741). The build hash changes on a new binary or a
+changed manifest.
+
+1. **Update the standby.** It returns with a mismatched hash. Expect the "standby on a
+   different build" alarm, and no stream applied. The leader keeps running.
+2. **Hand over** (SIGTERM on the old leader). Expect a cold takeover on the new build, with
+   outputs resent, and the measured time recorded as the update's cost.
+3. **Update the other controller.** Both are back in sync and the stream resumes.
+4. **Roll back** at each step. Expect no double writer at any point, and the same cold
+   handover rule.
+5. **Update the witness while the pair runs.** Nothing changes, as F14.
+6. **A config-only change** (manifest edit, same binary). The hash differs, so the handover is
+   cold. That is documented, and the test proves it.
+
+## 8. The engineer override and its audit trail (I8)
+
+**Authentication**
+
+1. No token: refused. Wrong token: refused. Both refusals are logged and counted.
+2. Not offered while a quorum exists. If the node has quorum, the request is refused.
+
+**Lifecycle**
+
+3. **Valid override on a lone survivor:**
+   - the journal record is fsynced before the gate opens, checked from the order of the
+     recorder's writes against the journal's fsync time;
+   - the record contains the attestation text, the context and the expiry;
+   - the takeover is hot or cold by the usual rule.
+4. **Expiry:** the gate closes at `expires`. The `.expire` record is written. Renewal extends
+   it, with a `.renew` record.
+5. **A peer is heard** (the other controller, or the adopted witness, comes back; a rebuilt
+   witness not yet adopted doesn't count, design §7): the override ends at once with an `.end` record, a normal election follows, and there is one writer afterwards.
+6. A restart ends the override. It is not resumed.
+
+**Crash ordering**
+
+7. A crash between the fsync and the gate opening leaves a record and no writes. The record
+   says "never effective": `.start` with no `.end` and no gate-open in the log.
+8. A crash before the fsync leaves no record and no writes.
+
+**Every redundancy event is recorded** (design §7.1)
+
+8a. Each takeover (hot or cold, with the image age), handover (orderly or I/O health), quorum
+    lost and regained, adoption of a witness incarnation and stale cold takeover writes exactly
+    one record in #709's shape. That shape is `ts`, `user`, `source`, `action`, `target`,
+    `before`, `after`, `result` and `detail`.
+8b. With quorum, records go through `oplog`. Without it, they go to the local journal and are
+    appended to `oplog` when quorum returns, never duplicated (by `id`).
+
+**Replication and format**
+
+9. **The journal is copied** to the peers on quorum return. Records are never duplicated and
+   never reordered. A torn final line is dropped.
+10. **The record shape** is validated against a fixture of the #709-shaped record, so the
+    later move into #709 is a check, not a guess.
+
+**The dangerous case**
+
+11. **The override is used while the other side is actually alive and partitioned.** This is
+    the only path to two writers.
+    - The test **expects** I1 to break for the time until the partition heals.
+    - It measures that window and asserts that the override ends the moment the peer is heard.
+    - The guide states the window. Two writers break I1, I2, I2-PN (on a PROFINET station)
+      and I3, and the override's own term can equal the one the other side elected, which
+      breaks I4 (design §7). The case is excluded from those five oracles by name, and from no
+      other.
+
+### 8.1 Operator intent through `oplog`, with the witness as third peer
+
+1. **Ack while B is down.** A and the witness commit the ack, then A dies. When B is back,
+   B and the witness elect B, which catches up from the witness. The ack is present and
+   is not doubled.
+2. **Ack while the witness is down.** A and B commit it. The witness, on its return, catches up.
+3. **Witness rebuilt from scratch** (wiped disk, or a pod rescheduled without a volume):
+   - it re-copies the whole log from the leader;
+   - with both controllers up, nothing committed is lost;
+   - its election state follows F15, adoption by both controllers included.
+4. **Two faults stop the pair, then the override.** B is down while A and the witness commit,
+   then the witness loses its disk.
+   - The rebuilt witness can't be adopted without B (design §3.1): A has no majority and
+     fences, with the no-quorum alarm. Nothing is lost.
+   - A then dies before anyone has copied the entry. B and the rebuilt witness can't adopt
+     its incarnation without A: B stays fenced with no quorum, and nothing is lost yet.
+   - A returns: the ack is still there, and B copies it.
+   - Rerun with the override on B instead of waiting for A. The ack **may be lost**, per PR 5's
+     rule for whose `oplog` survives the heal (design §7). The test asserts that rule's
+     outcome, that this is the only path that can lose an ack, and that the override's record
+     and the guide both state it.
+5. **Lone survivor.** An ack or shelve is refused with a "no quorum" error, and the HMI shows
+   it read-only.
+6. **The witness only follows the leader its votes name.** Replication from any other source
+   is refused, a stale term included.
+
+**Substitute values (#707)** go through `oplog` as operator intent: `substitute`, `unsubstitute`
+and `suback` entries, the last two naming the substitute's entry by `seq`. Cases 7–10 are the
+requirements agreed on #707. They join the run in #707's oplog PR, which builds the kinds.
+
+7. **A new leader's first scan sees every committed substitute.**
+   - Setup: partition A from B (F8); substitute a bad input on A, committed by A and the
+     witness; kill A.
+   - B's takeover catches up `oplog` and applies the substitute **before its first scan**,
+     in the same step as the retain load. The `oplog` copy wins over B's retained one.
+   - The first scan's input value is the substitute: checked on the scan, not after it.
+   - If catch-up fails within its bounded wait, B keeps its retained substitutes and raises
+     the alarm flag. A substitute is never dropped silently.
+   - Mutation: catch-up deferred to the first `oplog` write (today's lazy `leaderCatchUp`).
+     Case 7 must go red.
+8. **Only the leader expires a substitute, and the expiry is an entry.**
+   - At the end of the granted duration the leader appends `unsubstitute` (`by: system`,
+     `reason: expired`). The standby never expires one on its own.
+   - A takeover evaluates expiry once, as in case 9.
+   - A substitute that expired on the old leader just before a takeover is not revived.
+9. **How a leader times a substitute, and a wall-clock step** (F23-style).
+   - **The leader that applies it** times the granted duration on `CLOCK_BOOTTIME`, from
+     when it applied it.
+   - **A new leader** computes the remainder **once, at takeover**, from the entry's
+     wall-clock `until` on its own clock: `until − now`. Skew between the pair up to the
+     skew bound, **30 s** (`runtime.SubstituteSkew`), is accepted. Then it times that
+     remainder on `CLOCK_BOOTTIME`. A takeover never restarts the full duration.
+   - **A remainder outside its bounds** means the new leader's wall clock was stepped: below
+     zero, the substitute has expired. Above the granted duration it is capped there; above
+     the granted duration plus the 30 s skew bound, the cap also raises the alarm
+     (`__Substitute_Fault`, PR 3; until then a `fault` event, reason `clock-capped`).
+     A leader that was already timing the entry (it led before, as in A→B→A) keeps the
+     earlier of its own deadline and the one from `until`: a wall clock stepped back while
+     it stood by never stretches the substitute.
+   - **A single controller across a restart** works the same way: the remainder comes from
+     `until`, so downtime counts toward the duration.
+     - A clock that went backwards across the restart expires the entry, audited as
+       `expired-while-down`. "Backwards" means the clock now reads earlier than the entry's
+       start, or earlier than the last-seen wall time the retain store keeps.
+     - Last-seen is written only while a substitute is active, rounded down to 30 s
+       (`SubstituteSkew`).
+     - **The bound for a step during the downtime is the downtime plus 30 s**, and that is
+       inherent. A clock stepped back while the controller is down, by less than the
+       downtime, still reads later than last-seen, so the restart can't see the step. The
+       entry then runs up to that much longer.
+     - A step **while the entry runs** does not stretch it. Each save re-anchors the entry's
+       end on the wall clock from its monotonic remainder, and the restart takes the earlier
+       of that and `until`.
+   - Steps: step the leader's clock ±1 h mid-substitute; it still ends at its granted time.
+     Then step the standby's clock before a takeover. Set 1 h ahead, the remainder
+     shrinks by 1 h: it ends early, at worst at once, with the usual expiry audit and
+     `__Substitute_Expired` pulse. Set 1 h behind, the remainder grows past the granted
+     duration: it is capped there, and `__Substitute_Fault` is raised. At the bound: 29 s
+     behind is accepted as skew (no cap, no fault), and 31 s behind is capped and faults.
+   - **Repeated takeovers inside one substitute:** take over A→B→A→B at intervals shorter than
+     the granted duration. The substitute still ends at its granted time, ± the skew.
+   - Mutations: expiry taken from the wall-clock `until` on a steady leader (a step then
+     moves it), and a takeover restarting the full duration. Both turn case 9 red.
+10. **Expiry doesn't wait for quorum.**
+    - With no quorum, starting or stopping a substitute is refused like any operator write
+      (case 5).
+    - On the override path a substitute still ends on time: the expiry is journalled locally
+      and reconciled at the heal (design §7, PR 5's open question).
+    - A late or merged `unsubstitute` naming an older entry's `seq` does not end a newer
+      substitute of the same tag.
+    - Mutation: expiry gated on an `oplog` commit. Case 10 must go red.
+
+11. **Every case runs** in T2 (the simulated disk and network). Cases 1–5 and 7–10 also run
+    in T3.
+
+**The log's own T2 run (3b-4a).** `TestThreeReplicaSimulation` (oplog) runs seeded schedules
+of writes, leader changes, replicas down, lost answers, cut links, restarts, lost logs and
+rebuilt replicas on an in-process network: 120 seeds per PR, 3,000 nightly. After every step it
+checks agreement (no two replicas commit different entries at one seq) and no loss (every
+write answered as committed is at its seq wherever a committed log reaches it, and a leader
+that synced holds all of them). It catches `unsynced_counted`, `log_loss_silent` and
+`synced_by_unsynced_leader` on its own.
+
+### 8.2 Peer traffic and the Host rule (design §6.1)
+
+Each case runs in T1 against the handlers and in T3 between containers, with every peer
+addressed **by DNS name**: names that are not in any `NAUTILUS_ALLOWED_HOSTS`.
+
+1. **The peer listener requires the peer token.**
+   - A request without it gets 401/403, by name, by IP and on localhost alike, so a trusted
+     Host never stands in for the token.
+   - A request with the **client** token instead is refused.
+   - With the peer token it is answered, by name or by IP.
+2. **Peers by name, nothing allowed.** Votes, the stream, `oplog` replication and journal
+   copies all work between peers addressed by name, with `NAUTILUS_ALLOWED_HOSTS` empty. This
+   is F1 and F12, rerun this way.
+3. **No peer route behind the tag API.** `server.Handler` serves no vote, stream or `oplog`
+   path. A request for one gets 404, token or not.
+4. **The standby's proxy** keeps the client's Host and token header:
+   - by IP: answered by the leader;
+   - by a name in both controllers' `NAUTILUS_ALLOWED_HOSTS`: answered by the leader;
+   - by an untrusted name with the client token: answered;
+   - by an untrusted name without it: refused, 403.
+
+   The leader and the standby give the same answer in every case.
+5. **Client token mismatch.** A and B with different `NAUTILUS_TOKEN` values raise "client
+   token differs between A and B" at the handshake. The handshake's bytes never contain either
+   token, which the test checks with a tap on the peer port.
+6. **Advertised names.** `naut run` warns about an advertised peer name its
+   `NAUTILUS_ALLOWED_HOSTS` doesn't list. A browser HMI following `/api/cluster` to that name
+   gets 403. With the name listed, or with the controllers advertised by IP or the floating
+   address, it follows (§9).
+7. **Starting without a peer token.** A pair member or a witness without `NAUTILUS_PEER_TOKEN`
+   is refused at start. This joins F30.
+
+## 9. Clients follow the active controller (#716)
+
+Each case runs during F1, F3, F4, F12 and F27 in T3. F1 and F12 also run in T4.
+
+**Status (2026-11-22).** The T3 container harness does not exist yet, so these cases are
+covered below T3 and the rest are open:
+
+- Case 1 (browser): the kit's failover, peer learning and loop guard are unit-tested in
+  `hmi/tests/auth.test.ts`; `TestClientsOfARealPairFollowATakeover` runs a real pair and
+  checks that both controllers list both addresses and name the same leader before and
+  after a takeover, and records `t_api`. A headless browser followed a killed leader to the
+  other controller in a pair on loopback (by hand, not a regression test).
+- Case 3 (OPC UA): the ServiceLevel levels and the nodes are tested in `cmd/naut` and
+  `opcua/server`; a Go OPC UA client moving between two live controllers is open.
+- Case 4 (floating IP): the holder's behaviour is tested against a fake kernel and, under
+  `unshare -Urn`, the real netlink and ARP code; a real pair's gate drives it in `cmd/naut`.
+  The `arping -D` two-MAC observer and the kill/hang window measurement are open (they need
+  T3).
+- Cases 2, 5 and 6, `t_hmi` and `t_ua`: open.
+
+**HMI**
+
+1. **HMI in a browser.** The kit, configured with both addresses, follows `/api/cluster` to the
+   new leader. Data freshness recovers within `t_hmi`. The standby's view is read-only, and a
+   write against it is refused. Driven by the rig's browser harness.
+2. **The standby's API proxy** forwards to the leader, and refuses writes during the gap.
+
+**OPC UA**
+
+3. **OPC UA client** (a Go client in T3; a third-party client by hand on T4):
+   - it reads ServerUriArray and ServiceLevel and moves to the new leader;
+   - the leader's ServiceLevel is 200 or more, a standby in sync reports less, and one out of
+     sync reports 1;
+   - a write to the standby is refused (Bad_InvalidState).
+
+**Floating IP**
+
+4. **Floating IP** (design §8):
+   - **Orderly handover (F4, I/O handover).** An observer runs `arping -D` throughout, and the
+     address never answers from two MACs.
+   - **Kill, hang or pause (F3, F5, F6).** Two MACs may answer until systemd or `ExecStopPost`
+     acts. The test measures that window. It asserts that clients reach the new leader once
+     its gratuitous ARP is seen, and that every write reaching the fenced box is refused.
+   - Gratuitous ARP is seen on each change.
+   - A client that knows only one address reconnects within `t_ua` / `t_hmi`.
+
+**PROFINET**
+
+5. **PROFINET IO controller.** The controller follows the station to the new leader:
+   F32–F34, with `t_pn_*` reported beside `t_hmi` and `t_ua`.
+
+**Sparkplug**
+
+6. **Sparkplug edge** (when configured; #798): at most one birth holder on the broker at every
+   instant, with the same assertion as `edge-collector.md` §5.4. NDEATH on step-down, and a
+   new bdSeq on takeover.
+7. **Sparkplug host:** NCMD and DCMD come only from the leader, and are checked before each
+   publish.
+
+## 10. Soak and chaos
+
+**T3: containers**
+
+- **Nightly 2 h and weekly 24 h runs:** seeded random faults from §5, one every 30–300 s,
+  overlapping at most two at a time. All oracles are checked continuously.
+- **Resource drift** is tracked, with a regression failing the run: RSS, goroutines, fds,
+  journal and voter file size, stream bandwidth.
+
+**T4: the bench, with the maintainer's OK**
+
+- **A 72 h run** with scripted cable pulls and process kills.
+- **30 power pulls** spread across it, by a switched PDU or relay if the maintainer provides
+  one, and by hand otherwise.
+- **Pass:** no oracle broken, no unexplained takeover, and no drift.
+
+**The demo** (design §9.5) is the scripted subset of T3, then of T4: F1 mid-step, then F16/F17,
+then the override. It runs as a test, so it can't silently regress.
+
+## 11. Exit criteria by milestone (design §10)
+
+| PR | Must pass before merge |
+|---|---|
+| 2 `quorum` + sim | T1. T2 matrix + 2,000 seeds. The PR-2 mutations caught (§3.3). F9, F15b, F22, F22b, F24–F26 and the vote half of F31 in T2. |
+| 3 witness + wiring (cold) | The above, plus the T3 smoke subset: F1, F3–F5, F6b, F8–F10, F12, F13, F15–F20, F30, F35 and F36, and §8.2. Every output path in design §3.4 meets its rules (I3, §3.4). §8.1. The PR-3 mutations caught. Kubernetes `leader` tests unchanged. |
+| 4 stream + hot takeover | §6 in T2 and T3. I5 and I10 in the nightly run. §7 rolling update in T3. The PR-4 mutations caught, and the stream half of F31. |
+| 5 degraded modes | §8 in full. F16 and F17 with the device-watchdog assertion. F27 and F28 (the I/O-health handover). The PR-5 mutations caught. |
+| 6 clients (#716) | §9 in T3, including F32–F34 for PROFINET. |
+| 7 bench | §4 percentiles in T4, including `T_pn` against the bench PLC. The T4 rows of §5. The 72 h soak. Then the guide's numbers are published. |

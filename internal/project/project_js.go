@@ -9,11 +9,14 @@
 package project
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
 
 	nio "github.com/joyautomation/nautilus/io"
+	"github.com/joyautomation/nautilus/lang/ir"
 	"github.com/joyautomation/nautilus/runtime"
 )
 
@@ -32,10 +35,34 @@ func (s *simulated) InputNames() []string { return s.inputs }
 
 func checkNetworkSections(Manifest) error { return nil }
 
+func checkDriverOutputs([]runtime.TagDef, nio.Driver) error { return nil }
+
+func markReplicas(nio.Driver, bool) {}
+
+// offlineChannel stands in for a channel in the browser: a tab reaches no
+// peer, so every request fails as unreachable (STATUS -2), the way a
+// channel whose peer is down does.
+type offlineChannel struct{}
+
+func (offlineChannel) Read(context.Context, string, ir.Value, string) (ir.Value, error) {
+	return ir.Value{}, errOffline
+}
+func (offlineChannel) Write(context.Context, string, ir.Value, string) error { return errOffline }
+func (offlineChannel) Close() error                                          { return nil }
+
+var errOffline = errors.New("channels do not reach a peer in the browser")
+
+func buildChannel(ChannelConfig) (runtime.ChannelIO, error) { return offlineChannel{}, nil }
+
 func buildDriver(_ fs.FS, d DriverConfig) (nio.Driver, error) {
+	if err := statusTagsOnlyOnRuntime(d); err != nil {
+		return nil, err
+	}
 	switch strings.ToLower(d.Type) {
 	case "", "memory":
 		return nio.NewMemory(), nil
+	case "runtime": // the runtime's own health: real in the browser too
+		return newRuntimeStatus(d)
 	}
 	return &simulated{Memory: nio.NewMemory(), typ: strings.ToLower(d.Type)}, nil
 }
@@ -98,6 +125,9 @@ func platformNotices(m Manifest) []string {
 		}
 		out = append(out, fmt.Sprintf("driver %s (%s) is simulated: its inputs hold their init: values and its devices read as online. Install naut to run it against real equipment.", name, t))
 	}
+	for _, c := range m.Channels {
+		out = append(out, fmt.Sprintf("channel %s (%s) reaches no peer in the browser: its READ and WRITE blocks report ERROR with STATUS -2. Install naut to run them against real equipment.", c.Name, strings.ToLower(c.Type)))
+	}
 	if m.OPCUA != nil {
 		out = append(out, "opcua: the OPC UA server is off in the browser (nothing can connect to a tab). Install naut to serve this project's tags over OPC UA.")
 	}
@@ -106,3 +136,9 @@ func platformNotices(m Manifest) []string {
 	}
 	return out
 }
+
+func checkTakeoverHold(*TakeoverHoldConfig, []TagConfig, []nio.NamedDriver) error { return nil }
+
+// The playground runs no pair: redundancy.takeover-hold is checked by the
+// controller's build only (takeoverhold.go).
+func checkTakeoverHoldConfig(*TakeoverHoldConfig) error { return nil }

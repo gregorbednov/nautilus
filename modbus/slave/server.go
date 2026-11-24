@@ -31,6 +31,10 @@ type Server struct {
 	ln      net.Listener
 	conns   map[net.Conn]struct{}
 	closed  bool
+	// maxConns is how many connections are served at once (0: no limit);
+	// refused counts the ones closed for want of a slot.
+	maxConns int
+	refused  int
 
 	wg sync.WaitGroup
 }
@@ -73,6 +77,23 @@ func (s *Server) SetLatency(d time.Duration) {
 	s.mu.Lock()
 	s.latency = d
 	s.mu.Unlock()
+}
+
+// SetMaxConnections limits how many clients are served at once, as a
+// device with a small connection table does: a connection past n is
+// accepted and closed at once (the client's first request fails), and
+// counted in Refused; a closed connection frees its slot. 0 is no limit.
+func (s *Server) SetMaxConnections(n int) {
+	s.mu.Lock()
+	s.maxConns = n
+	s.mu.Unlock()
+}
+
+// Refused is how many connections were closed for want of a slot.
+func (s *Server) Refused() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.refused
 }
 
 // Start listens and begins serving. It returns once the listener is bound,
@@ -128,6 +149,13 @@ func (s *Server) accept(ln net.Listener) {
 			c.Close()
 			return
 		}
+		if s.maxConns > 0 && len(s.conns) >= s.maxConns {
+			s.refused++
+			s.mu.Unlock()
+			s.log.Debug("slave: connection refused: the device's connections are all in use", "max", s.maxConns, "remote", c.RemoteAddr())
+			c.Close()
+			continue
+		}
 		s.conns[c] = struct{}{}
 		s.mu.Unlock()
 		s.wg.Add(1)
@@ -182,9 +210,7 @@ func (s *Server) serve(c net.Conn) {
 		var resp []byte
 		if u == nil {
 			resp = exception(txid, unit, fc, 0x0B) // gateway target failed to respond
-		} else if code, ok := u.injectedFor(fc, data); ok {
-			resp = exception(txid, unit, fc, code)
-		} else if out, exc := s.dispatch(u, fc, data); exc != 0 {
+		} else if out, exc := u.Handle(fc, data); exc != 0 {
 			resp = exception(txid, unit, fc, exc)
 		} else {
 			resp = frame(txid, unit, fc, out)
@@ -195,11 +221,27 @@ func (s *Server) serve(c net.Conn) {
 	}
 }
 
+// Handle executes one request PDU against the unit, with no socket: the
+// function code and its data in, the response data (after the echoed
+// function code) or an exception code out. Injected exceptions and the
+// address map apply exactly as they do on the wire, so a caller stepping a
+// virtual device in process (virtdev) sees what a client on the socket
+// would.
+func (u *Unit) Handle(fc byte, data []byte) (out []byte, exc byte) {
+	if code, ok := u.injectedFor(fc, data); ok {
+		return nil, code
+	}
+	if u.refused(fc, data) {
+		return nil, 0x02 // illegal data address
+	}
+	return dispatch(u, fc, data)
+}
+
 // dispatch executes one PDU against a unit. It returns the response data
 // (after the echoed function code) or a nonzero exception code: 1 illegal
 // function, 2 illegal data address, 3 illegal data value — the same codes a
 // real device would pick.
-func (s *Server) dispatch(u *Unit, fc byte, data []byte) (out []byte, exc byte) {
+func dispatch(u *Unit, fc byte, data []byte) (out []byte, exc byte) {
 	switch fc {
 	case 0x01, 0x02: // read coils / discrete inputs
 		addr, count, ok := addrCount(data)

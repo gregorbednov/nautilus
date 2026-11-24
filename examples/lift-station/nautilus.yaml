@@ -102,6 +102,7 @@ tags:
   - { name: P101_InjectFault, role: setpoint, init: false, desc: "Bench only: trip P-101's VFD fault" }
   - { name: P101_InjectSealFail, role: setpoint, init: false, desc: "Bench only: trip P-101's seal-leak probe" }
   - { name: P101_InjectOverTemp, role: setpoint, init: false, desc: "Bench only: trip P-101's over-temperature contact" }
+  - { name: P101_FlapOverTemp, role: setpoint, init: false, desc: "Bench only: make P-101's over-temperature contact chatter (3 s on, 2 s off)" }
   - { name: P102_InjectFault, role: setpoint, init: false, desc: "Bench only: trip P-102's VFD fault" }
   - { name: P102_InjectSealFail, role: setpoint, init: false, desc: "Bench only: trip P-102's seal-leak probe" }
   - { name: P102_InjectOverTemp, role: setpoint, init: false, desc: "Bench only: trip P-102's over-temperature contact" }
@@ -113,20 +114,33 @@ alarms:
   defaults: { ack-required: true, auto-clear: true, shelve: true }
   shelve-times: [15m, 1h, 4h]
   journal: { keep: 500 }
+  # Live detection (#1249), on by default and spelled out here so it can be
+  # tuned. An alarm CHATTERS at 3 activations within 60 s (the ISA-18.2
+  # rate); the station is in a FLOOD at more than 6 activations of all its
+  # alarms within 10 min (ISA-18.2's 10 is for a whole plant; a lift station
+  # with fourteen alarms floods at fewer). Set P101_FlapOverTemp to see the
+  # chatter badge, the shelve-with-a-reason dialog and, with a storm
+  # (InflowGpm 950) and a few injected faults, the flood banner. Detection
+  # marks and journals; it never shelves or acknowledges by itself. A
+  # standalone controller counts nothing for its first minute.
+  chatter: { window: 60s, count: 3 }
+  flood: { window: 10m, threshold: 6 }
   defs:
-    - { id: LSHH101, tag: LSHH101, name: "Wet-well high-high (LSHH-101)", priority: critical, on-delay: 2s, class: process }
-    - { id: HighLevel, tag: HighLevelAlm, name: "Wet-well high level (LIT-101)", priority: high, on-delay: 10s, class: process }
-    - { id: LSLL101, tag: LSLL101, name: "Wet-well low-low (LSLL-101)", priority: medium, on-delay: 5s, class: process }
-    - { id: P101_FailToRun, tag: P101_FailToRun, name: "P-101 failed to run", priority: high, class: equipment }
-    - { id: P102_FailToRun, tag: P102_FailToRun, name: "P-102 failed to run", priority: high, class: equipment }
-    - { id: P101_LockedOut, tag: P101_LockedOut, name: "P-101 locked out (3 fail-to-run trips)", priority: high, class: equipment }
-    - { id: P102_LockedOut, tag: P102_LockedOut, name: "P-102 locked out (3 fail-to-run trips)", priority: high, class: equipment }
-    - { id: P101_VfdFault, tag: P101_VfdFault, name: "P-101 VFD fault", priority: high, on-delay: 1s, class: equipment }
-    - { id: P102_VfdFault, tag: P102_VfdFault, name: "P-102 VFD fault", priority: high, on-delay: 1s, class: equipment }
-    - { id: P101_SealFail, tag: P101_SealFail, name: "P-101 seal-leak probe", priority: medium, on-delay: 5s, class: equipment }
-    - { id: P102_SealFail, tag: P102_SealFail, name: "P-102 seal-leak probe", priority: medium, on-delay: 5s, class: equipment }
-    - { id: P101_OverTemp, tag: P101_OverTemp, name: "P-101 motor over-temperature", priority: high, on-delay: 2s, class: equipment }
-    - { id: P102_OverTemp, tag: P102_OverTemp, name: "P-102 motor over-temperature", priority: high, on-delay: 2s, class: equipment }
+    # `equipment:` groups an alarm with the piece of equipment it is on: out of
+    # service takes the whole piece (P101) out at once, not one alarm tag at a time.
+    - { id: LSHH101, tag: LSHH101, name: "Wet-well high-high (LSHH-101)", priority: critical, on-delay: 2s, class: process, equipment: WetWell }
+    - { id: HighLevel, tag: HighLevelAlm, name: "Wet-well high level (LIT-101)", priority: high, on-delay: 10s, class: process, equipment: WetWell }
+    - { id: LSLL101, tag: LSLL101, name: "Wet-well low-low (LSLL-101)", priority: medium, on-delay: 5s, class: process, equipment: WetWell }
+    - { id: P101_FailToRun, tag: P101_FailToRun, name: "P-101 failed to run", priority: high, class: equipment, equipment: P101 }
+    - { id: P102_FailToRun, tag: P102_FailToRun, name: "P-102 failed to run", priority: high, class: equipment, equipment: P102 }
+    - { id: P101_LockedOut, tag: P101_LockedOut, name: "P-101 locked out (3 fail-to-run trips)", priority: high, class: equipment, equipment: P101 }
+    - { id: P102_LockedOut, tag: P102_LockedOut, name: "P-102 locked out (3 fail-to-run trips)", priority: high, class: equipment, equipment: P102 }
+    - { id: P101_VfdFault, tag: P101_VfdFault, name: "P-101 VFD fault", priority: high, on-delay: 1s, class: equipment, equipment: P101 }
+    - { id: P102_VfdFault, tag: P102_VfdFault, name: "P-102 VFD fault", priority: high, on-delay: 1s, class: equipment, equipment: P102 }
+    - { id: P101_SealFail, tag: P101_SealFail, name: "P-101 seal-leak probe", priority: medium, on-delay: 5s, class: equipment, equipment: P101 }
+    - { id: P102_SealFail, tag: P102_SealFail, name: "P-102 seal-leak probe", priority: medium, on-delay: 5s, class: equipment, equipment: P102 }
+    - { id: P101_OverTemp, tag: P101_OverTemp, name: "P-101 motor over-temperature", priority: high, on-delay: 2s, class: equipment, equipment: P101 }
+    - { id: P102_OverTemp, tag: P102_OverTemp, name: "P-102 motor over-temperature", priority: high, on-delay: 2s, class: equipment, equipment: P102 }
     - { id: BothUnavail, tag: BothUnavail, name: "Both pumps unavailable", priority: critical, on-delay: 5s, class: equipment }
 
 driver:

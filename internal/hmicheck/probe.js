@@ -3,7 +3,7 @@
 (async () => {
 	await document.fonts.ready;
 	await new Promise((r) => setTimeout(r, SETTLE_MS));
-	const out = { blank: false, pipes: [], crossed: [], outside: [], mimics: [], drawings: [], fold: null, sideways: 0, width: DEVICE_WIDTH };
+	const out = { blank: false, pipes: [], unrouted: [], crossed: [], outside: [], mimics: [], drawings: [], fold: null, sideways: 0, width: DEVICE_WIDTH };
 
 	// Blank: nothing a person would see — no text, no drawing, no control.
 	const shows = (el) => {
@@ -22,6 +22,13 @@
 	for (const el of document.querySelectorAll('[data-broken-pipes]')) {
 		try {
 			out.pipes.push(...JSON.parse(el.dataset.brokenPipes));
+		} catch {}
+	}
+
+	// Routed pipes (routing "auto") with no clear way round the equipment.
+	for (const el of document.querySelectorAll('[data-unrouted]')) {
+		try {
+			out.unrouted.push(...JSON.parse(el.dataset.unrouted));
 		} catch {}
 	}
 
@@ -80,6 +87,9 @@
 	};
 	const clipped = (el, svg) => {
 		if (el.closest('defs, clipPath, mask, pattern, symbol, marker')) return true;
+		// the kit's own annotations that stand beside a drawing by design (a
+		// tank's level marks and pump ranges)
+		if (el.closest('[data-nx-beside]')) return true;
 		for (let g = el; g && g !== svg; g = g.parentElement) {
 			if (g.hasAttribute('clip-path') || g.hasAttribute('mask')) return true;
 			const cs = getComputedStyle(g);

@@ -31,6 +31,33 @@ Usage:
                                -count prints only the total; -site and
                                -priority narrow the list; -o yaml|table
                                picks the format (default table).
+  naut alarms oncall [dir]       Who each on-call roster has on call
+                               now, or -at "YYYY-MM-DD HH:MM".
+  naut alarms escalation [dir]   How many alarms each escalation policy
+                               covers; -id <alarm> prints the steps it
+                               would send (who, when, by which channel)
+                               if it began waiting -at a moment.
+  naut alarms contacts ...       Each person's email and phone numbers,
+                               on the box (naut alarms contacts help).
+  naut alarms secrets ...        The channels' credentials, on the box,
+                               read from stdin.
+  naut alarms push confirm-revocations
+                               End the Web Push subscriptions a mass
+                               revocation held (naut alarms push help).
+  naut alarms master export|check [dir]
+                               The master alarm database: one row per
+                               alarm (priority, consequence, response,
+                               review state), exported to CSV or YAML
+                               and checked back against the manifest.
+  naut alarms report flood|chatter|bad-actors|stale
+                               ISA-18.2 alarm performance from the
+                               journal (naut alarms report help).
+  naut alarms out-of-service <equipment> --host H --for 4h --reason "…"
+  naut alarms in-service <equipment> --host H
+  naut alarms oos-list --host H
+                               Hide a piece of equipment's alarms while
+                               it is worked on (a week at most), put it
+                               back, list what is out (soonest first).
 `
 
 func runAlarms(args []string) int {
@@ -41,6 +68,20 @@ func runAlarms(args []string) int {
 	switch args[0] {
 	case "list":
 		return runAlarmsList(args[1:])
+	case "oncall":
+		return runAlarmsOncall(args[1:])
+	case "escalation":
+		return runAlarmsEscalation(args[1:])
+	case "contacts", "secrets":
+		return runAlarmsContacts(args[0], args[1:])
+	case "push":
+		return runAlarmsPush(args[1:])
+	case "master":
+		return runAlarmsMaster(args[1:])
+	case "report":
+		return runAlarmsReport(args[1:])
+	case "out-of-service", "in-service", "oos-list":
+		return runAlarmsOOS(args[0], args[1:])
 	case "help", "--help", "-h":
 		fmt.Print(alarmsUsage)
 		return 0

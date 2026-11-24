@@ -1,0 +1,1012 @@
+// TiaCalls.cs: the calls that need TIA (siemens-ide.md section 3.4): GSDML
+// install, projects and sessions, station, software, compile. Each one
+// checks every gate first, applies the agent's own rules, and only then
+// asks ITia, on the TIA thread.
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using System.Threading;
+using System.Xml;
+
+namespace Tiad
+{
+    public sealed partial class Agent
+    {
+        readonly TiaThread tiaThread = new TiaThread();
+        readonly SessionTable sessions = new SessionTable();
+        readonly Func<ITia> makeTia;
+        volatile ITia tia; // made on the TIA thread by the first call that needs it
+        // tiaGone is why TIA is gone (ITia.Gone), null while it is not.
+        // Once set it stays set: every call that needs TIA is refused,
+        // naming the fix, until the agent restarts.
+        volatile string tiaGone;
+        readonly object goneMu = new object();
+
+        // retired is the blind trust of the instance the agent retired
+        // last (RetireIfTrusted), until the next instance is made: the
+        // record is cleared only then, never before a new instance exists.
+        // Written and read on the TIA thread.
+        BlindTrust retired;
+
+        // GoneFix is what to do once TIA died.
+        const string GoneFix = "every project open on it is gone, and the agent starts TIA again only when it restarts. Restart the agent, then compare in a fresh session (the read-only after-check) before anything else";
+
+        // TiaGoneNow reports why TIA is gone, or null while it is not,
+        // recording it the first time. A Gone that throws counts as gone.
+        string TiaGoneNow()
+        {
+            string why = tiaGone;
+            if (why != null) return why;
+            ITia t = tia;
+            if (t == null) return null;
+            string how = "";
+            bool gone;
+            try
+            {
+                gone = t.Gone;
+            }
+            catch (Exception e)
+            {
+                gone = true;
+                how = " (reading whether it is alive failed: " + e.GetType().Name + ")";
+            }
+            if (!gone) return null;
+            lock (goneMu)
+            {
+                // The instance read may have been retired meanwhile, on
+                // purpose (RetireIfTrusted): that is no death.
+                if (tiaGone == null && !ReferenceEquals(tia, t)) return null;
+                if (tiaGone == null)
+                {
+                    tiaGone = "TIA Portal died" + how + ", noticed " + DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                    Log.Line("{0}: {1}", tiaGone, GoneFix);
+                }
+                return tiaGone;
+            }
+        }
+
+        // TiaGate is the host's tia gate, failed once TIA is gone.
+        Gate TiaGate(Gate host)
+        {
+            string why = TiaGoneNow();
+            if (why == null) return host;
+            return new Gate { Name = "tia", State = Gate.StateFailed, Detail = why + ": " + GoneFix, Remedy = "restart the agent" };
+        }
+
+        // GoneRefusal refuses a call once TIA is gone, the way a failed
+        // gate does.
+        static TiadException GoneRefusal(string why)
+        {
+            return new TiadException(412, Kinds.Gate, "gate tia: " + why + ": " + GoneFix);
+        }
+
+        // Died is the answer for the call TIA died in. It ends the
+        // session: in doubt (outcome_unknown) when TIA's side says its
+        // download had begun, else a plain failure; both name the fix.
+        static TiadException Died(Exception e, string why)
+        {
+            // tiad's own outcome_unknown (an internal error inside a
+            // recorded download) stays in doubt: TIA going too settles
+            // nothing about the CPU (#1180 review).
+            var tde = e as TiadException;
+            if (tde != null && tde.Kind == Kinds.OutcomeUnknown)
+            {
+                return new TiadException(500, Kinds.OutcomeUnknown, tde.Message + "; " + why + ", and " + GoneFix, tde.Payload, true);
+            }
+            string msg = "TIA: " + (e is TiaException ? e.Message : TiaNames.Message(e)) + "; " + why;
+            var te = e as TiaException;
+            if (te != null && te.InDoubt)
+            {
+                return new TiadException(500, Kinds.OutcomeUnknown, msg + ", so the CPU may or may not be loaded, and " + GoneFix, null, true);
+            }
+            return new TiadException(500, Kinds.OperationFailed, msg + ": " + GoneFix, null, true);
+        }
+
+        void RegisterTia(Router r)
+        {
+            r.Add("POST", "/v1/gsd/install", InstallGsd);
+            r.Add("POST", "/v1/projects", CreateProject);
+            r.Add("POST", "/v1/sessions", OpenSession);
+            r.Add("GET", "/v1/sessions", ListSessions);
+            r.Add("DELETE", "/v1/sessions/{id}", CloseSession);
+            r.Add("PUT", "/v1/sessions/{id}/station", ApplyStation);
+            r.Add("POST", "/v1/sessions/{id}/software", Software);
+            r.Add("POST", "/v1/sessions/{id}/compile", Compile);
+        }
+
+        // StartReaper closes sessions idle longer than idle, checking every
+        // period. The close runs on the TIA thread like every TIA call.
+        void StartReaper(TimeSpan idle)
+        {
+            TimeSpan period = TimeSpan.FromMilliseconds(Math.Max(50, Math.Min(30000, idle.TotalMilliseconds / 4)));
+            var t = new Thread(delegate()
+            {
+                while (true)
+                {
+                    Thread.Sleep(period);
+                    foreach (var s in sessions.TakeIdle(idle))
+                    {
+                        try
+                        {
+                            Close(s);
+                        }
+                        catch (Exception e)
+                        {
+                            sessions.Restore(s);
+                            Log.Line("closing idle session {0}: {1}", s.Id, e.Message);
+                            continue;
+                        }
+                        sessions.ReleaseCpus(s);
+                        sessions.Closed(s);
+                        Log.Line("closed idle session {0} ({1})", s.Id, s.Project);
+                        RetireIfTrusted();
+                        if (s.Staging != "") deploys.RemoveStaging(s.Staging);
+                    }
+                }
+            });
+            t.IsBackground = true;
+            t.Name = "reaper";
+            t.Start();
+        }
+
+        // NeedTia refuses a TIA call while any gate fails (412, gate).
+        void NeedTia()
+        {
+            foreach (var g in Gates())
+            {
+                if (g.Blocks) throw new TiadException(412, Kinds.Gate, "gate " + g.Name + ": " + g.Detail);
+            }
+        }
+
+        // OnTia runs f on the TIA thread with ITia, made on first use. Once
+        // TIA is gone it refuses, also a call that was queued behind the
+        // one TIA died in; a call TIA dies in answers Died.
+        T OnTia<T>(Func<ITia, T> f)
+        {
+            return tiaThread.Run(delegate
+            {
+                string gone = TiaGoneNow();
+                if (gone != null) throw GoneRefusal(gone);
+                if (tia == null)
+                {
+                    try
+                    {
+                        tia = makeTia();
+                    }
+                    catch (Exception e)
+                    {
+                        host.TiaStarted(e);
+                        throw;
+                    }
+                    host.TiaStarted(null);
+                    // A new instance holds no earlier logon.
+                    instanceLogons.NewInstance("a new TIA instance started");
+                    // A new instance after a retire trusts nothing: the
+                    // retired one's record goes only now.
+                    if (retired != null)
+                    {
+                        Log.Line("audit blind-trust cleared: a new TIA instance started; the instance that trusted blindly ({0}) was retired", BlindTrust.Audit(retired));
+                        if (blindTrust == retired) blindTrust = null;
+                        retired = null;
+                    }
+                }
+                try
+                {
+                    return f(tia);
+                }
+                catch (Exception e)
+                {
+                    string why = TiaGoneNow();
+                    if (why != null) throw Died(e, why);
+                    if (e is TiaException) host.TiaFailed(e);
+                    throw;
+                }
+            });
+        }
+
+        // OnSession runs f on the TIA thread for an open session. A session
+        // closed while the call waited is gone (404, fatal).
+        T OnSession<T>(Session s, Func<ITia, T> f)
+        {
+            return OnTia(delegate(ITia t)
+            {
+                if (s.Closed) throw new TiadException(404, Kinds.NotFound, "session " + s.Id + " was closed", null, true);
+                return f(t);
+            });
+        }
+
+        // Close closes a session's project. Once TIA is gone there is no
+        // project left to close: the session is dropped, never kept broken.
+        // No retire comes between (RetireIfTrusted waits for every close
+        // to end), so the project is on the instance it was opened on.
+        void Close(Session s)
+        {
+            bool done = tiaThread.Run<bool>(delegate
+            {
+                if (s.Closed) return true;
+                if (TiaGoneNow() == null) return false;
+                s.Closed = true;
+                Log.Line("session {0}: TIA is gone, so its project is dropped without closing it", s.Id);
+                return true;
+            });
+            if (done) return;
+            OnTia<object>(delegate(ITia t)
+            {
+                if (!s.Closed)
+                {
+                    t.CloseProject(s.Handle);
+                    s.Closed = true;
+                }
+                return null;
+            });
+        }
+
+        // RetireIfTrusted retires the TIA instance once it trusted a CPU's
+        // certificate blindly and no session is left on it (#789 D1): the
+        // next call that needs TIA starts a new instance, which trusts
+        // nothing, so a deploy's own download never rides on an earlier
+        // read's trust. It is decided when a close ends (a DELETE, the
+        // reaper); a failed open leaves it to the next close. While any
+        // session is open, still opening, still closing or broken, the
+        // instance stays and the download gate (BlindTrustRule) holds. A
+        // retire that cannot show TIA's process exited counts as TIA gone:
+        // nothing runs on an instance that may still hold the trust; one
+        // that has not returned after cfg.RetireWatch (TIAD_RETIRE_WATCH) counts as gone too, so
+        // the tia gate says why the TIA thread is stuck. It never throws:
+        // the close it follows has ended.
+        void RetireIfTrusted()
+        {
+            try
+            {
+                RetireIfTrustedOnTia();
+            }
+            catch (Exception e)
+            {
+                try
+                {
+                    Log.Line("retiring the TIA instance: {0}", e.Message);
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+
+        // LatchGone records why TIA is gone, the first time.
+        void LatchGone(string why)
+        {
+            lock (goneMu)
+            {
+                if (tiaGone == null)
+                {
+                    tiaGone = why + ", noticed " + DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                    Log.Line("{0}: {1}", tiaGone, GoneFix);
+                }
+            }
+        }
+
+        void RetireIfTrustedOnTia()
+        {
+            tiaThread.Run<object>(delegate
+            {
+                if (blindTrust == null || tia == null || sessions.Any) return null;
+                if (TiaGoneNow() != null) return null;
+                ITia old = tia;
+                BlindTrust bt = blindTrust;
+                // Before Retire: a gate that reads the old instance's Gone
+                // meanwhile must not take the retire for a death.
+                tia = null;
+                var watch = new Timer(delegate
+                {
+                    LatchGone("TIA Portal's retire, after it trusted a CPU's certificate blindly, had not returned " + GoDuration.Format(cfg.RetireWatch.Ticks * 100) + " later");
+                }, null, (long)cfg.RetireWatch.TotalMilliseconds, Timeout.Infinite);
+                try
+                {
+                    old.Retire();
+                }
+                catch (Exception e)
+                {
+                    LatchGone("TIA Portal could not be retired after it trusted a CPU's certificate blindly (" + TiaNames.Message(e) + ")");
+                    return null;
+                }
+                finally
+                {
+                    watch.Dispose();
+                }
+                // A retire the watch already gave up on stays gone.
+                if (tiaGone != null) return null;
+                retired = bt;
+                instanceLogons.NewInstance("the TIA instance was retired");
+                Log.Line("audit blind-trust retired: no session left on the TIA instance that trusted blindly ({0}); it exited, and the next call starts a new one", BlindTrust.Audit(bt));
+                return null;
+            });
+        }
+
+        // WithSession runs a call on the session the route names.
+        object WithSession(Call c, Func<Session, object> f)
+        {
+            Session s = sessions.Begin(c.Var("id"));
+            try
+            {
+                return f(s);
+            }
+            finally
+            {
+                sessions.End(s);
+            }
+        }
+
+        // File resolves a body path that must name an existing file.
+        string ExistingFile(string requestPath)
+        {
+            string full = work.Resolve(requestPath);
+            if (!File.Exists(full)) throw TiadException.NotFound("no file {0}", Paths.CleanPath(requestPath));
+            return full;
+        }
+
+        object InstallGsd(Call c)
+        {
+            NeedTia();
+            var r = c.Json();
+            string path = r.Str("path");
+            r.Done();
+            string full = ExistingFile(path);
+            string name = Path.GetFileName(full);
+            if (!name.StartsWith("GSDML-", StringComparison.OrdinalIgnoreCase) || !name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+            {
+                throw TiadException.BadRequest("{0} is not named like a GSDML file (GSDML-*.xml)", name);
+            }
+            CheckGsdml(full, name);
+            bool already = OnTia(delegate(ITia t) { return t.InstallGsd(full); });
+            var o = new Obj();
+            o["path"] = work.Rel(full);
+            o["alreadyInstalled"] = already;
+            return o;
+        }
+
+        // CheckGsdml reads a GSDML file before TIA's importer ever parses
+        // it: it must be well-formed XML (which has a root element) without
+        // a DOCTYPE, so no external entity (XXE) or entity expansion
+        // reaches TIA.
+        static void CheckGsdml(string full, string name)
+        {
+            var settings = new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit,
+                XmlResolver = null,
+                IgnoreComments = true,
+            };
+            try
+            {
+                using (var f = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (var r = XmlReader.Create(f, settings))
+                {
+                    while (r.Read())
+                    {
+                    }
+                }
+            }
+            catch (XmlException e)
+            {
+                throw TiadException.BadRequest("{0} is not well-formed XML without a DOCTYPE (line {1}): tiad never hands TIA a DOCTYPE", name, e.LineNumber);
+            }
+        }
+
+        // CheckProjectName is tiad.CheckProjectName: one path segment that
+        // the sandbox rule accepts as it is.
+        static void CheckProjectName(string name)
+        {
+            string c;
+            try
+            {
+                c = Paths.CleanPath(name);
+            }
+            catch (TiadException e)
+            {
+                throw TiadException.BadRequest("project name: {0}", e.Message);
+            }
+            if (c != name || name.IndexOf('/') >= 0)
+            {
+                throw TiadException.BadRequest("project name {0} must be a single path segment", Json.Quote(name));
+            }
+        }
+
+        // SetsUsers reports whether applying st sets local users'
+        // passwords: the Full access user's, or a web user's.
+        static bool SetsUsers(Station st)
+        {
+            return st.Cpu.AccessControl == StationRules.AccessFullAccessUser || st.WebServer != null && st.WebServer.Enabled && st.WebServer.Users.Count > 0;
+        }
+
+        // CheckPolicy refuses, before any write, a Full access or web
+        // user's password the project's own password policy for local
+        // users would refuse.
+        static void CheckPolicy(ITia t, object project, Station st, Secrets sec)
+        {
+            if (!SetsUsers(st)) return;
+            PasswordPolicy pol = t.ReadPolicy(project);
+            if (st.Cpu.AccessControl == StationRules.AccessFullAccessUser)
+            {
+                string e = pol.Check(sec.FullAccessPassword);
+                if (e != null) throw TiadException.BadRequest("secrets.fullAccessPassword {0}", e);
+            }
+            if (st.WebServer == null || !st.WebServer.Enabled) return;
+            foreach (var u in st.WebServer.Users)
+            {
+                string e = pol.Check(sec.WebUsers[u.Name]);
+                if (e != null) throw TiadException.BadRequest("secrets.webUsers[{0}] {1}", Json.Quote(u.Name), e);
+            }
+        }
+
+        // CheckStation applies the agent-side station rules: the spec's
+        // own, the secrets it needs (a password for every web user among
+        // them), an installed GSDML for every device.
+        void CheckStation(Station st, Secrets sec)
+        {
+            string err = st.Validate();
+            if (err != null) throw TiadException.BadRequest("{0}", err);
+            err = sec.CheckFor(st);
+            if (err != null) throw TiadException.BadRequest("{0}", err);
+            if (st.Profinet != null)
+            {
+                foreach (var d in st.Profinet.Devices)
+                {
+                    var dev = d;
+                    if (!OnTia(delegate(ITia t) { return t.GsdInstalled(dev.Gsdml); }))
+                    {
+                        throw TiadException.BadRequest("device {0}: GSDML {1} is not installed (POST /v1/gsd/install first)", d.Name, d.Gsdml);
+                    }
+                }
+            }
+        }
+
+        static Obj SessionJson(Session s)
+        {
+            var o = new Obj();
+            o["session"] = s.Id;
+            o["project"] = s.Project;
+            return o;
+        }
+
+        // CreateProject builds a fresh project from a station spec. A
+        // project of that name that is not open is replaced: the work dir
+        // is scratch, and every deploy rebuilds from what naut sends (D1).
+        object CreateProject(Call c)
+        {
+            NeedTia();
+            var r = c.Json();
+            string name = r.Str("name");
+            Station st = Station.Read(r.Child("station"));
+            Secrets sec = Secrets.Read(r.Child("secrets"));
+            r.Done();
+            CheckProjectName(name);
+            CheckStation(st, sec);
+            sec.Records = records;
+            string project = "projects/" + name + "/" + name + ".ap21";
+            string full = work.Resolve(project);
+            // One project at a time (Sessions.Reserve): projects/<name>/ is
+            // replaced only once no other project is open.
+            Session s = sessions.Reserve(project, full, "projects/" + name + "/");
+            // kept: the project could not be closed after a failed create,
+            // so TIA may still hold it.
+            bool kept = false;
+            try
+            {
+                s.Handle = OnTia(delegate(ITia t)
+                {
+                    string cannot = t.CannotApply(st);
+                    if (cannot != null) throw new TiaException(cannot);
+                    string dir = Path.GetDirectoryName(full);
+                    if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                    Directory.CreateDirectory(dir);
+                    object h = t.CreateProject(full, name);
+                    try
+                    {
+                        if (st.Cpu.AccessControl == StationRules.AccessFullAccessUser) s.AccessControlSet = true;
+                        CheckPolicy(t, h, st, sec);
+                        t.ApplyStation(h, st, CpuReuse.Create, sec, false, new List<string>(), s.Made);
+                    }
+                    catch
+                    {
+                        try
+                        {
+                            t.CloseProject(h);
+                        }
+                        catch (Exception ce)
+                        {
+                            // TIA may still hold the project: the session
+                            // stays, broken, so nothing else opens over it
+                            // and a close can be tried again (#1186 review).
+                            s.Handle = h;
+                            s.Broken = true;
+                            kept = true;
+                            Log.Line("create {0}: closing the project after the failed create failed too ({1}); session {2} is kept, broken: close it again",
+                                Json.Quote(project), Json.Quote(TiaNames.Message(ce)), s.Id);
+                        }
+                        throw;
+                    }
+                    s.Station = st;
+                    s.Address = st.Cpu.Address;
+                    return h;
+                });
+            }
+            catch
+            {
+                if (kept)
+                {
+                    sessions.End(s);
+                }
+                else
+                {
+                    sessions.Drop(s);
+                    // A create that raced a close may have kept a trusting
+                    // instance up (RetireIfTrusted): with it gone, retire.
+                    RetireIfTrusted();
+                }
+                throw;
+            }
+            sessions.End(s);
+            return SessionJson(s);
+        }
+
+        object OpenSession(Call c)
+        {
+            NeedTia();
+            var r = c.Json();
+            string path = r.Str("path");
+            r.Done();
+            string full = work.Resolve(path);
+            if (!File.Exists(full)) throw TiadException.NotFound("no project {0}", Paths.CleanPath(path));
+            Session s = sessions.Reserve(work.Rel(full), full, "");
+            try
+            {
+                s.Handle = OnTia(delegate(ITia t) { return t.OpenProject(full); });
+            }
+            catch
+            {
+                sessions.Drop(s);
+                RetireIfTrusted();
+                throw;
+            }
+            // A project an unverified turn-on download saved stays gated.
+            if (File.Exists(full + TurnOnRule.MarkerSuffix))
+            {
+                s.AccessTurnOn = true;
+                s.AccessTurnOnTried = true;
+                Log.Line("audit access-turn-on session={0} project={1} opened turn-on pending", s.Id, Json.Quote(s.Project));
+            }
+            sessions.End(s);
+            var o = SessionJson(s);
+            if (s.AccessTurnOn) o["notes"] = new[] { TurnOnRule.PendingNote };
+            return o;
+        }
+
+        object ListSessions(Call c)
+        {
+            var list = new List<object>();
+            var now = DateTime.UtcNow;
+            foreach (var s in sessions.Open())
+            {
+                var o = SessionJson(s);
+                o["idleSeconds"] = s.InFlight > 0 ? 0 : (int)(now - s.LastUsed).TotalSeconds;
+                list.Add(o);
+            }
+            var outp = new Obj();
+            outp["sessions"] = list;
+            return outp;
+        }
+
+        // CloseSession closes even a session with a call in flight: the
+        // close waits on the TIA thread behind that call, and anything
+        // queued after it finds the session gone. A close that fails keeps
+        // the session, broken, so it can be closed again.
+        object CloseSession(Call c)
+        {
+            EndSession(sessions.Find(c.Var("id")));
+            return new Obj();
+        }
+
+        // EndSession closes a session taken from the table, as a DELETE
+        // does: one already taken out (closed meanwhile) is left as it is;
+        // a close that fails puts it back, broken. Once closed, its CPU
+        // claims go, a blindly trusting instance with no session left is
+        // retired, and then its staging is removed.
+        void EndSession(Session s)
+        {
+            if (!sessions.Remove(s)) return;
+            try
+            {
+                Close(s);
+            }
+            catch
+            {
+                sessions.Restore(s);
+                throw;
+            }
+            sessions.ReleaseCpus(s);
+            sessions.Closed(s);
+#if TIAD_TEST_SEAMS
+            Session seam = TestSeams.ReserveBeforeRetire ? sessions.Reserve("projects/seam/seam.ap21", "", "projects/seam/") : null;
+            try
+            {
+                RetireIfTrusted();
+            }
+            finally
+            {
+                if (seam != null) sessions.Drop(seam);
+            }
+#else
+            RetireIfTrusted();
+#endif
+            // Once retired, so TIA let go of the retrieved project first.
+            if (s.Staging != "") deploys.RemoveStaging(s.Staging);
+        }
+
+        object ApplyStation(Call c)
+        {
+            NeedTia();
+            return WithSession(c, delegate(Session s)
+            {
+                var r = c.Json();
+                Station st = Station.Read(r.Child("station"));
+                Secrets sec = Secrets.Read(r.Child("secrets"));
+                bool recordOnly = r.Bool("fullAccessRecordOnly");
+                bool turnOn = r.Bool("accessControlTurnOn");
+                r.Done();
+                CheckStation(st, sec);
+                sec.Records = records;
+                if (recordOnly)
+                {
+                    if (st.Cpu.AccessControl != StationRules.AccessFullAccessUser) throw TiadException.BadRequest("{0}", "fullAccessRecordOnly goes with cpu.accessControl fullAccessUser");
+                    Log.Line("audit access-record session={0} project={1} fullAccessRecordOnly=yes", s.Id, Json.Quote(s.Project));
+                }
+                if (turnOn && st.Cpu.AccessControl != StationRules.AccessFullAccessUser) throw TiadException.BadRequest("{0}", TurnOnRule.NeedsFullAccessUser);
+                // The session's state changes only on the TIA thread, in
+                // call order. Until TIA has applied the spec, the project
+                // is neither compiled nor described by any spec, so a
+                // failure part-way leaves nothing downloadable.
+                var notes = new List<string>();
+                var kept = new List<KeptDevice>();
+                List<string> changes = OnSession(s, delegate(ITia t)
+                {
+                    // Decided from the CPU the project holds, before any
+                    // write: a refusal here leaves the session as it was.
+                    ProjectCpu pc = s.Unclean ? null : t.ReadCpu(s.Handle);
+                    string decision = CpuReuse.Decide(pc, st.Cpu, s.Unclean);
+                    string protection = ConfigProtection.Nothing;
+                    // Whether this apply turns a kept CPU's access control
+                    // on (accessControlTurnOn over "Disabled").
+                    bool turning = false;
+                    if (decision == CpuReuse.Reuse)
+                    {
+                        CpuReuse.Collides(pc, st);
+                        protection = ConfigProtection.Plan(pc.Protection, st.Cpu.ConfigurationProtection, sec.ConfigurationPassword != "");
+                        AccessRule.Plan(pc.AccessControl, st.Cpu.AccessControl, sec.FullAccessPassword != "", turnOn);
+                        WebRule.Plan(AccessRule.After(pc.AccessControl, st.Cpu.AccessControl, turnOn), st.WebServer);
+                        turning = turnOn && pc.AccessControl == TurnOnRule.Disabled;
+                        kept = pc.Others;
+                    }
+                    if (turning)
+                    {
+                        // Read before any write: a refusal leaves the
+                        // session as it was.
+                        try
+                        {
+                            TurnOnRule.Check(t.ReadTurnOn(s.Handle), notes);
+                        }
+                        catch (TiadException e)
+                        {
+                            Log.Line("audit access-turn-on session={0} project={1} refused: {2}", s.Id, Json.Quote(s.Project), Json.Quote(e.Message));
+                            throw;
+                        }
+                    }
+                    else if (turnOn)
+                    {
+                        notes.Add(TurnOnRule.NothingNote);
+                    }
+                    // A pending mark over a project whose access control
+                    // reads off (the archive failed before it saved, or an
+                    // upload brought the CPU's off state back): no load of
+                    // it turns the CPU's on, so the gate goes.
+                    if (!turning && s.AccessTurnOn && !s.AccessTurnOnLoaded && decision == CpuReuse.Reuse && pc.AccessControl == TurnOnRule.Disabled)
+                    {
+                        string marker = work.Resolve(s.Project) + TurnOnRule.MarkerSuffix;
+                        try
+                        {
+                            File.Delete(marker);
+                            s.AccessTurnOn = false;
+                            s.AccessTurnOnTried = false;
+                            notes.Add(TurnOnRule.ClearedNote);
+                            Log.Line("audit access-turn-on session={0} project={1} pending mark removed: the project's access control reads \"Disabled\"", s.Id, Json.Quote(s.Project));
+                        }
+                        catch (Exception e)
+                        {
+                            Log.Line("audit access-turn-on session={0} removing the turn-on pending mark failed: {1}", s.Id, Json.Quote(e.GetType().Name + ": " + e.Message));
+                        }
+                    }
+                    if (st.Cpu.AccessControl == StationRules.AccessFullAccessUser) s.AccessControlSet = true;
+                    if (recordOnly) s.AccessRecordOnly = true;
+                    CheckPolicy(t, s.Handle, st, sec);
+                    string cannot = t.CannotApply(st);
+                    if (cannot != null) throw new TiaException(cannot);
+                    // A found user's password, before any write: a refusal
+                    // leaves the session as it was, unless putting the
+                    // user's record back failed.
+                    var w = new AccessWrites();
+                    try
+                    {
+                        t.PrepareAccess(s.Handle, st, sec, recordOnly, w, notes);
+                    }
+                    catch
+                    {
+                        if (w.Dirty)
+                        {
+                            s.Unclean = true;
+                            s.UsersUnclean = true;
+                        }
+                        // A password set before a later user's was refused
+                        // is a change to the project: its users match their
+                        // records, and it needs compiling again.
+                        if (w.Wrote) s.Compiled = false;
+                        throw;
+                    }
+                    // A password set or recorded is a change to the project.
+                    bool was = s.Compiled && !w.Wrote;
+                    Station prev = s.Station;
+                    int writes = s.Made.Writes;
+                    s.Compiled = false;
+                    s.Station = null;
+                    s.Unclean = true;
+                    if (turning)
+                    {
+                        // From the first write on: gated until a download
+                        // on this session loads it (a turn-on after an
+                        // upload re-arms a spent gate).
+                        s.AccessTurnOn = true;
+                        s.AccessTurnOnLoaded = false;
+                        s.AccessTurnOnTried = false;
+                        Log.Line("audit access-turn-on session={0} project={1} accessControlTurnOn=yes from={2}", s.Id, Json.Quote(s.Project), Json.Quote(pc.AccessControl));
+                    }
+                    t.ApplyStation(s.Handle, st, decision, sec, turning, notes, s.Made);
+                    if (turning)
+                    {
+                        // Read again with access control on: TIA may read a
+                        // role's runtime rights only then. A refusal here
+                        // leaves the session unclean: close it unsaved.
+                        try
+                        {
+                            TurnOnRule.Check(t.ReadTurnOn(s.Handle), new List<string>());
+                        }
+                        catch (TiadException e)
+                        {
+                            Log.Line("audit access-turn-on session={0} project={1} refused after the turn-on (session unclean): {2}", s.Id, Json.Quote(s.Project), Json.Quote(e.Message));
+                            throw TiadException.BadRequest("{0}", e.Message + TurnOnRule.LateRefusal);
+                        }
+                    }
+                    s.Unclean = false;
+                    string kn = CpuReuse.KeptNote(kept);
+                    if (kn != null) notes.Add(kn);
+                    // The first apply on an opened or uploaded project says
+                    // what it changed in the project as found; any later
+                    // one, what changed over the spec it last applied.
+                    bool usersWrote = w.Wrote || s.Made.Writes != writes;
+                    List<string> ch = decision == CpuReuse.Reuse && prev == null
+                        ? CpuReuse.Found(pc, st, protection, usersWrote)
+                        : CpuReuse.Changes(decision, prev, st);
+                    s.Station = st;
+                    s.Kept = kept;
+                    s.Address = st.Cpu.Address;
+                    if (ch.Count == 0) s.Compiled = was;
+                    return ch;
+                });
+                var o = new Obj();
+                o["changes"] = changes.ToArray();
+                if (notes.Count > 0) o["notes"] = notes.ToArray();
+                if (kept.Count > 0) o["keptDevices"] = KeptDevice.ToJson(kept);
+                return o;
+            });
+        }
+
+        object Software(Call c)
+        {
+            NeedTia();
+            return WithSession(c, delegate(Session s)
+            {
+                var r = c.Json();
+                string group = r.Str("group");
+                List<string> srcs = r.Strs("sources");
+                List<string> tables = r.Strs("tagTables");
+                bool prune = r.Bool("prune");
+                // prunePrefix: with prune, every object in the group that no
+                // source declares must carry it (Ownership.PruneRefused).
+                string prunePrefix = r.Str("prunePrefix");
+                List<CyclicOB> obs = CyclicObs.Read(r.Children("obs"));
+                r.Done();
+                if (group == "") throw TiadException.BadRequest("group is empty");
+                TiadException badGroup = Ownership.GroupRefused(group);
+                if (badGroup != null) throw badGroup;
+                var sources = new List<SourceFile>();
+                foreach (string p in srcs) sources.Add(new SourceFile { Path = Paths.CleanPath(p), FullPath = ExistingFile(p) });
+                var tagTables = new List<SourceFile>();
+                foreach (string p in tables) tagTables.Add(new SourceFile { Path = Paths.CleanPath(p), FullPath = ExistingFile(p) });
+                SoftwareResult res = OnSession(s, delegate(ITia t)
+                {
+                    if (s.ForeignChanged) throw Ownership.Unusable("another import");
+                    // Every block and data type the sources declare, read on
+                    // the TIA thread right before TIA reads the same files:
+                    // a name outside the group (blocks and data types share
+                    // TIA's names), or a source with both kinds, refuses the
+                    // whole call before anything is imported (Ownership).
+                    var declared = new List<Declared>();
+                    foreach (var src in sources)
+                    {
+                        foreach (var d in Ownership.Sources(File.ReadAllBytes(src.FullPath)))
+                        {
+                            d.Source = src.Path;
+                            declared.Add(d);
+                        }
+                    }
+                    TiadException mixed = Ownership.MixedRefused(declared);
+                    if (mixed != null) throw mixed;
+                    HashSet<string> typeSources = Ownership.TypeSources(declared);
+                    foreach (var src in sources) src.DataTypes = typeSources.Contains(src.Path);
+                    TiadException obSources = CyclicObs.SourcesRefused(declared, obs);
+                    if (obSources != null) throw obSources;
+                    List<ProjectBlock> before = t.Blocks(s.Handle);
+                    List<ProjectBlock> objectsBefore = Objects(t, s, before);
+                    List<string> conflicts = Ownership.Conflicts(declared, objectsBefore, group);
+                    if (conflicts.Count > 0) throw Ownership.Refusal(conflicts, group);
+                    if (prune)
+                    {
+                        TiadException notOurs = Ownership.PruneRefused(objectsBefore, declared, group, prunePrefix);
+                        if (notOurs != null) throw notOurs;
+                    }
+                    TiadException clash = CyclicObs.ConstantClash(declared, before, obs);
+                    if (clash != null) throw clash;
+                    List<OBStep> steps = CyclicObs.Plan(obs, before, group, prune);
+                    s.Compiled = false;
+                    // The group this session imports into: a later compile
+                    // checks what lies outside it, and a compare requires
+                    // its data types by name (TiaNames.CompareEqual).
+                    s.ImportGroup = group;
+                    // Unusable until the blocks and data types outside the
+                    // group compare the same afterwards, whether the import
+                    // returns or throws: a failure part-way may have
+                    // replaced one.
+                    s.ForeignChanged = true;
+                    // touched: an OB was deleted or imported. A failure after
+                    // that may leave an OB gone or an empty stub, so the
+                    // session then stays unusable whatever else compares.
+                    bool touched = false;
+                    SoftwareResult sr;
+                    try
+                    {
+                        // The cyclic interrupt OBs first (an OB source with
+                        // no OB of its name would make a program cycle OB):
+                        // every delete before any import, so OBs may trade
+                        // numbers.
+                        foreach (var st in steps)
+                        {
+                            if (st.Action != "removed" && st.Action != "recreated") continue;
+                            touched = true;
+                            t.DeleteBlock(s.Handle, group, st.Name);
+                        }
+                        foreach (var st in steps)
+                        {
+                            if (st.Action != "created" && st.Action != "recreated") continue;
+                            touched = true;
+                            t.ImportBlock(s.Handle, group, CyclicObs.Xml(st.Want));
+                        }
+                        sr = t.ImportSoftware(s.Handle, group, sources, tagTables, prune, prune && prunePrefix != "");
+                    }
+                    catch (Exception e)
+                    {
+                        // TIA handed back an object outside the group: it
+                        // replaced a same-named object where it sits, maybe
+                        // with the same content and date, so no compare can
+                        // clear the session (Ownership).
+                        TiaException te = e as TiaException;
+                        if (te != null && te.OutsideGroup) throw Ownership.OutsideGroupError(te.Message, group);
+                        // A data type import that failed stays unusable too:
+                        // TIA may have regenerated a customer's type with its
+                        // content and date, and the failure may have hidden
+                        // the glue's mark.
+                        if (!touched && typeSources.Count == 0 && Ownership.Changed(objectsBefore, Objects(t, s, t.Blocks(s.Handle)), group).Count == 0) s.ForeignChanged = false;
+                        throw;
+                    }
+                    List<ProjectBlock> after = t.Blocks(s.Handle);
+                    List<ProjectBlock> objectsAfter = Objects(t, s, after);
+                    List<string> changed = Ownership.Changed(objectsBefore, objectsAfter, group);
+                    if (changed.Count > 0) throw Ownership.ForeignChangedError(changed, group);
+                    // A source that declares an asked OB must have made its
+                    // body: else the OB is an empty stub (or gone, with prune).
+                    List<string> failedObs = CyclicObs.FailedSources(declared, sr.Results);
+                    if (failedObs.Count > 0) throw CyclicObs.VerifyFailed(failedObs);
+                    List<string> bad = CyclicObs.Verify(obs, after, group);
+                    if (bad.Count > 0) throw CyclicObs.VerifyFailed(bad);
+                    s.ForeignChanged = false;
+                    sr.Obs = steps;
+                    sr.Foreign = Ownership.Foreign(objectsAfter, group);
+                    return sr;
+                });
+                return res.ToJson();
+            });
+        }
+
+        // Objects is blocks and then every data type the project holds
+        // (ITia.Types, each marked DataType): the one list the ownership
+        // checks read, since blocks and data types share TIA's names.
+        static List<ProjectBlock> Objects(ITia t, Session s, List<ProjectBlock> blocks)
+        {
+            var l = new List<ProjectBlock>(blocks);
+            foreach (var ty in t.Types(s.Handle))
+            {
+                ty.DataType = true;
+                l.Add(ty);
+            }
+            return l;
+        }
+
+        object Compile(Call c)
+        {
+            NeedTia();
+            return WithSession(c, delegate(Session s)
+            {
+                var r = c.Json();
+                bool hw = r.Bool("hardware");
+                bool sw = r.Bool("software");
+                r.Done();
+                if (!hw && !sw) throw TiadException.BadRequest("neither hardware nor software selected");
+                CompileResult res = OnSession(s, delegate(ITia t)
+                {
+                    // After an import, a compile recompiles what uses the
+                    // group's objects. TIA's date bump is accepted on the
+                    // group's own; a block or data type outside the group
+                    // whose date moves (a customer's block that uses one of
+                    // nautilus's types) makes the session unusable: the
+                    // compile changed what nautilus does not own.
+                    // Pinned unusable before the compile and cleared only once
+                    // a read after it shows nothing outside changed: a
+                    // compile, or the read after it, that fails leaves it.
+                    string group = s.ImportGroup;
+                    bool was = s.ForeignChanged;
+                    List<ProjectBlock> before = group == "" ? null : Objects(t, s, t.Blocks(s.Handle));
+                    if (before != null) s.ForeignChanged = true;
+                    CompileResult cr;
+                    try
+                    {
+                        cr = t.Compile(s.Handle, hw, sw);
+                    }
+                    catch
+                    {
+                        s.Compiled = false;
+                        if (before != null && Ownership.Changed(before, Objects(t, s, t.Blocks(s.Handle)), group).Count == 0) s.ForeignChanged = was;
+                        throw;
+                    }
+                    if (before != null)
+                    {
+                        List<string> changed = Ownership.Changed(before, Objects(t, s, t.Blocks(s.Handle)), group);
+                        if (changed.Count > 0)
+                        {
+                            s.Compiled = false;
+                            throw Ownership.CompileChangedError(changed, group);
+                        }
+                        s.ForeignChanged = was;
+                    }
+                    // Only a full compile without errors makes the
+                    // project downloadable.
+                    if (cr.Errors > 0) s.Compiled = false;
+                    else if (hw && sw) s.Compiled = true;
+                    return cr;
+                });
+                if (res.Errors > 0)
+                {
+                    throw new TiadException(422, Kinds.CompileFailed, res.Errors + " errors", res.ToJson(), false);
+                }
+                return res.ToJson();
+            });
+        }
+    }
+}

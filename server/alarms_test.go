@@ -47,9 +47,9 @@ func do(t *testing.T, s *Server, method, path, body string) *httptest.ResponseRe
 	t.Helper()
 	var r *http.Request
 	if body == "" {
-		r = httptest.NewRequest(method, path, nil)
+		r = httptest.NewRequest(method, "http://localhost"+path, nil)
 	} else {
-		r = httptest.NewRequest(method, path, strings.NewReader(body))
+		r = httptest.NewRequest(method, "http://localhost"+path, strings.NewReader(body))
 	}
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, r)
@@ -67,6 +67,9 @@ func TestAlarmRoutes404WithoutAnEngine(t *testing.T) {
 		{"POST", "/api/alarms/ack", `{"all":true}`},
 		{"POST", "/api/alarms/shelve", `{"id":"HiTemp","seconds":60}`},
 		{"POST", "/api/alarms/unshelve", `{"id":"HiTemp"}`},
+		{"GET", "/api/alarms/out-of-service", ""},
+		{"POST", "/api/alarms/out-of-service", `{"equipment":"HiTempAlm","seconds":60,"reason":"x"}`},
+		{"POST", "/api/alarms/in-service", `{"equipment":"HiTempAlm"}`},
 	} {
 		rec := do(t, srv, tc.method, tc.path, tc.body)
 		if rec.Code != http.StatusNotFound {
@@ -116,6 +119,41 @@ func TestAlarmsListAndSummary(t *testing.T) {
 	}
 	if got.TS == 0 {
 		t.Error("no timestamp on the response")
+	}
+}
+
+// A suppressed alarm is not in the list unless asked for (?suppressed=1), and
+// then it comes with why, who and until: the HMI's out-of-service badge.
+func TestAlarmsListSuppressedOnRequest(t *testing.T) {
+	srv, eng := alarmServer(t, map[string]any{"HiTempAlm": true, "LoFlowAlm": false})
+	eng.Evaluate()
+	if err := eng.TakeOutOfService("HiTempAlm", time.Now().Add(time.Hour), "alice", "probe swap"); err != nil {
+		t.Fatal(err)
+	}
+	list := func(path string) []alarm.Record {
+		var got alarmsResponse
+		rec := do(t, srv, "GET", path, "")
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got.Alarms
+	}
+	if got := list("/api/alarms"); len(got) != 0 {
+		t.Fatalf("the plain list shows %+v for a suppressed alarm", got)
+	}
+	got := list("/api/alarms?suppressed=1")
+	if len(got) != 1 || got[0].ID != "HiTemp" || got[0].State != alarm.Suppressed {
+		t.Fatalf("with ?suppressed=1: %+v", got)
+	}
+	var all alarmsResponse
+	if err := json.Unmarshal(do(t, srv, "GET", "/api/alarms?suppressed=1", "").Body.Bytes(), &all); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(all.Equipment, ",") != "HiTempAlm,LoFlowAlm" {
+		t.Errorf("equipment %v: every piece of equipment, quiet ones too, so one can be taken out before maintenance", all.Equipment)
+	}
+	if r := got[0]; r.Suppression != alarm.SuppressOutOfService || !strings.Contains(r.Reason, "probe swap") || r.SuppressedBy != "alice" || r.SuppressUntilMs == 0 {
+		t.Errorf("record %+v lacks the kind, why, who or until", r)
 	}
 }
 
@@ -190,9 +228,12 @@ func TestAckShelveAndUnshelve(t *testing.T) {
 		t.Errorf("ack of an unknown id = %d, want 404", rec.Code)
 	}
 
-	rec = do(t, srv, "POST", "/api/alarms/shelve", `{"id":"LoFlow","seconds":600,"by":"operator1"}`)
+	rec = do(t, srv, "POST", "/api/alarms/shelve", `{"id":"LoFlow","seconds":600,"by":"operator1","reason":" seal weeping ","via":"chatter"}`)
 	if rec.Code != 200 {
 		t.Fatalf("shelve status = %d: %s", rec.Code, rec.Body)
+	}
+	if j := do(t, srv, "GET", "/api/alarms/journal?kind=shelve", ""); !strings.Contains(j.Body.String(), `"reason":"seal weeping"`) {
+		t.Errorf("the shelve row lacks the trimmed reason: %s", j.Body)
 	}
 	var recd alarm.Record
 	if err := json.Unmarshal(rec.Body.Bytes(), &recd); err != nil {
@@ -220,7 +261,7 @@ func TestAckShelveAndUnshelve(t *testing.T) {
 }
 
 // Writes go through authorizeWrite unchanged — the same token rules as a
-// tag write, and reads stay open.
+// tag write, and reads (by a trusted Host) need no token.
 func TestAlarmWritesHonorAuth(t *testing.T) {
 	cond := map[string]any{"HiTempAlm": true, "LoFlowAlm": false}
 	eng := newTestAlarms(t, cond)
@@ -242,7 +283,7 @@ func TestAlarmWritesHonorAuth(t *testing.T) {
 		t.Errorf("GET /api/alarms with auth configured = %d, want 200", rec.Code)
 	}
 
-	r := httptest.NewRequest("POST", "/api/alarms/ack", strings.NewReader(`{"all":true,"by":"operator1"}`))
+	r := httptest.NewRequest("POST", "http://localhost/api/alarms/ack", strings.NewReader(`{"all":true,"by":"operator1"}`))
 	r.Header.Set("X-Nautilus-Token", "s3cret")
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, r)
@@ -291,6 +332,93 @@ func TestJournalQuery(t *testing.T) {
 	rec = do(t, srv, "GET", "/api/alarms/journal?from=nonsense", "")
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("a malformed from= = %d, want 400", rec.Code)
+	}
+}
+
+// A notify row (#715) is not a state change, and an HMI that predates it
+// keys journal rows on ts:id:kind: the journal view leaves notify rows out
+// unless a client asks for that kind.
+func TestJournalHidesNotifyUnlessAsked(t *testing.T) {
+	srv, eng := alarmServer(t, map[string]any{"HiTempAlm": true, "LoFlowAlm": false})
+	eng.Evaluate()
+	eng.Notified("HiTemp", alarm.Notice{Level: 1, To: "alice", Via: "log", Result: alarm.NotifySent})
+	eng.Notified("HiTemp", alarm.Notice{Level: 1, To: "dave", Via: "log", Result: alarm.NotifySent})
+
+	var out journalResponse
+	rec := do(t, srv, "GET", "/api/alarms/journal", "")
+	json.Unmarshal(rec.Body.Bytes(), &out)
+	if len(out.Events) != 1 || out.Events[0].Kind != alarm.KindActive {
+		t.Fatalf("default journal = %+v, want only the activation", out.Events)
+	}
+	rec = do(t, srv, "GET", "/api/alarms/journal?kind=notify", "")
+	json.Unmarshal(rec.Body.Bytes(), &out)
+	if len(out.Events) != 2 || out.Events[0].To == "" || out.Events[0].Result != alarm.NotifySent {
+		t.Fatalf("kind=notify = %+v, want both rows with their recipient and result", out.Events)
+	}
+	rec = do(t, srv, "GET", "/api/alarms/journal?kind=notify,active", "")
+	json.Unmarshal(rec.Body.Bytes(), &out)
+	if len(out.Events) != 3 {
+		t.Fatalf("kind=notify,active = %d rows, want 3", len(out.Events))
+	}
+}
+
+// Detection rows (#1249) are left out of the journal view as notify rows
+// are, unless a client names them; /api/alarms carries the flood in
+// progress with its first alarms, and each chattering alarm's episode.
+func TestJournalHidesDetectionUnlessAsked(t *testing.T) {
+	now := time.Now().Add(-time.Minute)
+	cond := map[string]any{"HiTempAlm": false, "LoFlowAlm": false}
+	eng, err := alarm.New(alarm.Options{
+		Defs: []alarm.Def{
+			{ID: "HiTemp", Tag: "HiTempAlm", Priority: alarm.High, AckRequired: true, AutoClear: true, Equipment: "Boiler"},
+			{ID: "LoFlow", Tag: "LoFlowAlm", Priority: alarm.Medium, AckRequired: true, AutoClear: true, Equipment: "P101"},
+		},
+		Read:    func(p string) (any, bool) { v, ok := cond[p]; return v, ok },
+		Now:     func() time.Time { return now },
+		Chatter: alarm.ChatterConfig{Count: 2},
+		Flood:   alarm.FloodConfig{Threshold: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { eng.Close() })
+	srv := New(newTestRuntime(t), Options{Alarms: eng})
+	eng.Evaluate()
+	for _, tag := range []string{"HiTempAlm", "HiTempAlm", "LoFlowAlm"} {
+		now = now.Add(time.Second)
+		cond[tag] = true
+		eng.Evaluate()
+		now = now.Add(time.Second)
+		cond[tag] = false
+		eng.Evaluate()
+	}
+
+	var out journalResponse
+	json.Unmarshal(do(t, srv, "GET", "/api/alarms/journal", "").Body.Bytes(), &out)
+	for _, e := range out.Events {
+		if e.Kind != alarm.KindActive && e.Kind != alarm.KindRTN {
+			t.Fatalf("default journal has a %q row: %+v", e.Kind, e)
+		}
+	}
+	json.Unmarshal(do(t, srv, "GET", "/api/alarms/journal?kind=chatter,flood", "").Body.Bytes(), &out)
+	if len(out.Events) != 2 || out.Events[0].Kind != alarm.KindFlood || out.Events[0].Count != 3 || out.Events[1].Kind != alarm.KindChatter || out.Events[1].ID != "HiTemp" {
+		t.Fatalf("kind=chatter,flood = %+v", out.Events)
+	}
+
+	var list alarmsResponse
+	json.Unmarshal(do(t, srv, "GET", "/api/alarms", "").Body.Bytes(), &list)
+	if list.Flood == nil || list.Flood.Count != 3 || len(list.Flood.FirstOut) != 2 || list.Flood.FirstOut[1].ID != "LoFlow" ||
+		len(list.Flood.Groups) != 2 || list.Flood.Groups[0].Equipment != "Boiler" || list.Summary.Flood == nil || list.Summary.Chattering != 1 {
+		t.Fatalf("alarms flood = %+v summary = %+v", list.Flood, list.Summary)
+	}
+	var chat *alarm.Chatter
+	for _, r := range list.Alarms {
+		if r.ID == "HiTemp" {
+			chat = r.Chatter
+		}
+	}
+	if chat == nil || chat.Activations != 2 {
+		t.Fatalf("HiTemp's chatter = %+v", chat)
 	}
 }
 
@@ -475,5 +603,139 @@ func TestJournalScanStopsAtTheCap(t *testing.T) {
 	json.Unmarshal(rec.Body.Bytes(), &out)
 	if len(out.Events) != 0 || out.Truncated {
 		t.Errorf("exhausted journal = %d events, truncated %v; want 0, false", len(out.Events), out.Truncated)
+	}
+}
+
+// A signed-in user's acknowledgement or shelve is recorded in the alarm
+// journal as that user, whatever name the client sent (#708 PR 7b): the
+// identity is the session's or the personal access token's, decided here,
+// never a name a page typed. A token keeps the name the client sends, as
+// before (an HMI behind a service token names its operator so).
+func TestAckAndShelveRecordTheSignedInUser(t *testing.T) {
+	// patServer's engine (auditServer's): HiTemp is active, LoFlow is not.
+	srv, toks, _ := patServer(t)
+	eng := srv.alarms
+	record := func(id string) alarm.Record {
+		t.Helper()
+		for _, rec := range eng.Records() {
+			if rec.ID == id {
+				return rec
+			}
+		}
+		t.Fatalf("no alarm %s", id)
+		return alarm.Record{}
+	}
+
+	// A personal access token acts as its user.
+	if rec := call(t, srv, "POST", "/api/alarms/ack", `{"ids":["HiTemp"],"by":"someone-else"}`, bearer(toks["akhan"])); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"acked":1`) {
+		t.Fatalf("ack with a PAT: %d %s (records %+v)", rec.Code, rec.Body, eng.Records())
+	}
+	if got := record("HiTemp").AckBy; got != "akhan" {
+		t.Errorf("ack by a PAT recorded as %q, want akhan", got)
+	}
+
+	// A browser sign-in too: shelve and unshelve.
+	c := signIn(t, srv, "akhan")
+	if rec := call(t, srv, "POST", "/api/alarms/shelve", `{"id":"HiTemp","seconds":300,"by":"someone-else"}`, withCookie(c.Value), ownOrigin); rec.Code != 200 {
+		t.Fatalf("shelve signed in: %d %s", rec.Code, rec.Body)
+	}
+	if got := record("HiTemp").ShelfBy; got != "akhan" {
+		t.Errorf("shelve signed in recorded as %q, want akhan", got)
+	}
+	if rec := call(t, srv, "POST", "/api/alarms/unshelve", `{"id":"HiTemp","by":"someone-else"}`, withCookie(c.Value), ownOrigin); rec.Code != 200 {
+		t.Fatalf("unshelve signed in: %d %s", rec.Code, rec.Body)
+	}
+	evs, err := eng.Journal(time.Time{}, time.Now().Add(time.Minute), alarm.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range evs {
+		if e.By == "someone-else" {
+			t.Errorf("the alarm journal recorded the client's name: %+v", e)
+		}
+	}
+	// The audit journal keeps the typed name as said, beside the principal.
+	es := srv.audit.ring.Recent()
+	if len(es) == 0 {
+		t.Fatal("no audit entry")
+	}
+	if es[0].User != "user:akhan" || es[0].Detail["by"] != "someone-else" {
+		t.Errorf("audit entry: %+v", es[0])
+	}
+}
+
+// Without a user (no auth: block, a token), the name the client sends is
+// the record, as it always was.
+func TestAckByTokenKeepsTheTypedName(t *testing.T) {
+	cond := map[string]any{"HiTempAlm": true}
+	srv, eng := alarmServer(t, cond)
+	eng.Evaluate()
+	if rec := do(t, srv, "POST", "/api/alarms/ack", `{"ids":["HiTemp"],"by":"operator1"}`); rec.Code != 200 {
+		t.Fatalf("ack: %d %s", rec.Code, rec.Body)
+	}
+	for _, rec := range eng.Records() {
+		if rec.ID == "HiTemp" && rec.AckBy != "operator1" {
+			t.Errorf("ack recorded as %q, want operator1", rec.AckBy)
+		}
+	}
+}
+
+// oldJournal is a Journal written before ExceptKinds existed: it ignores it.
+type oldJournal struct{ *alarm.RingJournal }
+
+func (j oldJournal) Query(from, to time.Time, f alarm.Filter) ([]alarm.Event, error) {
+	f.ExceptKinds = nil
+	return j.RingJournal.Query(from, to, f)
+}
+
+// A journal that does not honour ExceptKinds still never hands an old HMI
+// a notify row: the server drops the kind again itself.
+func TestJournalHidesNotifyFromAnOldJournal(t *testing.T) {
+	cond := map[string]any{"HiTempAlm": true}
+	eng, err := alarm.New(alarm.Options{
+		Defs:    []alarm.Def{{ID: "HiTemp", Tag: "HiTempAlm", Priority: alarm.High, AckRequired: true, AutoClear: true}},
+		Read:    func(p string) (any, bool) { v, ok := cond[p]; return v, ok },
+		Journal: oldJournal{alarm.NewRing(100)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { eng.Close() })
+	srv := New(newTestRuntime(t), Options{Alarms: eng})
+	eng.Evaluate()
+	eng.Notified("HiTemp", alarm.Notice{Level: 1, To: "alice", Via: "log", Result: alarm.NotifySent})
+	var out journalResponse
+	rec := do(t, srv, "GET", "/api/alarms/journal", "")
+	json.Unmarshal(rec.Body.Bytes(), &out)
+	if len(out.Events) != 1 || out.Events[0].Kind != alarm.KindActive {
+		t.Fatalf("default journal over an old Journal = %+v, want only the activation", out.Events)
+	}
+}
+
+// A shelve's reason is one short line; a chatter shelve must have one (#1249).
+func TestCheckShelveWhy(t *testing.T) {
+	long := strings.Repeat("é", shelveReasonMax+1)
+	for _, c := range []struct {
+		name string
+		req  shelveRequest
+		bad  string // a piece of the refusal, "" for accepted
+	}{
+		{"a plain shelve needs no reason", shelveRequest{}, ""},
+		{"a reason alone is fine", shelveRequest{Reason: "seal"}, ""},
+		{"chatter with a reason", shelveRequest{Via: "chatter", Reason: "seal weeping"}, ""},
+		{"chatter with no reason", shelveRequest{Via: "chatter"}, "needs a one-line reason"},
+		{"chatter with a blank reason", shelveRequest{Via: "chatter", Reason: "  \t"}, "needs a one-line reason"},
+		{"an unknown via", shelveRequest{Via: "bulk", Reason: "x"}, "not one of: chatter"},
+		{"a line break", shelveRequest{Reason: "a\nb"}, "one line"},
+		{"a unicode line separator", shelveRequest{Reason: "a\u2028b"}, "one line"},
+		{"an escape sequence", shelveRequest{Reason: "a\x1b[31mb"}, "control characters"},
+		{"only zero-width characters", shelveRequest{Via: "chatter", Reason: "\u200b\u200b"}, "invisible"},
+		{"exactly the limit", shelveRequest{Reason: strings.Repeat("é", shelveReasonMax)}, ""},
+		{"one over, counted in characters", shelveRequest{Reason: long}, "at most 200"},
+	} {
+		got := checkShelveWhy(c.req)
+		if (c.bad == "") != (got == "") || !strings.Contains(got, c.bad) {
+			t.Errorf("%s: got %q, want it to contain %q", c.name, got, c.bad)
+		}
 	}
 }

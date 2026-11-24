@@ -246,3 +246,68 @@ func TestStateWireTokens(t *testing.T) {
 		t.Error("ParseState should reject an unknown token")
 	}
 }
+
+// A notify row's fields survive the file journal, and ExceptKinds drops a
+// kind after Kinds has chosen.
+func TestNotifyRowRoundTripAndExcept(t *testing.T) {
+	path := t.TempDir() + "/alarms.jsonl"
+	j, err := NewFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	ts := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC).UnixMilli()
+	row := Event{TS: ts, ID: "TT1", Kind: KindNotify, By: "system", State: "unack-active",
+		Level: 2, To: "oidc:carol", Via: "log", Result: NotifyFailed, Reason: "joined late: x"}
+	j.Append(Event{TS: ts - 1, ID: "TT1", Kind: KindActive})
+	j.Append(row)
+	got, err := j.Query(time.Time{}, time.Time{}, Filter{Kinds: []string{KindNotify}})
+	if err != nil || len(got) != 1 || got[0] != row {
+		t.Fatalf("notify row = %+v, %v; want %+v", got, err, row)
+	}
+	got, _ = j.Query(time.Time{}, time.Time{}, Filter{ExceptKinds: []string{KindNotify}})
+	if len(got) != 1 || got[0].Kind != KindActive {
+		t.Fatalf("ExceptKinds notify = %+v, want the activation only", got)
+	}
+}
+
+// The offline reader returns both generations oldest first and never
+// creates a journal at a path that has none.
+func TestReadFileJournal(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "alarms.jsonl")
+	if _, err := ReadFileJournal(path); err == nil {
+		t.Fatal("read a journal that does not exist")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("reading created %s", path)
+	}
+	j, err := NewFileSize(path, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 6 {
+		if err := j.Append(Event{TS: int64(i), ID: "A", Kind: KindActive}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	j.Close()
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Fatalf("no rotation happened, so the test checks nothing: %v", err)
+	}
+	got, err := ReadFileJournal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) < 2 {
+		t.Fatalf("read %d events", len(got))
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i].TS < got[i-1].TS {
+			t.Fatalf("not oldest first: %v", got)
+		}
+	}
+	if got[len(got)-1].TS != 5 {
+		t.Errorf("last event ts %d, want 5", got[len(got)-1].TS)
+	}
+}

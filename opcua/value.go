@@ -81,6 +81,8 @@ func toVariant(typ string, v any) (*ua.Variant, error) {
 			return nil, err
 		}
 		return ua.NewVariant(b)
+	case ByteString, ByteArray:
+		return bytesVariant(typ, v)
 	case "String":
 		switch x := v.(type) {
 		case string:
@@ -205,3 +207,13 @@ func toInt(v any) (int64, error) {
 // an operator screen that shows an "Uncertain_LastUsableValue" as a live
 // reading is the heuristic the Quality enum exists to replace.
 func good(s ua.StatusCode) bool { return s&(ua.StatusBad|ua.StatusUncertain) == 0 }
+
+// statusUncertainSubstituteValue is Uncertain_SubstituteValue (0x40910000):
+// the server says the value is a substitute for the real one (an operator
+// override on the server, #707). It is the one Uncertain code with a value
+// worth keeping.
+const statusUncertainSubstituteValue ua.StatusCode = 0x40910000
+
+// substituted reports whether s is Uncertain_SubstituteValue, so the driver
+// keeps the value and reports io.Substituted instead of Bad.
+func substituted(s ua.StatusCode) bool { return s == statusUncertainSubstituteValue }

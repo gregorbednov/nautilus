@@ -28,9 +28,11 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/joyautomation/nautilus/internal/fence"
 	"github.com/joyautomation/nautilus/lang/ir"
 	"github.com/joyautomation/nautilus/sparkplug"
 	"github.com/joyautomation/nautilus/sparkplug/spb"
@@ -39,6 +41,9 @@ import (
 const (
 	connectTimeout = 30 * time.Second
 	tokenTimeout   = 10 * time.Second
+	// tokenLeak bounds how long a timed-out publish is still counted as in
+	// flight (pahoPub.publishEnded): well past paho's 30 s queue timeout.
+	tokenLeak = 2 * time.Minute
 	// rebirthStagger spaces the connect-time rebirth requests so 60 sites
 	// don't all birth into the broker at once (design §8.6).
 	rebirthStagger = 50 * time.Millisecond
@@ -48,6 +53,12 @@ const (
 	// is baked into CONNECT, so a leadership change can only be honoured by
 	// reconnecting.
 	leaderPoll = time.Second
+	// stopDeathWait bounds how long Stop waits for the broker to take the
+	// STATE death certificate. A broker that has not acknowledged it by then
+	// is not answering; Stop disconnects anyway, and the broker fires the
+	// will when the session drops. tokenTimeout (10 s) here held a stop past
+	// a supervisor's budget (#942).
+	stopDeathWait = 2 * time.Second
 )
 
 // stateBody is the Sparkplug 3.0 STATE birth/death certificate. Field order
@@ -75,11 +86,39 @@ func legacyStateTopic(hostID string) string { return "STATE/" + hostID }
 type pahoPub struct{ cli mqtt.Client }
 
 func (p *pahoPub) publish(topic string, qos byte, retain bool, payload []byte) error {
+	return p.publishEnded(topic, qos, retain, payload, func() {})
+}
+
+// publishEnded is publish that calls ended once the message has left or
+// failed for good (paho's token completed), which for a publish that timed
+// out is later than the return: it may still sit in paho's queue and go
+// out then (a drain waits for it, fence.Enter).
+//
+// paho completes a queued message's token when it is written, fails, or
+// waits out paho's own 30 s queue timeout; a QoS 0 publish that raced a
+// disconnect is returned neither queued nor completed (paho v1.5.1
+// Publish). That one never leaves, so after tokenLeak a token still open is
+// taken as ended, or every later drain would wait on it for good.
+func (p *pahoPub) publishEnded(topic string, qos byte, retain bool, payload []byte, ended func()) error {
 	tok := p.cli.Publish(topic, qos, retain, payload)
 	if !tok.WaitTimeout(tokenTimeout) {
+		go func() {
+			select {
+			case <-tok.Done():
+			case <-time.After(tokenLeak):
+			}
+			ended()
+		}()
 		return fmt.Errorf("host: publish %s timed out", topic)
 	}
+	ended()
 	return tok.Error()
+}
+
+// endedPublisher is a publisher that says when a message has really left
+// (pahoPub.publishEnded).
+type endedPublisher interface {
+	publishEnded(topic string, qos byte, retain bool, payload []byte, ended func()) error
 }
 
 // publisher returns the live publisher, or nil while disconnected.
@@ -104,9 +143,21 @@ func (d *Driver) isLeader() bool {
 		return false
 	}
 	d.gateMu.Lock()
-	g := d.writeGate
+	g, plain := d.writeGate, d.plainGate
 	d.gateMu.Unlock()
-	return g == nil || g()
+	return g == nil || plain || g()
+}
+
+// commandsAllowed reports whether tag commands (NCMD/DCMD) may leave the
+// driver now: mayPublish, and a plain write gate (#943) open.
+func (d *Driver) commandsAllowed() bool {
+	if !d.mayPublish() {
+		return false
+	}
+	d.gateMu.Lock()
+	g, plain := d.writeGate, d.plainGate
+	d.gateMu.Unlock()
+	return !plain || g == nil || g()
 }
 
 // replicated reports whether this host is one replica of a redundant set —
@@ -119,7 +170,7 @@ func (d *Driver) replicated() bool {
 	}
 	d.gateMu.Lock()
 	defer d.gateMu.Unlock()
-	return d.writeGate != nil
+	return d.writeGate != nil && !d.plainGate
 }
 
 // clientID is the MQTT client ID for the next CONNECT: the configured one,
@@ -190,6 +241,7 @@ func (d *Driver) run(ctx context.Context) {
 				d.mu.Lock()
 				d.brokerLostLocked()
 				d.mu.Unlock()
+				d.flushForgets()
 			}
 			d.log.Warn("host: connect failed", "broker", d.cfg.BrokerURL, "error", err, "retryIn", backoff)
 			select {
@@ -208,6 +260,9 @@ func (d *Driver) run(ctx context.Context) {
 		backoff = backoffMin
 
 		dropped := d.serve(ctx, lost) && ctx.Err() == nil && !d.isStopping()
+		if hook := afterServe.Load(); hook != nil {
+			(*hook)()
+		}
 
 		d.mu.Lock()
 		d.connected = false
@@ -218,11 +273,18 @@ func (d *Driver) run(ctx context.Context) {
 			d.brokerLostLocked()
 		}
 		d.mu.Unlock()
+		d.flushForgets()
 		// Death-before-DISCONNECT: Stop publishes the certificate and only
 		// then cancels, so by the time we get here the wire is already clear.
 		cli.Disconnect(250)
 	}
 }
+
+// afterServe, unset outside tests, runs between a session ending (serve
+// returning) and the run loop tearing it down: a test sets it to hold that
+// window open (TestDemotionIsDisconnectedBeforeItsDeathIsSeen). Atomic, so
+// a driver another test left running can read it while a test sets it.
+var afterServe atomic.Pointer[func()]
 
 // serve holds a live session open until the connection drops, the context
 // ends, or leadership changes (which needs a new CONNECT to install — or
@@ -254,9 +316,26 @@ func (d *Driver) serve(ctx context.Context, lost <-chan struct{}) bool {
 			d.log.Warn("host: connection lost", "broker", d.cfg.BrokerURL)
 			return true
 		case <-t.C:
+			// Commands held by a closed gate go out once it is open again
+			// (#943): a plain gate, or a leadership gate closed for less
+			// than leaderPoll, which the check below never sees, so no
+			// reconnect kicks the writer. Looked at on every tick, not on
+			// a change between two ticks, or such a closure would hold its
+			// command until the next write, birth or reconnect.
+			if d.commandsAllowed() && d.hasPending() {
+				d.kickWriter()
+			}
 			if d.mayPublish() != wasLeader {
 				d.log.Info("host: leadership changed; reconnecting to refresh STATE",
 					"leader", !wasLeader)
+				// The session ends here, on purpose: stop reporting it as
+				// connected BEFORE its death certificate goes out, so nothing
+				// reads Status as this session still connected (and online,
+				// StateOnlineMs) after the broker has heard it go offline. The
+				// run loop's own teardown below comes after the publish.
+				d.mu.Lock()
+				d.connected = false
+				d.mu.Unlock()
 				if wasLeader {
 					d.publishDemotionDeath()
 				}
@@ -524,7 +603,12 @@ func (d *Driver) publishStateOffline(p publisher, ts int64) {
 		return
 	}
 	if err := p.publish(stateTopic(d.cfg.HostID), 1, true, body); err != nil {
-		d.log.Error("host: publish STATE death", "error", err)
+		if d.deathAbandoned.Load() {
+			// Stop already gave up on it (#942); the will stands in.
+			d.log.Warn("host: publish STATE death after Stop stopped waiting", "error", err)
+		} else {
+			d.log.Error("host: publish STATE death", "error", err)
+		}
 	}
 	if d.cfg.StateForm == StateForm2x || d.cfg.StateForm == StateFormBoth {
 		if err := p.publish(legacyStateTopic(d.cfg.HostID), 1, true, []byte("OFFLINE")); err != nil {
@@ -547,12 +631,29 @@ func cmdTopic(group, edge, device string) string {
 // publishCommand encodes and sends one coalesced command payload. QoS 0,
 // retain false, OmitSeq — a command carries no sequence number.
 func (d *Driver) publishCommand(topic string, metrics []sparkplug.Metric) error {
+	if hook := testHookPublish.Load(); hook != nil {
+		if err := (*hook)(); err != nil {
+			return err
+		}
+	}
 	p := d.publisher()
 	if p == nil {
 		return fmt.Errorf("host: not connected")
 	}
-	if !d.mayPublish() {
-		return fmt.Errorf("host: not the publishing host (primary=%v, leader=%v)",
+	// Counted for a planned switchover's drain from before the gate is
+	// read until the command has left (fence.Enter, #710 d1b).
+	var done func()
+	early := !mut("host_enter_after_gate")
+	if early {
+		done = fence.Enter()
+	}
+	allowed := d.commandsAllowed()
+	if !early {
+		done = fence.Enter()
+	}
+	if !allowed {
+		done()
+		return fmt.Errorf("host: commands not allowed now (primary=%v, leader=%v, or the write gate is closed)",
 			d.cfg.Primary, d.isLeader())
 	}
 	body, err := sparkplug.Payload{
@@ -561,8 +662,13 @@ func (d *Driver) publishCommand(topic string, metrics []sparkplug.Metric) error 
 		Metrics:   metrics,
 	}.Encode()
 	if err != nil {
+		done()
 		return fmt.Errorf("host: encode command for %s: %w", topic, err)
 	}
+	if ep, ok := p.(endedPublisher); ok {
+		return ep.publishEnded(topic, 0, false, body, done)
+	}
+	defer done()
 	return p.publish(topic, 0, false, body)
 }
 
@@ -722,8 +828,18 @@ func (d *Driver) flushWrites() {
 		}
 		return
 	}
-	if !d.mayPublish() {
-		return // a standby: stay queued until promoted
+	if !d.commandsAllowed() {
+		// A standby, or a closed plain gate: stay queued (#943). A plain
+		// gate holds tag commands only: a __Rebirth is a rebirth request,
+		// which the leader may still send.
+		if d.isLeader() {
+			d.flushRebirthTags()
+		}
+		return
+	}
+	if d.termMoved() {
+		d.dropEarlierTerm() // nothing held from an earlier leadership goes out
+		return
 	}
 	d.wmu.Lock()
 	if len(d.pending) == 0 {
@@ -732,7 +848,11 @@ func (d *Driver) flushWrites() {
 	}
 	work := d.pending
 	d.pending = map[string]any{}
+	gen := d.termGen.Load() // the term generation this work is from
 	d.wmu.Unlock()
+	if hook := testHookAfterSwap.Load(); hook != nil {
+		(*hook)()
+	}
 
 	byTopic := map[string][]sparkplug.Metric{}
 	names := map[string][]string{}
@@ -844,7 +964,7 @@ func (d *Driver) flushWrites() {
 	}
 
 	if len(hold) > 0 {
-		drops += d.queueOffline(hold)
+		drops += d.queueOffline(hold, gen)
 		// A node that birthed while this flush was in flight found nothing
 		// to release — it parked here, after the birth had passed. Close
 		// that race rather than making the operator wait for the next
@@ -861,16 +981,21 @@ func (d *Driver) flushWrites() {
 	}
 
 	for topic, metrics := range byTopic {
+		if d.termMoved() {
+			d.dropEarlierTerm()
+		}
+		if d.termGen.Load() != gen && !mut("old_term_kept") {
+			// The lease was lost and won again while this flush ran (seen
+			// here or by another caller, a scan's WriteOutputs): the rest
+			// is the earlier leadership's.
+			return
+		}
 		if err := d.publishCommand(topic, metrics); err != nil {
 			d.setErr(err)
 			d.log.Warn("host: command publish failed", "topic", topic, "error", err)
 			// Requeue so the values go out after the next connect.
 			d.wmu.Lock()
-			for _, n := range names[topic] {
-				if _, exists := d.pending[n]; !exists {
-					d.pending[n] = work[n]
-				}
-			}
+			d.requeueLocked(names[topic], work, gen)
 			d.wmu.Unlock()
 			continue
 		}
@@ -926,8 +1051,25 @@ func setTemplateMember(root *sparkplug.Template, mo memberOut, leaf sparkplug.Me
 func (d *Driver) markWritten(name string, v any) {
 	d.wmu.Lock()
 	d.initWriteMapsLocked()
-	d.lastOut[name] = v
 	d.remote[name] = v
+	kick := false
+	if lo, ok := d.lastOut[name]; ok && !sameValue(lo, v) {
+		// The program moved the tag while this command was in flight
+		// (#940): v reached the site, but the program wants lo. Keep lo
+		// as the program's value and owe it, unless a newer one is
+		// pending already.
+		if _, newer := d.pending[name]; !newer {
+			d.pending[name] = lo
+			kick = true
+		}
+	} else {
+		d.lastOut[name] = v
+	}
+	defer func() {
+		if kick {
+			d.kickWriter()
+		}
+	}()
 	// A command that went out supersedes one parked for the same tag. A
 	// newer write to a dark device is parked in its place instead, so this
 	// is a safety net for a write that raced the device's birth.
@@ -980,12 +1122,24 @@ const maxQueuedPerNode = 256
 // because the node's queue is full. Only the LATEST value per tag survives:
 // an operator who moves a setpoint twice while the site is down commanded it
 // once, to the second value.
-func (d *Driver) queueOffline(hold map[string]map[string]any) uint64 {
+func (d *Driver) queueOffline(hold map[string]map[string]any, gen uint64) uint64 {
 	var dropped uint64
 	var full []string
 	var parked uint64
+	requeued := false
+	defer func() {
+		if requeued {
+			d.kickWriter()
+		}
+	}()
 
 	d.wmu.Lock()
+	if d.termGen.Load() != gen && !mut("old_term_kept") {
+		// A term move since the flush took this work: none of it parks
+		// (a later birth would publish an earlier leadership's command).
+		d.wmu.Unlock()
+		return 0
+	}
 	if d.queued == nil {
 		d.queued = map[string]map[string]any{}
 	}
@@ -996,6 +1150,18 @@ func (d *Driver) queueOffline(hold map[string]map[string]any) uint64 {
 			d.queued[node] = q
 		}
 		for name, v := range tags {
+			if lo, ok := d.lastOut[name]; ok && !sameValue(lo, v) {
+				// Superseded while this flush was in flight (#940): park
+				// nothing for it. The program's value is owed instead,
+				// unless it is pending already or the site holds it.
+				_, newer := d.pending[name]
+				held, known := d.remote[name]
+				if !newer && !(known && sameValue(held, lo)) {
+					d.pending[name] = lo
+					requeued = true
+				}
+				continue
+			}
 			if _, replacing := q[name]; !replacing && len(q) >= maxQueuedPerNode {
 				dropped++
 				full = append(full, name)
@@ -1095,6 +1261,45 @@ func (d *Driver) queuedDepths() map[string]int {
 	return out
 }
 
+// hasPending reports whether any command is queued.
+func (d *Driver) hasPending() bool {
+	d.wmu.Lock()
+	defer d.wmu.Unlock()
+	return len(d.pending) > 0
+}
+
+// flushForgets drains forgetQ: the host can no longer vouch for what the
+// sites it names hold, so their outputs' remote values go. A command the
+// program then writes is owed again, even one equal to what the host last
+// sent: a site that died or reborn may hold anything (#940). It runs with
+// neither lock held, like flushAdopts.
+func (d *Driver) flushForgets() {
+	d.mu.Lock()
+	q := d.forgetQ
+	d.forgetQ = nil
+	d.mu.Unlock()
+	if len(q) == 0 {
+		return
+	}
+	d.wmu.Lock()
+	for _, f := range q {
+		for name, b := range d.byName {
+			if b.Node == f.node && (f.all || b.Device == f.device) {
+				delete(d.remote, name)
+			}
+		}
+	}
+	d.wmu.Unlock()
+}
+
+// testHookAfterSwap, when set (by tests), runs in flushWrites right after
+// it takes the pending commands, before they are parked or published.
+var testHookAfterSwap atomic.Pointer[func()]
+
+// testHookPublish, when set (by tests), runs as publishCommand begins: a
+// non-nil error fails the publish, as a lost broker would.
+var testHookPublish atomic.Pointer[func() error]
+
 // flushAdopts applies the member-output baselines the state machine queued
 // while it held d.mu: the live value of a member IS what the site holds, so a
 // later operator write of that same value is a no-op and a write of anything
@@ -1161,19 +1366,4 @@ func (d *Driver) onlineDevices(edge string) (map[string]bool, bool) {
 		return devs, true
 	}
 	return nil, false
-}
-
-// nodeOnline reports whether an edge node has birthed and not died. An unknown
-// node — one we have never heard from — is offline, which is exactly the case
-// the dark-site queue exists for: a host that starts before its fleet can
-// still be commanded, and the commands land as the sites birth.
-func (d *Driver) nodeOnline(edge string) bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for k, ns := range d.nodes {
-		if k.EdgeNode == edge {
-			return ns != nil && ns.online
-		}
-	}
-	return false
 }

@@ -1,0 +1,79 @@
+# The vote protocol's long checks, nightly (#997; #710's test plan §3.2,
+# §3.3): the mutation runner, then 200,000 seeded simulator schedules (a
+# PR runs 2,000). Not a PR gate. A red run opens (or comments on) the
+# rolling "quorum: nightly simulator" issue with the failing step, the
+# mutation table or the failing seeds' QUORUM_SEED repro lines, and the
+# run; a green run closes it (.github/scripts/quorum-nightly-issue.sh).
+# By hand: Actions → quorum-nightly → Run workflow.
+name: quorum-nightly
+on:
+  schedule:
+    - cron: '11 5 * * *' # daily, 05:11 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  quorum:
+    name: Quorum — mutation runner + 200k seeds
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write # the rolling issue
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.25'}
+      # Non-zero if a mutation survived or a build broke (about 50 s).
+      - name: go run ./tools/quorum-mutants
+        id: mutants
+        shell: bash
+        run: |
+          set -o pipefail
+          go run ./tools/quorum-mutants 2>&1 | tee "$RUNNER_TEMP/mutants.log"
+      # Runs even when the mutants step is red (about 130 s). Each failing
+      # seed prints a QUORUM_SEED=k repro line. Then the operator-intent
+      # log's three-replica schedules (#710 3b-4a, about 6 min); a failing
+      # one names its seed (OPLOG_SIM_ONE=k reruns it with a trace). The
+      # clone schedules (#1029 layer 2) run their own 200,000 too, the
+      # clone races (#1029 step 1) 20,000 per case, the clone splits
+      # (#1029 3c-1) 2,000 per shape, the spare gates (#1029 3c-2)
+      # 2,000 per family, and the from-spare gate (#1029 3c-3c) 1,000 per
+      # cell.
+      - name: QUORUM_SEEDS=200000 go test ./quorum/sim (default and clone schedules), OPLOG_SIM_SEEDS=3000 go test ./oplog
+        id: seeds
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          QUORUM_SEEDS: '200000'
+          QUORUM_CLONE_SEEDS: '200000'
+          QUORUM_CLONE_RACE_SEEDS: '20000'
+          QUORUM_CLONE_SPLIT_SEEDS: '2000'
+          QUORUM_CLONE_RESTART_SEEDS: '1000'
+          QUORUM_SPARE_SEEDS: '2000'
+          OPLOG_SIM_SEEDS: '3000'
+        run: |
+          set -o pipefail
+          rc=0
+          go test -count=1 -timeout 20m ./quorum/sim -run '^TestSeeds$' 2>&1 | tee "$RUNNER_TEMP/seeds.log" || rc=1
+          go test -count=1 -timeout 20m ./quorum/sim -run '^TestCloneSeeds$' 2>&1 | tee -a "$RUNNER_TEMP/seeds.log" || rc=1
+          go test -count=1 -timeout 30m ./quorum/sim -run '^TestCloneRaceSeeds$' 2>&1 | tee -a "$RUNNER_TEMP/seeds.log" || rc=1
+          go test -count=1 -timeout 20m ./quorum/sim -run '^TestCloneSplit' 2>&1 | tee -a "$RUNNER_TEMP/seeds.log" || rc=1
+          go test -count=1 -timeout 20m ./quorum/sim -run '^(TestACloneBesideASettledPairBecomesASpare|TestLateFramesOfARestartMakeNoSpare|TestTheIncumbentRestartsOrDiesWhileTheSpareRuns|TestTheSpareDecisionUnderASplit|TestASplitWithASpareClearsByRestarts|TestALossyOriginalNeverGoesSpare|TestAnOriginalRestartingAfterTheMarkStaysAMember|TestLateFramesToBothVotersUpToALeaseMakeNoSpare|TestFromSpareNeverMakesTwoLeaders)$' 2>&1 | tee -a "$RUNNER_TEMP/seeds.log" || rc=1
+          go test -count=1 -timeout 20m ./oplog -run '^TestThreeReplicaSimulation$' 2>&1 | tee -a "$RUNNER_TEMP/seeds.log" || rc=1
+          exit $rc
+      - name: Rolling issue
+        if: always() && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MUTANTS_OUTCOME: ${{ steps.mutants.outcome }}
+          SEEDS_OUTCOME: ${{ steps.seeds.outcome }}
+          MUTANTS_LOG: ${{ runner.temp }}/mutants.log
+          SEEDS_LOG: ${{ runner.temp }}/seeds.log
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: .github/scripts/quorum-nightly-issue.sh

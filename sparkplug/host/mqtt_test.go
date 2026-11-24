@@ -27,7 +27,8 @@ import (
 	mqttsrv "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/hooks/auth"
 	"github.com/mochi-mqtt/server/v2/listeners"
-	"github.com/mochi-mqtt/server/v2/packets"
+
+	"github.com/joyautomation/nautilus/internal/testmqtt"
 
 	nio "github.com/joyautomation/nautilus/io"
 	"github.com/joyautomation/nautilus/lang/ir"
@@ -55,8 +56,20 @@ func freePort(t *testing.T) string {
 }
 
 // startBroker brings up an in-process broker on addr ("" = any free port) and
-// returns it with the address it actually bound.
+// returns it with the address it actually bound. It closes the broker itself
+// at cleanup, through closeBroker: a test never closes one with srv.Close
+// (TestTestBrokersCloseThroughCloseBroker holds every test file to that).
 func startBroker(t *testing.T, addr string) (*mqttsrv.Server, string) {
+	t.Helper()
+	srv, bound := newBroker(t, addr)
+	t.Cleanup(func() { _ = closeBroker(srv) })
+	return srv, bound
+}
+
+// newBroker is startBroker without the cleanup, for a test that must close
+// the broker itself and must not hang in cleanup if closing ever does
+// (TestCloseBrokerUnderClientChurn).
+func newBroker(t *testing.T, addr string) (*mqttsrv.Server, string) {
 	t.Helper()
 	if addr == "" {
 		addr = "127.0.0.1:0"
@@ -65,7 +78,13 @@ func startBroker(t *testing.T, addr string) (*mqttsrv.Server, string) {
 	if err := srv.AddHook(new(auth.AllowHook), nil); err != nil {
 		t.Fatalf("auth hook: %v", err)
 	}
-	tcp := listeners.NewTCP(listeners.Config{ID: "t", Address: addr})
+	// The host reconnects with the same client ID on a leadership change;
+	// mochi v2.7.9 can drop the new session if the old one is still being
+	// torn down (testmqtt.SameIDSerializer).
+	if err := srv.AddHook(&testmqtt.SameIDSerializer{Server: srv}, nil); err != nil {
+		t.Fatalf("same-id hook: %v", err)
+	}
+	tcp := testmqtt.NewTCP(srv, listeners.Config{ID: "t", Address: addr})
 	if err := srv.AddListener(tcp); err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -73,35 +92,10 @@ func startBroker(t *testing.T, addr string) (*mqttsrv.Server, string) {
 	return srv, tcp.Address()
 }
 
-// closeBroker stops a startBroker broker. Use it instead of srv.Close, which
-// can deadlock in mochi-mqtt v2.7.9 (mochi-mqtt/server#488, unfixed
-// upstream): Close's client sweep, Clients.GetByListener, read-locks the
-// client map and then read-locks it again through Len, so a client
-// disconnecting at that moment (Clients.Delete, a writer queued between the
-// two) blocks both forever. CI hung ten minutes on exactly that.
-//
-// TCP.Close runs its client sweep only the first time a listener closes, so
-// closing it here with a no-op sweep takes GetByListener out of srv.Close
-// entirely. The clients are disconnected from GetAll's copy instead (one
-// read lock), repeatedly while srv.Close waits for their goroutines, which
-// also catches one accepted just before the listener shut.
-func closeBroker(srv *mqttsrv.Server) error {
-	srv.Listeners.Close("t", func(string) {})
-	done := make(chan error, 1)
-	go func() { done <- srv.Close() }()
-	for {
-		for _, cl := range srv.Clients.GetAll() {
-			if !cl.Closed() {
-				_ = srv.DisconnectClient(cl, packets.ErrServerShuttingDown)
-			}
-		}
-		select {
-		case err := <-done:
-			return err
-		case <-time.After(20 * time.Millisecond):
-		}
-	}
-}
+// closeBroker stops a startBroker broker: testmqtt.Close, which avoids
+// mochi v2.7.9's Close deadlock and is idempotent (startBroker registers it
+// as a cleanup; a broker-loss test may close the broker earlier too).
+func closeBroker(srv *mqttsrv.Server) error { return testmqtt.Close(srv) }
 
 func brokerURL(addr string) string { return "tcp://" + addr }
 
@@ -142,8 +136,25 @@ func newObserver(t *testing.T, addr, id string, filters ...string) *observer {
 			t.Fatalf("observer subscribe %s: %v", f, tok.Error())
 		}
 	}
+	o.settle(t)
 	t.Cleanup(func() { o.cli.Disconnect(50) })
 	return o
+}
+
+// settle returns once the broker has finished serving the observer's
+// subscriptions, retained messages included. mochi answers a SUBSCRIBE with
+// its SUBACK first and only then scans the retained messages for a wildcard
+// filter, and that scan reads each topic's retainPath without the lock that
+// RetainMessage writes it under (mochi v2.7.9 topics.go): a retained publish
+// from another client while the scan runs is a data race inside the broker
+// (#1120, TestMqttStopPublishesStateDeath). A client's packets are handled
+// one after another, so the SUBACK of a second, non-wildcard subscription
+// (whose scan is a locked lookup) proves the first scan is over.
+func (o *observer) settle(t *testing.T) {
+	t.Helper()
+	if tok := o.cli.Subscribe("settle/observer", 1, nil); !tok.WaitTimeout(5*time.Second) || tok.Error() != nil {
+		t.Fatalf("observer settle: %v", tok.Error())
+	}
 }
 
 // wait blocks until a recorded message satisfies pred, or the deadline passes.
@@ -953,7 +964,7 @@ func TestQueueOfflineIsBoundedPerNode(t *testing.T) {
 	for i := 0; i < maxQueuedPerNode+over; i++ {
 		hold["W6"][fmt.Sprintf("W6_T%04d", i)] = float64(i)
 	}
-	if got := d.queueOffline(hold); got != uint64(over) {
+	if got := d.queueOffline(hold, d.termGen.Load()); got != uint64(over) {
 		t.Errorf("dropped %d, want %d (everything past the bound)", got, over)
 	}
 	if n := len(d.queued["W6"]); n != maxQueuedPerNode {
@@ -970,7 +981,7 @@ func TestQueueOfflineIsBoundedPerNode(t *testing.T) {
 		parked = name
 		break
 	}
-	if got := d.queueOffline(map[string]map[string]any{"W6": {parked: 99.0}}); got != 0 {
+	if got := d.queueOffline(map[string]map[string]any{"W6": {parked: 99.0}}, d.termGen.Load()); got != 0 {
 		t.Errorf("replacing a parked tag dropped %d, want 0", got)
 	}
 	if got := d.queued["W6"][parked]; got != 99.0 {
@@ -978,7 +989,7 @@ func TestQueueOfflineIsBoundedPerNode(t *testing.T) {
 	}
 
 	// The bound is per node: another site has its own budget.
-	if got := d.queueOffline(map[string]map[string]any{"W9": {"W9_A": 1.0}}); got != 0 {
+	if got := d.queueOffline(map[string]map[string]any{"W9": {"W9_A": 1.0}}, d.termGen.Load()); got != 0 {
 		t.Errorf("a different node dropped %d, want 0 — the bound is per node", got)
 	}
 	if n := len(d.queued["W9"]); n != 1 {
@@ -1656,5 +1667,32 @@ func TestReadInputsIntoMatchesReadInputs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(map[string]any(got), map[string]any(want)) {
 		t.Error("repeated ReadInputsInto calls diverged from the snapshot")
+	}
+}
+
+// An observer that returns before the broker has scanned its retained
+// messages leaves that scan running against the next retained publish: a
+// data race in mochi that -race reports. A broker holding many retained
+// topics makes the scan long enough to hit it every time; newObserver's
+// settle is what ends it. Red under -race with settle taken out.
+func TestObserverReturnsAfterItsRetainedScan(t *testing.T) {
+	_, addr := startBroker(t, "")
+	seeder := newObserver(t, addr, "seeder")
+	var last mqtt.Token
+	for i := 0; i < 8000; i++ {
+		last = seeder.cli.Publish(fmt.Sprintf("spBv1.0/STATE/seed%05d", i), 1, true, []byte("x"))
+	}
+	if !last.WaitTimeout(30*time.Second) || last.Error() != nil {
+		t.Fatalf("seed: %v", last.Error())
+	}
+	pub := newObserver(t, addr, "pub-scan")
+	for round := 0; round < 12; round++ {
+		o := newObserver(t, addr, fmt.Sprintf("obs-scan-%d", round), "spBv1.0/STATE/#")
+		// retained publishes to topics the scan is reading
+		for i := 0; i < 200; i++ {
+			pub.cli.Publish(fmt.Sprintf("spBv1.0/STATE/seed%05d", (i*97+round*13)%8000), 0, true, []byte("y"))
+		}
+		pub.cli.Publish("spBv1.0/STATE/done", 1, true, []byte("y")).Wait()
+		o.cli.Disconnect(10)
 	}
 }

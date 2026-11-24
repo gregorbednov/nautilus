@@ -1,0 +1,332 @@
+page: website/src/content/docs/guides/checkout.md
+title: I/O checkout and commissioning sign-off
+prefix: CHK
+claims:
+  - id: CHK-001
+    claim: >-
+      The checkout is optional: a project with no `checkout:` section gets no
+      checkout routes (they answer that it is not enabled for the project) and
+      naut check prints nothing about it.
+    source: "#i-o-checkout-and-commissioning-sign-off"
+    tests:
+      - go ./server TestCheckoutIsOffUnlessTheProjectEnablesIt
+      - go ./cmd/naut TestCheckoutIsOptIn
+      - go ./cmd/naut TestCheckHoldsTheCheckoutSheetToTheProject
+
+  - id: CHK-002
+    claim: >-
+      `naut checkout init` writes a row for each scalar input and output tag,
+      with the alias as its address, the equipment of an alarm on the tag and
+      the first auth area whose patterns match; struct and array tags are
+      reported as not listed.
+    source: "#the-sheet"
+    tests:
+      - go ./cmd/naut TestCheckoutInitWritesTheSheetFromTheProject
+
+  - id: CHK-003
+    claim: >-
+      naut check holds the sheet to the project: a point names a tag the
+      project has, a forced point is a declared output, a bad row is named, and
+      a single-person sign-off is a warning.
+    source: "#the-sheet"
+    tests:
+      - go ./cmd/naut TestCheckHoldsTheCheckoutSheetToTheProject
+      - go ./checkout TestSheetValidate
+
+  - id: CHK-004
+    claim: >-
+      A result carries what the controller read at the point's tag and its
+      quality, and the client cannot say what was seen; a fail and a note must
+      say why; one run is open at a time; an abandoned run takes no more
+      results and keeps the ones it has.
+    source: "#runs-and-results"
+    tests:
+      - go ./server TestCheckoutRunAndResults
+      - go ./server TestCheckoutReadingsAreTheControllersOwn
+      - go ./server TestJSONSafeWritesNaNAsText
+      - go ./checkout TestRunsAndResults
+
+  - id: CHK-005
+    claim: >-
+      Recording needs the checkout permission in the point's area, and a
+      person (a token records nothing); beginning and abandoning a run need it
+      for the whole controller; a refusal records nothing.
+    source: "#who"
+    tests:
+      - go ./server TestCheckoutWhoMayRecord
+      - go ./server TestCheckoutRecordingIsScopedToThePointsArea
+      - go ./server TestEveryAreaScopedActionChecksItsTarget
+
+  - id: CHK-006
+    claim: >-
+      The results file is chained by SHA-256 line to line and fsynced per
+      entry: a line edited, or removed or moved from the middle, is refused at
+      start and never repaired, and a last line cut short before it was
+      acknowledged is cut off; a failed write is cut back so the next entry is
+      never glued onto half a line.
+    source: "#runs-and-results"
+    tests:
+      - go ./checkout TestOpenRefusesATamperedFile
+      - go ./checkout TestOpenDropsATornLastLine
+      - go ./checkout TestAFailedAppendLeavesNothingBehind
+      - go ./checkout TestTheStoreStopsWhenItCannotCutBack
+      - go ./checkout TestAHugeReadingIsShortened
+    partial: true
+    note: >-
+      The file is fsynced per entry and its directory once at creation; a power
+      cut between a write and its sync is not simulated (the torn line is a
+      hand-made one). Lines removed from the end of the file, or the whole file,
+      are not noticed: nothing outside the file anchors the chain yet.
+
+  - id: CHK-007
+    claim: >-
+      Every begin, result and abandon is an audit entry, accepted or refused,
+      and a redundant pair that has no checkout store (a project without the
+      section or without auth users) refuses the checkout; one with it keeps
+      its results in the log (CHK-014).
+    source: "#who"
+    tests:
+      - go ./server TestEveryWritePathJournalsExactlyOneEntry
+      - go ./server TestCheckoutRefusedOnAPair
+
+  - id: CHK-008
+    claim: >-
+      A checkout force is refused unless the run is open on this sheet, the
+      caller holds the checkout and the force permissions in the point's area,
+      the point's id was typed, the point is one the sheet forces, its
+      equipment is out of service now (a window that has run out does not count,
+      swept or not), the seconds are 1 to 300, and nothing at or around the
+      output is forced already; nothing is forced by a refused request.
+    source: "#forcing-an-output"
+    tests:
+      - go ./server TestCheckoutForceIsHeldToItsInterlock
+      - go ./server TestCheckoutForceNeedsBothPermissions
+      - go ./server TestCheckoutForceRefusesAnOutputAlreadyForced
+      - go ./server TestCheckoutForceRefusesAnOverlappingForce
+      - go ./server TestCheckoutForceRefusesAnExpiredWindow
+      - go ./server TestCheckoutForceDefaultsAndConfirmation
+      - go ./server TestCheckoutForceRefusesAToken
+      - go ./runtime TestForceIfFreeSeesOverlaps
+      - go ./alarm TestIsOutOfServiceHonoursAnEndedWindow
+
+  - id: CHK-009
+    claim: >-
+      A checkout force lets go by itself when its seconds are up (a timer, not
+      a wall-clock time), and when it is released or its run is abandoned; every
+      frame says it stands, with the seconds left, until then (and stops saying
+      so if the force is cleared); it also ends when its equipment is back in
+      service or its window runs out; the controller's own end of it is an
+      audit entry; the force is identified by the force table's generation, so
+      an enum, a TIME or a member force is let go like any other and a force
+      someone else set or changed meanwhile is not removed, and the record says
+      so; a result on a forced point carries the force and how it ended.
+    source: "#forcing-an-output"
+    tests:
+      - go ./server TestCheckoutForceStandsThenExpiresByItself
+      - go ./server TestCheckoutForceReleaseAndAbandon
+      - go ./server TestCheckoutForceDoesNotRemoveAnotherForce
+      - go ./server TestCheckoutForceReleasesTypedOutputs
+      - go ./server TestCheckoutForceEndsWhenTheEquipmentIsBackInService
+      - go ./server TestCheckoutForceNoticesItsForceBeingCleared
+      - go ./server TestCheckoutForceStateIsRaceFree
+      - go ./runtime TestForceGenerationsAreOwnership
+      - go ./runtime TestForceSpellingsOfOneElementAreOneEntry
+      - go ./runtime TestForceSurvivesALiterallyNamedTagBesideTheArray
+      - go ./runtime TestForceRefusesMalformedIndexes
+      - go ./runtime TestForceIfFreeNamesTheForceTheWayTheTableDoes
+      - go ./runtime TestForceIndexSpellingsAreOneAddress
+      - go ./server TestCheckoutForceCanonicalSpellings
+      - go ./server TestCheckoutAbandonDuringAStartLetsTheForceGo
+      - go ./server TestCheckoutNoForceStartsWhileAnotherIsEnding
+      - go ./server TestCheckoutForceReconcilesAStaleRecord
+      - go ./checkout TestForcesInTheRecord
+    partial: true
+    note: >-
+      The expiry is a Go timer (the monotonic clock); no test steps the wall
+      clock. A force left standing in the file by a process that is gone is
+      recorded as interrupted when the store is opened (tested on the store);
+      that naut run calls it at start is not itself tested. A takeover on a
+      pair is CHK-015.
+
+  - id: CHK-010
+    claim: >-
+      A run exports as JSON or CSV by `GET /api/checkout/runs/{id}/export`,
+      read like the run itself: every result is kept (a fail before a pass),
+      the points are in the sheet's order and the same run gives the same
+      bytes, results for a point the sheet no longer lists are kept, the
+      content says it is unsealed (and, for a rehearsal, that it can never be
+      signed), a note that would be a spreadsheet formula is defused, and the
+      file's name is built from the run's id alone.
+    source: "#export"
+    tests:
+      - go ./server TestCheckoutExport
+      - go ./server TestCheckoutExportOfARehearsalSaysSo
+      - go ./checkout TestNeutralize
+      - go ./checkout TestFileStemIsBuiltFromTheIDAlone
+      - go ./checkout TestExportKeepsResultsForPointsTheSheetNoLongerHas
+      - go ./checkout TestExportIsDeterministic
+
+  - id: CHK-011
+    claim: >-
+      A person with the signoff permission seals a run, asking for a fresh
+      password, and the controller decides every condition under the store's
+      lock: it refuses a rehearsal run, a controller that cannot say its devices
+      are real (decided from its own manifest when the run begins and again at
+      the seal, failing closed: no field driver, any loopback, own-box or
+      virtual endpoint, any endpoint it cannot read, waived only for the names
+      the manifest lists in real-io; whatever the client's flag says; a result
+      recorded against other devices than the run began against is refused), a sheet that changed since the
+      run began, a standing checkout force, a point whose latest result is not
+      a pass (none, a fail or only a note), and (by default) a signer who took
+      part in the run (began it, recorded results or forced an output), and
+      any force or substitute standing on a sheet tag; a pass is not recorded
+      while a force or substitute (other than the checkout's own force on the
+      point) stands on the point's tag, and a fail or note records what stood; a refused seal writes nothing; a
+      sealed run takes no more results; single-person sign-off is said in the
+      record.
+    source: "#signing-off"
+    tests:
+      - go ./checkout TestSealSignsAndVerifies
+      - go ./checkout TestSealRefusals
+      - go ./checkout TestSealRefusesARehearsal
+      - go ./checkout TestSealKeepsTheFailThatAPassSuperseded
+      - go ./checkout TestSingleModeSaysSoInTheRecord
+      - go ./checkout TestAFailedSealLeavesNothingSealed
+      - go ./server TestCheckoutSealSignsAndTheRecordVerifies
+      - go ./server TestCheckoutSealRefusals
+      - go ./server TestCheckoutSealSinglePersonSaysSo
+      - go ./cmd/naut TestSealEvidenceFailsClosed
+      - go ./checkout TestSealNeedsAPassOnEveryPoint
+      - go ./checkout TestSealRefusesResultsRecordedAgainstOtherDevices
+      - go ./cmd/naut TestRedactRemovesCredentials
+      - go ./cmd/naut TestEvidenceReasonStaysShortOnALargeSheet
+      - go ./checkout TestPassIsRefusedWhileAnOverrideStands
+      - go ./checkout TestSealRefusedWhileAnOverrideStands
+      - go ./server TestCheckoutOverridesOnSheetTags
+      - go ./server TestCheckoutOwnForceIsNotAnOverride
+      - go ./checkout TestTwoPersonCountsEveryoneWhoTookPart
+      - go ./checkout TestSealIsBoundToTheDevicesTheRunBeganAgainst
+      - go ./server TestCheckoutRunBegunAgainstVirtualDevicesCanNeverBeSealed
+      - go ./server TestCheckoutSealRefusesDevicesThatChangedSinceTheRunBegan
+      - go ./cmd/naut TestClassifyEndpoints
+
+  - id: CHK-012
+    claim: >-
+      A sealed record is tamper-evident: it carries the export, a payload and the
+      controller's Ed25519 signature, and `naut checkout verify` fails on an
+      edited result, payload, signature or key, and with the controller's
+      results file on an edited or removed line, a removed seal entry, or another
+      controller's file; the seal's hash is also written in the audit journal, and `verify --audit` finds it there; it says plainly that this is not an electronic
+      signature in a legal or regulatory sense and that the person's identity is
+      the controller's sign-in.
+    source: "#signing-off"
+    tests:
+      - go ./checkout TestVerifyCatchesTampering
+      - go ./checkout TestVerifyChecksWhereTheSealSits
+      - go ./checkout TestSealVerifiesNotesThatHTMLWouldEscape
+      - go ./checkout TestOpenSweepsASealedRecordForARunTheFileCallsOpen
+      - go ./checkout TestTheSigningKey
+      - go ./cmd/naut TestCheckoutVerifyCommand
+      - go ./server TestEveryWritePathJournalsExactlyOneEntry
+
+  - id: CHK-013
+    claim: >-
+      A run prints as a page: a run not sealed says DRAFT, NOT SIGNED OFF, a
+      sealed run's report is built from its sealed record and is refused when
+      that record no longer verifies, every free-text field is escaped, and the
+      page loads nothing and is served with a policy that allows no script. The
+      Checkout page offers Sign off only to a person with signoff on an open
+      live run, shows the signing key's fingerprint and each run's files, and
+      says what a seal is.
+    source: "#export"
+    tests:
+      - go ./checkout TestReportEscapesAndLoadsNothing
+      - go ./checkout TestReportOfASealedRunNamesWhoSignedAndWhatItWasConnectedTo
+      - go ./server TestCheckoutReport
+      - go ./internal/hmibuild TestTheCheckoutPageIsOptIn
+
+  - id: CHK-014
+    claim: >-
+      On a redundant pair the checkout's runs live in the operator-intent log,
+      not in a file: every entry is proposed through the log and applied at
+      commit on every replica by one deterministic apply (the log's own
+      sequence number and time, never the clock), so both controllers hold
+      the same runs and write the same canonical results file; an entry apply
+      refuses (a second run begun on the other controller in the same moment)
+      is skipped alike on every replica and the proposer is told; a write with
+      no majority is refused before anything is proposed and never queued; a
+      seal is signed by the controller that proposes it over the chain as it
+      stood and is applied only if nothing committed first (else signed
+      again), every replica checks a seal's signature, key, hash, run, signer, the
+      two-person rule and the results at apply, and any replica rebuilds the
+      sealed record from its own entries (keeping it, so a later edit of the
+      sheet does not lose it) and refuses to serve one that does not hash to
+      what was signed; a replica that reads an entry from a newer build or of
+      an unknown kind stops (and says so) instead of diverging; a replica
+      that was away catches up from the log.
+    source: "#a-redundant-pair"
+    tests:
+      - go ./checkout TestAPairHoldsOneRunOnBothControllers
+      - go ./checkout TestTwoBeginsInTheSameMomentLoseTheSecondOnEveryReplica
+      - go ./checkout TestAPairRefusesWritesWithoutAMajority
+      - go ./checkout TestASealOnOneControllerVerifiesFromTheOther
+      - go ./checkout TestASealThatRacedAResultIsSignedAgain
+      - go ./checkout TestAReplicaWithAnotherSheetRefusesTheSealedRecord
+      - go ./checkout TestAReplicaWithAnotherHistoryRefusesTheSealedRecord
+      - go ./checkout TestReplayGivesTheSameStoreAndResetEmptiesIt
+      - go ./checkout TestConcurrentWritersOnAPairAllLand
+      - go ./checkout TestASealedRecordSurvivesAnEditOfTheSheet
+      - go ./checkout TestApplyRefusesASealThatIsNotWhatItSaysItIs
+      - go ./checkout TestAReplicaThatCannotReadAnEntryHaltsInsteadOfDiverging
+      - go ./checkout TestAWriterIsToldItsOwnResultNotALaterOne
+      - go ./checkout TestALateEndDoesNotEndTheNextForce
+      - go ./checkout TestAProposerInFlightWhenTheStoreHaltsIsToldUnknown
+      - go ./checkout TestAKeptRecordThatIsNotTheLogsIsNotServed
+      - go ./checkout TestASealWithoutAPayloadIsRefusedAtApply
+      - go ./server TestAPairsWriteAnswersSayWhetherAnythingIsWaiting
+      - go ./server TestAProposeIsNotAnswerUntilItIsAppliedHere
+      - go ./server TestReconcileEndsAForceNothingDrives
+      - go ./checkout TestATakeoverEndsAForceTheLogStillHas
+      - go ./server TestACheckoutOnAPairIsOnBothControllers
+      - go ./server TestASealSignedOnOneControllerVerifiesFromTheOtherOnAPair
+      - go ./server TestACheckoutWriteWithoutAMajorityIsRefusedAndNeverQueued
+      - go ./server TestAControllerThatWasAwayCatchesUpTheRuns
+      - go ./server TestCheckoutLogHandsOtherKindsOn
+      - go ./server TestARealisticCheckoutRunIsAFewMegabytesOfLog
+      - go ./server TestAPairsServersAnswerTheCheckoutAndShowBothKeys
+      - go ./cmd/naut TestAPairOfMembersSharesTheCheckout
+    note: >-
+      naut run composes the log's apply, attach and supersede reset for a
+      project with a checkout section and auth users (tested through two pair
+      members); the duty loop's steps (the lead by term, the halted condition,
+      the reconcile) are tested as steps, not as a once-a-second timed run.
+      Not exercised on bench hardware.
+
+  - id: CHK-015
+    claim: >-
+      A force is a controller's own output drive and never fails over. On a
+      pair, the controller that runs the program ends (as interrupted) a
+      standing force it is not driving, once its log has synced; a standby
+      refuses to force; a controller that loses the lead, or wins it again in
+      another term, lets the force it drove go at once (unforced in its own
+      table, its timer and watch stopped) and proposes nothing, also when its
+      checkout has halted; a force still starting at that moment lets go
+      itself; a force whose record the log says is ended (an operator
+      abandoning the run on the other controller) is let go by its driver
+      within a second; a shutdown lets a standing force go and records it as
+      interrupted. A force let go here without a record end logs why (the lead
+      lost, or the log no longer says it stands).
+    source: "#a-redundant-pair"
+    tests:
+      - go ./server TestDemotionLetsAForceGoAndARePromotionFindsNoneStanding
+      - go ./server TestDemotionDuringAStartLetsTheForceGo
+      - go ./server TestCheckoutForceEndedInTheRecordElsewhereIsLetGoHere
+      - go ./server TestStopLetsAStandingForceGoAndWaitsForItsGoroutines
+      - go ./server TestReconcileEndsAForceNothingDrives
+      - go ./checkout TestATakeoverEndsAForceTheLogStillHas
+      - go ./cmd/naut TestCheckoutDutiesFollowTheLeadByTerm
+    note: >-
+      The output is fenced and the table cleared by the runtime on a lost
+      lead; this claim is the checkout's own state following it. The duty
+      loop is tested as steps, not as a timed run; not exercised on bench
+      hardware.

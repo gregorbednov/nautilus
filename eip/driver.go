@@ -1,6 +1,7 @@
 package eip
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/joyautomation/nautilus/eip/logix"
+	"github.com/joyautomation/nautilus/internal/fence"
 	nio "github.com/joyautomation/nautilus/io"
 	"github.com/joyautomation/nautilus/lang/ir"
 )
@@ -24,6 +26,7 @@ import (
 // WriteOutputs enqueues changed values; a writer goroutine pushes them to the
 // controller (latest value wins per tag).
 type Driver struct {
+	fence.CutLabel
 	host     string
 	port     int
 	slot     int
@@ -49,8 +52,12 @@ type Driver struct {
 	// (internal words like TIMER.Control). They read as zero.
 	deadLeaves map[string]map[string]bool
 
-	mu        sync.Mutex
-	snapshot  nio.Values // latest polled values (nautilus tag name -> value)
+	mu       sync.Mutex
+	snapshot nio.Values // latest polled values (nautilus tag name -> value)
+	// failed holds the tags whose last read failed on a live session: their
+	// snapshot value is the last good one, and Quality says Bad until a
+	// read succeeds again (publish clears it).
+	failed    map[string]bool
 	connected bool
 	// primed is set once every scan class has completed a poll on the
 	// current connection, and cleared when the connection changes. The
@@ -74,12 +81,45 @@ type Driver struct {
 	term  uint64
 	wkick chan struct{}
 
+	// baseline (under wmu) is armed by Start unless the driver began as a
+	// standby (sawShut): the first push is not a command, it is decided per
+	// output against what the controller holds (#1123). holdBaseline makes
+	// it record and never send (a held swap, io.BaselineHolder).
+	baseline     bool
+	holdBaseline bool
+	// undecided holds the start-up baseline's outputs that no live read of
+	// the controller has settled yet: the program's latest value for each.
+	// They are in neither written nor pending until decided, so nothing
+	// that walks those (a requeue, a struct's previous value) sees them.
+	undecided map[string]any
+	// scanRead is what BeginScan froze for the scan in progress: the
+	// polled outputs' values as read on this connection, once every class
+	// has completed a poll. scanUnread marks the outputs that cannot be
+	// read back (not polled, or their read failed). Decided only against
+	// these, and only on a push from that scan; nil until a scan is live.
+	scanRead   map[string]any
+	scanUnread map[string]bool
+	scanLive   bool
+	// scanAware: BeginScan has been called, so a runtime drives the driver
+	// and decides on its pushes; without one the driver decides itself, at
+	// the poll.
+	scanAware atomic.Bool
+	// sawShut: the write gate has been seen closed, so this driver began (or
+	// became) a standby, which has no baseline: its takeover commands every
+	// output (#606).
+	sawShut atomic.Bool
+
 	// gateMu guards writeGate (SetWriteGate). gateShut is true from the
 	// first look that finds the gate closed to the first that finds it
 	// open again (see gateOpen), and turnMu serializes those transitions.
 	// wanted is the request OutputsWanted answers.
 	gateMu    sync.Mutex
 	writeGate func() bool
+	sendGate  nio.SendGate // a pair's gate with its send budget (SetSendGate)
+	// leaseTerm is the lease's term the last open look saw (0: none yet,
+	// or no pair): a look under another term is a reopen, closed between
+	// two looks or not (#1040 review).
+	leaseTerm atomic.Uint64
 	gateShut  atomic.Bool
 	turnMu    sync.Mutex
 	wanted    atomic.Bool
@@ -177,6 +217,7 @@ func New(host string, m Manifest, opts ...Option) (*Driver, error) {
 		snapshot:   nio.Values{},
 		pending:    map[string]any{},
 		written:    map[string]any{},
+		undecided:  map[string]any{},
 		wkick:      make(chan struct{}, 1),
 		byName:     map[string]TagBinding{},
 		classRates: map[string]time.Duration{},
@@ -361,6 +402,10 @@ func (d *Driver) OutputNames() []string {
 func (d *Driver) Start(ctx context.Context) {
 	ctx, d.cancel = context.WithCancel(ctx)
 	d.done = make(chan struct{})
+	d.wmu.Lock()
+	d.baseline = !d.sawShut.Load() // a standby has none (#606)
+	d.holdBaseline = false
+	d.wmu.Unlock()
 	d.started.Store(true)
 	go d.run(ctx)
 }
@@ -466,11 +511,15 @@ func (d *Driver) ReadInputs() (nio.Values, error) {
 
 // Quality reports, per tag, the non-Good verdicts (io.QualityReporter): a
 // binding never delivered is NotConnected, and one delivered while the
-// controller is not connected now is Stale — its last value, held. The
-// companion is the driver's own truth and always Good. Before this the
-// runtime could only infer staleness from a failed read, which this driver
-// stopped reporting once it had delivered anything: a controller that had
-// dropped read Good on every tag it had ever polled.
+// controller is not connected now is Stale — its last value, held. A tag
+// whose last read failed while the session stayed up is Bad, its last good
+// value held, until a read succeeds (modbus's rule for a failed block on a
+// live connection). The companion is the driver's own truth and always
+// Good. Before this the runtime could only infer staleness from a failed
+// read, which this driver stopped reporting once it had delivered
+// anything: a controller that had dropped read Good on every tag it had
+// ever polled, and a tag that failed to read on a live session (#862)
+// kept its old value as Good.
 func (d *Driver) Quality() map[string]nio.Quality {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -484,6 +533,8 @@ func (d *Driver) Quality() map[string]nio.Quality {
 				q = nio.NotConnected
 			case !d.connected:
 				q = nio.Stale
+			case d.failed[b.Name]:
+				q = nio.Bad
 			default:
 				continue
 			}
@@ -508,8 +559,38 @@ func (d *Driver) WriteOutputs(vals nio.Values) error {
 	}
 	d.wmu.Lock()
 	changed := false
+	baseline := d.baseline
+	recordOnly := baseline && d.holdBaseline
+	d.baseline = false
+	aware := d.scanAware.Load()
 	for name, v := range vals {
 		if _, ok := d.byName[name]; !ok {
+			continue
+		}
+		if _, waiting := d.undecided[name]; waiting {
+			// still waiting for a push computed from its live read: the
+			// latest value is the one to decide with, baseline push or not
+			d.undecided[name] = v
+			if d.decideLocked(name, aware) {
+				changed = true
+			}
+			continue
+		}
+		if recordOnly {
+			// Record, never send. A command already queued keeps it.
+			if _, queued := d.pending[name]; !queued {
+				d.written[name] = v
+			}
+			continue
+		}
+		if baseline {
+			if _, queued := d.pending[name]; queued {
+				continue
+			}
+			d.undecided[name] = v
+			if d.decideLocked(name, aware) {
+				changed = true
+			}
 			continue
 		}
 		if prev, ok := d.written[name]; ok && equalValue(prev, v) {
@@ -523,12 +604,210 @@ func (d *Driver) WriteOutputs(vals nio.Values) error {
 	}
 	d.wmu.Unlock()
 	if changed {
-		select {
-		case d.wkick <- struct{}{}:
-		default:
-		}
+		d.kickWriter()
 	}
 	return nil
+}
+
+// decideAtPoll settles the waiting outputs of a driver no runtime drives
+// (no BeginScan): the connection is primed, so what the poll read is live.
+// With a runtime, the decision is made on a push from a scan instead.
+func (d *Driver) decideAtPoll() {
+	if d.scanAware.Load() {
+		return
+	}
+	d.wmu.Lock()
+	queued := false
+	for name := range d.undecided {
+		if d.decideLocked(name, false) {
+			queued = true
+		}
+	}
+	d.wmu.Unlock()
+	if queued {
+		d.kickWriter()
+	}
+}
+
+func (d *Driver) kickWriter() {
+	select {
+	case d.wkick <- struct{}{}:
+	default:
+	}
+}
+
+// decideLocked settles one undecided output against what the controller
+// holds, when a live read of it is at hand: recorded when it holds the
+// program's value, queued as one command when it does not (a struct: the
+// members that differ, against what the controller was read to hold), and
+// queued whole when the output cannot be read back. Reports whether it
+// queued. aware: a runtime drives the driver, so only what BeginScan froze
+// counts; otherwise the latest live poll does. Caller holds wmu.
+func (d *Driver) decideLocked(name string, aware bool) bool {
+	v, ok := d.undecided[name]
+	if !ok {
+		return false
+	}
+	var dev any
+	var unread bool
+	if aware {
+		if !d.scanLive {
+			return false
+		}
+		dev, unread = d.scanRead[name], d.scanUnread[name]
+	} else {
+		var live bool
+		dev, unread, live = d.liveNow(name)
+		if !live {
+			return false
+		}
+	}
+	delete(d.undecided, name)
+	if unread {
+		d.pending[name] = v // cannot be read back: written once, as before
+		return true
+	}
+	if !d.differs(d.byName[name], v, dev) {
+		d.written[name] = v
+		return false
+	}
+	if _, isStruct := dev.(ir.Value); isStruct && dev.(ir.Value).Kind == ir.TypeStruct {
+		d.written[name] = dev // what the controller holds: only the members that differ go out
+	}
+	d.pending[name] = v
+	return true
+}
+
+// liveNow is the latest read of an output on a primed connection, for a
+// driver with no runtime driving it. live is false until every class has
+// polled on this connection.
+func (d *Driver) liveNow(name string) (dev any, unread, live bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.connected || !d.primed {
+		return nil, false, false
+	}
+	dev, unread = d.readOf(name)
+	return dev, unread, true
+}
+
+// readOf is the snapshot's value for an output, or unread when it has none
+// to trust (not polled, or its last read failed). Caller holds mu.
+func (d *Driver) readOf(name string) (any, bool) {
+	v, ok := d.snapshot[name]
+	if !ok || d.failed[name] {
+		return nil, true
+	}
+	return v, false
+}
+
+// BeginScan is the driver's io.ScanBeginner: the runtime calls it before it
+// reads this scan's inputs, so the push that scan makes was computed from
+// what the controller has answered by now. It freezes that for the start-up
+// baseline, which decides only on such a push, never on one computed from
+// init values before the first read (#1123), and asks the runtime for the
+// whole output set when an output is waiting and decidable.
+func (d *Driver) BeginScan() {
+	d.scanAware.Store(true)
+	d.wmu.Lock()
+	armed := d.baseline
+	waiting := len(d.undecided) > 0
+	d.wmu.Unlock()
+	if !armed && !waiting {
+		d.wmu.Lock()
+		d.scanLive, d.scanRead, d.scanUnread = false, nil, nil
+		d.wmu.Unlock()
+		return
+	}
+	read := map[string]any{}
+	unread := map[string]bool{}
+	d.mu.Lock()
+	live := d.connected && d.primed
+	if live {
+		for name := range d.byName {
+			if v, u := d.readOf(name); u {
+				unread[name] = true
+			} else {
+				read[name] = v
+			}
+		}
+	}
+	d.mu.Unlock()
+	d.wmu.Lock()
+	d.scanLive, d.scanRead, d.scanUnread = live, read, unread
+	if live && len(d.undecided) > 0 {
+		d.wanted.Store(true) // a waiting output is decidable: push it
+	}
+	d.wmu.Unlock()
+}
+
+// DisarmBaseline makes the next WriteOutputs a command rather than the
+// start-up baseline (io.BaselineDisarmer): a driver swapped into a running
+// set starts from the current commands. Call it after Start.
+func (d *Driver) DisarmBaseline() {
+	d.wmu.Lock()
+	d.baseline = false
+	d.wmu.Unlock()
+}
+
+// HoldBaseline makes the start-up baseline record and never send, whatever
+// the controller holds (io.BaselineHolder): a driver swapped in under
+// HoldOutputsOnSwap. Call it after Start.
+func (d *Driver) HoldBaseline() {
+	d.wmu.Lock()
+	d.holdBaseline = true
+	d.wmu.Unlock()
+}
+
+// Started reports whether Start has run (io.StartReporter).
+func (d *Driver) Started() bool { return d.started.Load() }
+
+// differs reports whether the controller's read dev is not the program's
+// value v for binding b. A scalar is compared as the bytes it would be
+// written as, so a REAL that rounds the same is equal. A struct is compared
+// over the members the driver writes (elementary, not strings or arrays),
+// the way writeStructLeaves walks them.
+func (d *Driver) differs(b TagBinding, v, dev any) bool {
+	if code, isElem := elementaryCode(b.Type); isElem && b.ArrayLen == 0 {
+		return !scalarBytesEqual(code, scalarOf(v), scalarOf(dev))
+	}
+	iv, ok1 := v.(ir.Value)
+	dv, ok2 := dev.(ir.Value)
+	td, ok3 := d.typeDef(b.Type)
+	if !ok1 || !ok2 || !ok3 {
+		return true
+	}
+	return d.leavesDiffer(td, iv, dv)
+}
+
+func (d *Driver) leavesDiffer(td TypeDef, v, dev ir.Value) bool {
+	if v.Kind != ir.TypeStruct || dev.Kind != ir.TypeStruct {
+		return true
+	}
+	for i, f := range td.Fields {
+		if i >= len(v.Fld) || i >= len(dev.Fld) {
+			break
+		}
+		if code, isElem := elementaryCode(f.Type); isElem && f.ArrayLen == 0 {
+			if !scalarBytesEqual(code, plainScalar(v.Fld[i]), plainScalar(dev.Fld[i])) {
+				return true
+			}
+			continue
+		}
+		if sub, ok := d.typeDef(f.Type); ok && f.ArrayLen == 0 {
+			if d.leavesDiffer(sub, v.Fld[i], dev.Fld[i]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// scalarBytesEqual compares two scalars as the bytes written for code.
+func scalarBytesEqual(code uint16, a, b any) bool {
+	ab, err1 := logix.EncodeScalar(code, a)
+	bb, err2 := logix.EncodeScalar(code, b)
+	return err1 == nil && err2 == nil && bytes.Equal(ab, bb)
 }
 
 // ── write gate ───────────────────────────────────────────────────────
@@ -570,6 +849,17 @@ func (d *Driver) SetWriteGate(gate func() bool) {
 	d.gateMu.Unlock()
 }
 
+// SetSendGate installs a pair's gate with its send budget (io.SendGated,
+// design §3.4): read immediately before every write request (each scalar,
+// each struct member), which gets the budget as its deadline; a request
+// still unanswered at its deadline resets the session's socket
+// (SO_LINGER 0), and the session is dialed again.
+func (d *Driver) SetSendGate(g nio.SendGate) {
+	d.gateMu.Lock()
+	d.sendGate = g
+	d.gateMu.Unlock()
+}
+
 // PlainWriteGate marks this driver's write gate as only a gate
 // (io.PlainGated): open, it acts as with none. naut run gives it one in a
 // project without redundancy too, open while the scans are live (#625).
@@ -582,31 +872,55 @@ var _ nio.PlainGated = (*Driver)(nil)
 // finds it open again after one found it closed forgets every written and
 // queued value and asks for the outputs. Callers do not hold wmu.
 func (d *Driver) gateOpen() bool {
+	open, _, _ := d.look()
+	return open
+}
+
+// look is gateOpen with the send budget (negative: no deadline) and the
+// lease's term the same read of the gate gave (io.SendGate), for a look
+// made right before a request.
+func (d *Driver) look() (bool, time.Duration, uint64) {
 	d.gateMu.Lock()
-	gate := d.writeGate
+	gate, send := d.writeGate, d.sendGate
 	d.gateMu.Unlock()
-	if gate == nil {
-		return true
+	if gate == nil && send == nil {
+		return true, -1, 0
 	}
-	open := gate()
+	open, budget, term := false, time.Duration(-1), uint64(0)
+	if send != nil {
+		open, budget, term = send()
+	} else {
+		open = gate()
+	}
 	// Steady state is one atomic load. A transition is made under turnMu,
 	// and gateShut is cleared only AFTER the forget: a second looker that
 	// finds the gate open meanwhile still sees gateShut, waits on turnMu,
 	// and so cannot queue against the previous term's written.
-	if shut := d.gateShut.Load(); shut == open {
+	if open && term != 0 && d.leaseTerm.Load() == 0 {
+		d.leaseTerm.CompareAndSwap(0, term) // the first term seen: nothing to forget
+	}
+	moved := open && term != 0 && d.leaseTerm.Load() != term
+	if shut := d.gateShut.Load(); shut == open || moved {
 		d.turnMu.Lock()
 		switch {
 		case !open && !d.gateShut.Load():
 			d.gateShut.Store(true)
-		case open && d.gateShut.Load():
+			d.sawShut.Store(true)
+			d.wmu.Lock()
+			d.baseline = false // a standby has no baseline (#606)
+			d.wmu.Unlock()
+		case open && (d.gateShut.Load() || term != 0 && d.leaseTerm.Load() != term):
 			d.forgetWritten()
+			if term != 0 {
+				d.leaseTerm.Store(term)
+			}
 			d.gateShut.Store(false)
 			d.wanted.Store(true)
 			d.log.Info("eip: write gate open again; every output goes out with the next push", "host", d.host)
 		}
 		d.turnMu.Unlock()
 	}
-	return open
+	return open, budget, term
 }
 
 // forgetWritten empties written and pending and starts a new term: no
@@ -616,6 +930,7 @@ func (d *Driver) forgetWritten() {
 	d.wmu.Lock()
 	clear(d.written)
 	clear(d.pending)
+	clear(d.undecided)
 	d.term++
 	d.wmu.Unlock()
 }
@@ -630,6 +945,7 @@ func (d *Driver) OutputsWanted() bool {
 var (
 	_ nio.OutputsRequester                   = (*Driver)(nil)
 	_ interface{ SetWriteGate(func() bool) } = (*Driver)(nil)
+	_ nio.SendGated                          = (*Driver)(nil)
 )
 
 // ── connection / poll loop ──────────────────────────────────────────────
@@ -817,6 +1133,7 @@ func (d *Driver) serve(ctx context.Context, sess *session) {
 	d.mu.Lock()
 	d.primed = true
 	d.mu.Unlock()
+	d.decideAtPoll()
 	for {
 		// At least once a second, so the write gate is looked at (see
 		// SetWriteGate) when no class is due for longer than that.
@@ -954,12 +1271,26 @@ func (d *Driver) storeRaw(sess *session, b TagBinding, raw logix.RawTag) {
 		d.tagError(b, err)
 		return
 	}
+	d.publish(b.Name, v)
+}
+
+// publish stores a good read and clears the tag's failed mark.
+func (d *Driver) publish(name string, v any) {
 	d.mu.Lock()
-	d.snapshot[b.Name] = v
+	d.snapshot[name] = v
+	delete(d.failed, name)
 	d.mu.Unlock()
 }
 
+// tagError records a failed read: the tag keeps its last good value and
+// reads Bad until the next good read (see Quality).
 func (d *Driver) tagError(b TagBinding, err error) {
+	d.mu.Lock()
+	if d.failed == nil {
+		d.failed = map[string]bool{}
+	}
+	d.failed[b.Name] = true
+	d.mu.Unlock()
 	d.setErr(fmt.Errorf("%s (%s): %w", b.Name, b.Device, err))
 	d.log.Warn("eip: tag read failed", "tag", b.Name, "device", b.Device, "error", err)
 }
@@ -982,15 +1313,35 @@ var (
 // goOn looks at the gate before a write of the flush that took its queue
 // in term: nil to send it, errGateClosed or errNewTerm to stop.
 func (d *Driver) goOn(term uint64) error {
-	if !d.gateOpen() {
-		return errGateClosed
+	_, cancel, err := d.send(context.Background(), term)
+	if err == nil {
+		cancel()
+	}
+	return err
+}
+
+// send is goOn immediately before one request (design §3.4): it reads the
+// gate once and returns the request's context, bounded by the gate's send
+// budget and marked fenced, so the transport resets its socket if the
+// request is still unanswered at that deadline.
+func (d *Driver) send(ctx context.Context, term uint64) (context.Context, context.CancelFunc, error) {
+	deadline, _, ok, done := fence.Begin(d.look, time.Now()) // the budget counts from before the read
+	if !ok || !fence.Started(deadline, time.Now()) {
+		done()
+		return nil, nil, errGateClosed
 	}
 	d.wmu.Lock()
-	defer d.wmu.Unlock()
-	if d.term != term {
-		return errNewTerm
+	newTerm := d.term != term
+	d.wmu.Unlock()
+	if newTerm {
+		done()
+		return nil, nil, errNewTerm
 	}
-	return nil
+	sctx, cancel := fence.Context(ctx, deadline)
+	sctx = fence.WithDevice(sctx, d.CutDriver("ethernet-ip"))
+	// The caller's cancel, after the request has returned (answered,
+	// failed, or its socket reset), ends the send for a drain.
+	return sctx, func() { cancel(); done() }, nil
 }
 
 // flushWrites pushes pending writes to the controller, in tag-name order.
@@ -1112,7 +1463,12 @@ func (d *Driver) writeOne(ctx context.Context, sess *session, b TagBinding, v an
 		if err != nil {
 			return nil, err
 		}
-		return nil, sess.ctrl.WriteTag(ctx, b.Device, code, 1, data)
+		sctx, cancel, err := d.send(ctx, term)
+		if err != nil {
+			return nil, err
+		}
+		defer cancel()
+		return nil, sess.ctrl.WriteTag(sctx, b.Device, code, 1, data)
 	}
 	iv, ok := v.(ir.Value)
 	if !ok {
@@ -1179,17 +1535,20 @@ func (d *Driver) writeStructLeaves(ctx context.Context, sess *session, devPath s
 		fv := v.Fld[i]
 		leaf := devPath + "." + f.deviceName()
 		if code, isElem := elementaryCode(f.Type); isElem && f.ArrayLen == 0 {
-			if scalarEqual(fv, held.Fld[i]) {
-				continue
+			if scalarEqual(fv, held.Fld[i]) || scalarBytesEqual(code, plainScalar(fv), plainScalar(held.Fld[i])) {
+				continue // held as the same bytes: a REAL that rounds the same
 			}
 			data, err := logix.EncodeScalar(code, plainScalar(fv))
 			if err != nil {
 				return fmt.Errorf("%s: %w", leaf, err)
 			}
-			if err := d.goOn(term); err != nil {
+			sctx, cancel, err := d.send(ctx, term)
+			if err != nil {
 				return err
 			}
-			if err := sess.ctrl.WriteTag(ctx, leaf, code, 1, data); err != nil {
+			err = sess.ctrl.WriteTag(sctx, leaf, code, 1, data)
+			cancel()
+			if err != nil {
 				return err
 			}
 			held.Fld[i] = fv

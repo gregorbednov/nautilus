@@ -23,6 +23,30 @@ the firmware starts beside its own (the [in-process
 tier](#faster-the-in-process-tier)). PLCnext Engineer is never opened, and
 no IEC program of Phoenix Contact's runs.
 
+## Without the controller
+
+The program, its tests and its screens do not need the hardware. The
+bench example carries a second manifest, `sim.yaml`, with the same
+program and the plcnext driver swapped for `memory`. Its inputs are tags
+you write in place of the board and the bus:
+
+```sh
+cd examples/plcnext-bench
+naut test -m sim.yaml .     # the acceptance suite, in virtual time
+naut run  -m sim.yaml .     # dashboard + tag API on http://localhost:8080
+```
+
+| Write | Stands in for |
+| --- | --- |
+| `DI_00` … `DI_03` | the board's pushbuttons S1 … S4 (momentary: set it back to `false`) |
+| `SliderV` (0 … 10) | the 0–10 V slider; `board.st` puts it on `AI_00` as 0 … 30000 counts |
+| `SupplyMissing` | the analog element without its supply: every channel reads `0x8020` |
+| `AXC__Online`, `AXC__Outages` | the driver's status, so an outage and the outputs' hold can be tried |
+
+What it cannot stand in for is the controller side: the Axioline timing,
+the in-process tier and the real-time numbers below were all measured on
+the bench unit.
+
 ## What you need
 
 - A PLCnext controller with its Axioline modules on the local bus, and
@@ -253,7 +277,14 @@ holds the Linux capability to ask for `SCHED_FIFO`, and the processes it
 starts do not inherit it. Pin the shim to CPU 1 (`echo 1 >
 io/nautilus_io.cpu` beside the binary) and naut to CPU 0: CPU 0 carries
 the firmware's periodic real-time tasks, and naut's threads sharing the
-shim's core were most of its lateness.
+shim's core were most of its lateness. Never pin a naut task with
+`priority:` to the shim's CPU: nautilus refuses it at start (the shim's
+FIFO 80 thread is above it) and runs the task unpinned at normal
+priority, and says so on the banner. That core also carries the NIC's
+receive path: `stmmacNapiRxTsk` at FIFO 1, the eth0 IRQ thread at 50 and
+`stmmacRxTsk` at 95. A real-time task above the NAPI thread there starves
+the network. It happened on the bench: the box was unreachable for hours,
+until the test ended.
 
 To run the shim at `SCHED_FIFO`, the controller's owner gives both
 binaries the `cap_sys_nice` file capability once, as root
@@ -263,7 +294,10 @@ the file: copying a new build into place drops it**, and the step is
 needed again. Without it both programs run best-effort and say so in the
 shim's log, the page, and naut's `scan.sched`. With it the shim asks for
 priority 80 (a `nautilus_io.prio` file asks for another), and a naut
-task may set `priority:`.
+task may set `priority:`. naut changes with every update, so give the
+capability to `naut-launch` instead, which ships beside the shim: it
+hands it on to whichever release it starts, and only it needs the
+step again, when it is itself replaced (see Start on boot).
 
 Shim lateness on the bench unit, 3-minute windows, naut at a 50 ms scan
 on CPU 0, late meaning more than 200 µs past the shim's 1 ms deadline,
@@ -301,7 +335,8 @@ protocol driver's input, which reads as zero until delivered (see [Inputs
 from a device that is
 down](/guides/tag-model/#inputs-from-a-device-that-is-down)). `__Outages` (DINT) counts the times it went false.
 `__WatchdogTrips` (DINT) counts the times the output frame went to zero
-without the driver choosing it: naut stalled for longer than
+without the driver choosing it (a closed [write
+gate](#when-the-scans-stop-the-write-gate) is the driver's choice): naut stalled for longer than
 `output-watchdog` between two writes to the page, the shim reported its
 watchdog had fired, or the shim restarted. A naut killed and restarted
 by the keepalive finds the shim's watchdog bit set by its predecessor's
@@ -348,13 +383,104 @@ start: with it on, every redeploy that outlasts the shim's 1 s watchdog
 holds until acknowledged), and its `naut test` suite covers the hold,
 the acknowledge, the restart case and the hold switched off.
 
+## When the scans stop: the write gate
+
+`naut run` keeps a write gate on the driver, open while the program's
+scans are live. It closes on a scan that hangs, or a task starved past
+its slot. Closed, the driver writes nothing to the controller, and what
+the outputs then do depends on the transport:
+
+- **shm:** the page isn't written, its heartbeat included. The shim's
+  output watchdog (`output-watchdog`, 1 s by default) drives the output
+  frame to **zero**. That's a safe state, provided zero is safe for your
+  outputs. The driver chose it, so it doesn't count in `__WatchdogTrips`.
+- **gRPC, or shm with `output-watchdog: 0`:** nothing is written, and the
+  outputs **hold their last values**. Nothing on these routes takes them
+  to a safe state, and nautilus won't invent output values to send. The
+  hold shows in three places only: an error in the log, `GateHolds` in the
+  driver's health, and the status row ("outputs held (no safe state…)").
+  No status binding reports it, and the outputs carry no quality.
+- **BusConductor:** the gate is looked at before each request the
+  handshake writes. Once it's closed, the bus is only read, and the rest
+  of the handshake runs, before any output, once the gate opens.
+
+The gate is looked at once per poll, just before the write, so a gate that
+closes after that look still lets that one write out. When the gate opens
+again, nothing is written until the program's next scan hands the driver
+its outputs, and then the whole frame goes out. **For production with
+outputs, use the shm transport with its output watchdog on.** It's the
+only route with a safe state when the program stops.
+
+## When naut or the shim dies
+
+Measured on an AXC F 2152 with a DO16 output module (#863):
+
+- **naut killed (or crashed), transport shm, `output-watchdog: 0`:** the
+  firmware does nothing. The PLC stays Running, the bus stays up, and the
+  shim keeps writing naut's last frame, so the outputs **hold**, for as
+  long as naut is down. The firmware doesn't zero them when naut's
+  BusConductor/gRPC session drops.
+- Not measured on the bench:
+  - **Transport grpc:** naut writes the outputs over gRPC itself, and
+    nothing else writes them. That they hold when naut dies is
+    **inferred** from the shm case above, where the firmware showed no
+    reaction to the session dropping.
+  - **The default `output-watchdog: 1s`:** by design, the shim drives the
+    frame to zero one second after naut's last write.
+- **The shim killed:** the firmware treats it as fatal ("Process
+  'NautilusIo' has exited unexpectedly"). Within about 4 s the hardware
+  watchdog reboots the whole controller, and the outputs go off with it.
+  After that reboot the PLC comes up **Ready|Blocked** ("Loading Plc is
+  prevented by 'Arp.System.Watchdog'"): no project, no bus, and the shim
+  idle. It stays that way until someone restarts the runtime
+  (`sudo /etc/init.d/plcnext restart`) or the controller.
+
+`naut check` warns about a manifest whose outputs would hold: transport
+grpc with an output binding, or shm with `output-watchdog: 0`. It's a
+warning and not an error, because holding the last value can be the
+engineered choice for an output. Make sure it is one.
+
 ## Start on boot
 
-The controller has no systemd, and `admin` cannot write `/etc/init.d`,
-but it may keep a crontab, and cron starts before the PLCnext runtime.
-`examples/plcnext-bench/controller/naut-keepalive.sh` starts `naut run`
-for the project unless it is already running, pinned to the CPU in
-`naut.cpu` if that file exists:
+The controller has no systemd, and `admin` cannot write `/etc/init.d`
+or use `sudo` for much, but it may keep a crontab, and cron starts
+before the PLCnext runtime. `naut deploy` has a mode for exactly that
+(the [deployment guide](/guides/deployment/#without-systemd-or-root-cron)).
+Once, as admin: put `naut-launch` from the I/O release in the root,
+have the controller's owner give it `cap_sys_nice` (the one-line recipe
+in `rt/plcnext-io/README.md`), and pin naut to CPU 0:
+
+```sh
+scp naut-launch admin@<controller>:/opt/plcnext/apps/nautilus/
+ssh admin@<controller> 'chmod 755 /opt/plcnext/apps/nautilus/naut-launch; echo 0 > /opt/plcnext/apps/nautilus/cpu'
+```
+
+Then, from the project. The controller's sshd refuses keys for admin
+(its home is group writable), so `naut deploy` signs in with the
+password: typed at the terminal, once per command, or from a password
+manager through an askpass program, such as
+`tools/deploy/askpass-bw.sh` for Bitwarden:
+
+```sh
+naut deploy install admin@<controller> -supervisor cron -root /opt/plcnext/apps/nautilus
+naut deploy update admin@<controller>      # every later release; rollback, status, backup as usual
+
+# unattended, the password from a Bitwarden item (the vault already unlocked)
+export NAUT_SSH_ASKPASS=tools/deploy/askpass-bw.sh NAUT_BW_ITEM=<item>
+naut deploy update admin@<controller>
+```
+
+The controller is built for `linux/armv7` on the matching naut release.
+It starts at boot and is restarted within a minute of a crash, through
+`naut-launch`, so a task's `priority:` holds across updates with no
+root step. naut need not wait for the runtime: the driver retries the
+socket and the page. The shim starts with the runtime, because the
+firmware starts it.
+
+Without `naut deploy`,
+`examples/plcnext-bench/controller/naut-keepalive.sh` does the same for
+a project copied by hand and run with `naut run` (pinned to the CPU in
+`naut.cpu`):
 
 ```sh
 ssh admin@<controller> 'printf "@reboot %s\n* * * * * %s\n" \
@@ -362,15 +488,17 @@ ssh admin@<controller> 'printf "@reboot %s\n* * * * * %s\n" \
   /opt/plcnext/apps/nautilus/plcnext-bench/controller/naut-keepalive.sh | crontab -'
 ```
 
-It starts naut at boot and restarts it within a minute of a crash;
-`crontab -r` takes it out. naut need not wait for the runtime: the
-driver retries the socket and the page. The shim starts with the
-runtime, because the firmware starts it. On the bench, after a reboot
-naut, the shim (FIFO 80, capabilities intact) and the heartbeat were all
-back about a minute after the controller answered ssh.
+On the bench, after a reboot naut, the shim (FIFO 80, capabilities
+intact) and the heartbeat were all back about a minute after the
+controller answered ssh.
 
 ## What it does not do yet
 
+- **Redundancy.** A project with a `plcnext` driver and a `redundancy:`
+  section is refused at load (`naut check` says so). The driver writes
+  the output image from its own loop, every scan on the shm route,
+  without asking whether this replica leads, so a standby would drive the
+  outputs. PLCnext under redundancy is #710.
 - **Per-channel quality.** The driver has one quality for the whole
   image: the bus `RUN` bit. False makes every input `bad`.
 - **The status tags on the controller.** `__Online`, `__Outages` and

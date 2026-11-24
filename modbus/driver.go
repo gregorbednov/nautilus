@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/joyautomation/nautilus/internal/fence"
 	nio "github.com/joyautomation/nautilus/io"
 )
 
@@ -163,6 +164,7 @@ type classAssignment struct {
 // values per source; each source's loop pushes them to its device (latest
 // value wins per tag).
 type Driver struct {
+	fence.CutLabel
 	manifest Manifest
 	plan     Plan
 	scanRate time.Duration
@@ -173,13 +175,17 @@ type Driver struct {
 	classRates  map[string]time.Duration
 	assignments []classAssignment
 
+	// srcMu guards the source set against ReplaceSource (#706): sources,
+	// bySource, enables, plan and manifest. Readers (the scan's read and
+	// write, health, quality, connections) take it shared.
+	srcMu    sync.RWMutex
+	replMu   sync.Mutex // serializes ReplaceSource, start to finish
 	sources  []*source
 	bySource map[string]*source
 	// byName routes writable bindings; enables routes the Enable command
 	// tags (a source's Enable tag is a synthesized OUTPUT name: the runtime
 	// hands its value to WriteOutputs, and the driver parks or wakes the
 	// source instead of writing a register).
-	byName  map[string]outBinding
 	enables map[string][]*source
 
 	inputs  []string // polled bindings + __Online/__Outages companions, sorted
@@ -201,6 +207,19 @@ type Driver struct {
 	// that finds the gate reopened while another is still forgetting waits
 	// for the forget instead of reading the previous term's written.
 	turnMu sync.Mutex
+	// leaseTerm is the lease's term the last open look saw (0: none yet,
+	// or no pair). A look that finds the gate open under another term
+	// treats it as a reopen, closed between two looks or not: the lease
+	// was lost and won again, and nothing queued before may go (#1040).
+	leaseTerm atomic.Uint64
+	// reopens counts forgetWritten: a flush that took its queue before a
+	// reopen sends none of it after (the reopen forgot it as the previous
+	// leadership's), as eip's term does (#1040 review).
+	reopens atomic.Uint64
+	// sendGate is a pair's gate with its send budget (SetSendGate): when
+	// installed it is the gate every look reads, and each request gets the
+	// budget as its deadline (design §3.4).
+	sendGate nio.SendGate
 
 	// baseline is armed by Start: the first WriteOutputs snapshot after it
 	// describes the world, it does not command it (sparkplug-host's rule).
@@ -209,6 +228,16 @@ type Driver struct {
 	// that finds the write gate closed disarms it (see SetWriteGate).
 	wmu      sync.Mutex
 	baseline bool
+	// holdBaseline (under wmu): the baseline only records (a held swap,
+	// io.BaselineHolder) instead of deciding against the device.
+	holdBaseline bool
+
+	// scanAware: BeginScan has been called, so a runtime drives this
+	// driver and a push is computed from the inputs its scan read. Without
+	// one (a harness or tool writing outputs directly) nothing says which
+	// reads a push was computed from, and the baseline decides at the read
+	// itself, as before BeginScan (#1123).
+	scanAware atomic.Bool
 
 	started atomic.Bool
 	reads   atomic.Uint64 // successful block reads
@@ -216,7 +245,12 @@ type Driver struct {
 	errs    atomic.Uint64 // transport errors + exceptions + refused writes
 
 	cancel context.CancelFunc
+	runCtx context.Context // Start's, which every source loop's derives from
 	wg     sync.WaitGroup
+	// lifeMu orders startSource against Stop: no loop is added to wg once
+	// Stop has begun waiting on it.
+	lifeMu  sync.Mutex
+	stopped bool
 }
 
 // outBinding is one writable binding with its source resolved.
@@ -224,14 +258,20 @@ type outBinding struct {
 	src *source
 	b   TagBinding
 	f   Format
+	// readable: a poll block reads the binding back, so the start-up
+	// baseline can compare with what the device holds (#1123). NoPoll and
+	// WriteOnly bindings are not.
+	readable bool
 }
 
 // source is one Modbus TCP endpoint's runtime state. Its loop goroutine is
 // the only writer of conn state; mu guards what other goroutines read
 // (snapshot, health) and write (pending, enabled).
 type source struct {
-	cfg    Source
-	blocks []*blockRun
+	cfg Source
+	// explicitTimeout: the manifest set cfg.Timeout (WriteTimeouts).
+	explicitTimeout bool
+	blocks          []*blockRun
 
 	mu       sync.Mutex
 	snapshot nio.Values // decoded values, held across disconnects
@@ -247,23 +287,62 @@ type source struct {
 	excs     uint64
 	rttMs    float64 // EWMA of request round-trip
 	enabled  bool
+	held     bool // ReplaceOptions.Held: never started, its tags Bad
 
 	// pending is the last-value write queue (tag name → desired value),
 	// held across disconnects and flushed on reconnect. written is the last
 	// value handed over per output tag — the on-change reference and what
 	// the rewrite loop re-asserts.
-	pending  map[string]any
-	written  map[string]any
-	rewrites []*rewriteRun
+	pending map[string]any
+	written map[string]any
+	// undecided holds the start-up baseline's outputs whose coil or register
+	// the device has not answered yet: the program's first value, decided
+	// against what the device holds at the first live read (#1123).
+	undecided map[string]any
+	// devRead is what the device last answered for each readable output on
+	// the current connection (cleared when it drops): a value is only ever
+	// decided against a live read.
+	devRead map[string]devValue
+	// scanRead is what BeginScan froze for the scan in progress: the
+	// outputs whose live read (or, for one that cannot be read, a live
+	// source) reached this scan's input read. The baseline decides only
+	// against it, and only on a push from that scan (#1123).
+	scanRead map[string]devValue
+	// recording: devRead is being filled (until the start-up baseline has
+	// nothing left to decide). Under mu.
+	recording bool
+	rewrites  []*rewriteRun
 	// stuck is, per tag, a command whose write did not run (0x0A, 0x0B,
 	// 0x06) and has not landed since: its retry backoff and how many
 	// times it was tried (see wroteOK). Touched only by the source loop,
 	// under mu.
 	stuck map[string]*stuckWrite
+	// safe is the takeover hold's safe values (WriteSafe, hold.go) this
+	// source's device has not yet confirmed, under mu.
+	safe map[string]any
 
 	// outputs are this source's writable binding names, so WriteOutputs
 	// can queue a source's share of a snapshot under one hold of mu.
 	outputs []string
+	// byName is this source's writable bindings, by tag: the loop encodes
+	// its writes with its own, so a source replaced while its loop winds
+	// down still writes only what it was built with (#706).
+	byName map[string]outBinding
+
+	// cancel stops this source's loop alone; done closes when it has
+	// returned (ReplaceSource). Both are set under the driver's lifeMu,
+	// and stay nil for a source whose loop never started.
+	cancel context.CancelFunc
+	done   chan struct{}
+
+	// baseline (under mu): the source's next share of an output snapshot
+	// is recorded, not sent, like the driver's start-up baseline. Set by
+	// ReplaceSource with ReplaceOptions.HoldOutputs; the next WriteOutputs
+	// clears it, gate open or not (a takeover's push is a command).
+	baseline bool
+	// observe, when set, is told what the next share of an output snapshot
+	// queued (ReplaceOptions.Observe), then cleared. Under mu.
+	observe func(FirstShare)
 
 	// kick wakes the loop: a queued write, an enable flip, a stop.
 	kick chan struct{}
@@ -291,6 +370,7 @@ type blockRun struct {
 	parkedUntil time.Time // exception parking (excCount ≥ exceptionsToPark)
 	bad         bool      // tags Bad while true (guarded by source.mu)
 	gwFail      bool      // latest read got a gateway no-answer (guarded by source.mu)
+	live        bool      // the device answered a read of it on this connection (guarded by source.mu)
 }
 
 // rewriteRun schedules one Rewrite binding's re-assert (brief §4.1).
@@ -311,7 +391,6 @@ func New(m Manifest, opts ...Option) (*Driver, error) {
 		log:        slog.Default(),
 		classRates: map[string]time.Duration{},
 		bySource:   map[string]*source{},
-		byName:     map[string]outBinding{},
 		enables:    map[string][]*source{},
 		baseline:   true,
 	}
@@ -395,26 +474,8 @@ func (d *Driver) buildSources() error {
 	}
 
 	for _, sc := range d.manifest.Sources {
-		cfg := sc
-		if cfg.Timeout <= 0 {
-			cfg.Timeout = defaultTimeout
-		}
-		if cfg.RetryMin <= 0 {
-			cfg.RetryMin = defaultRetryMin
-		}
-		if cfg.RetryMax <= 0 {
-			cfg.RetryMax = defaultRetryMax
-		}
-		s := &source{
-			cfg:      cfg,
-			snapshot: nio.Values{},
-			state:    "connecting",
-			enabled:  true,
-			pending:  map[string]any{},
-			written:  map[string]any{},
-			stuck:    map[string]*stuckWrite{},
-			kick:     make(chan struct{}, 1),
-		}
+		s := newSource(sc)
+		cfg := s.cfg
 		d.sources = append(d.sources, s)
 		d.bySource[cfg.ID] = s
 
@@ -437,9 +498,7 @@ func (d *Driver) buildSources() error {
 	}
 
 	for _, blk := range d.plan.Blocks {
-		s := d.bySource[blk.Source]
-		br := &blockRun{Block: blk, rate: d.classRates[blk.Class]}
-		s.blocks = append(s.blocks, br)
+		d.bySource[blk.Source].addBlock(blk, d.classRates[blk.Class])
 		for _, t := range blk.Bindings {
 			d.inputs = append(d.inputs, t.Name)
 		}
@@ -449,14 +508,8 @@ func (d *Driver) buildSources() error {
 		if !t.Writable {
 			continue
 		}
-		s := d.bySource[t.Source]
-		f, _ := t.format() // Validate (in BuildPlan) already vetted it
-		d.byName[t.Name] = outBinding{src: s, b: t, f: f}
+		d.bySource[t.Source].addOutput(t)
 		d.outputs = append(d.outputs, t.Name)
-		s.outputs = append(s.outputs, t.Name)
-		if t.Rewrite > 0 {
-			s.rewrites = append(s.rewrites, &rewriteRun{name: t.Name, period: t.Rewrite})
-		}
 	}
 	for name := range d.enables {
 		d.outputs = append(d.outputs, name)
@@ -464,6 +517,63 @@ func (d *Driver) buildSources() error {
 	sort.Strings(d.inputs)
 	sort.Strings(d.outputs)
 	return nil
+}
+
+// newSource is one source's runtime state before its blocks and outputs.
+func newSource(cfg Source) *source {
+	explicit := cfg.Timeout > 0
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = defaultTimeout
+	}
+	if cfg.RetryMin <= 0 {
+		cfg.RetryMin = defaultRetryMin
+	}
+	if cfg.RetryMax <= 0 {
+		cfg.RetryMax = defaultRetryMax
+	}
+	return &source{
+		cfg:             cfg,
+		explicitTimeout: explicit,
+		snapshot:        nio.Values{},
+		state:           "connecting",
+		enabled:         true,
+		pending:         map[string]any{},
+		written:         map[string]any{},
+		undecided:       map[string]any{},
+		devRead:         map[string]devValue{},
+		scanRead:        map[string]devValue{},
+		recording:       true,
+		stuck:           map[string]*stuckWrite{},
+		byName:          map[string]outBinding{},
+		kick:            make(chan struct{}, 1),
+	}
+}
+
+// polls reports whether one of the source's blocks reads the tag. Blocks are
+// added before outputs.
+func (s *source) polls(name string) bool {
+	for _, br := range s.blocks {
+		for _, t := range br.Bindings {
+			if t.Name == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *source) addBlock(blk Block, rate time.Duration) {
+	s.blocks = append(s.blocks, &blockRun{Block: blk, rate: rate})
+}
+
+// addOutput adds a writable binding (Validate has vetted its format).
+func (s *source) addOutput(t TagBinding) {
+	f, _ := t.format()
+	s.byName[t.Name] = outBinding{src: s, b: t, f: f, readable: s.polls(t.Name)}
+	s.outputs = append(s.outputs, t.Name)
+	if t.Rewrite > 0 {
+		s.rewrites = append(s.rewrites, &rewriteRun{name: t.Name, period: t.Rewrite})
+	}
 }
 
 // SetWriteGate installs the write gate WriteOutputs, the rewrite loop and
@@ -516,6 +626,42 @@ func (d *Driver) SetWriteGate(gate func() bool) {
 	d.gateMu.Unlock()
 }
 
+// SetSendGate installs a pair's gate with its send budget (io.SendGated,
+// design §3.4): read immediately before every write request, which gets
+// the budget as its deadline; a request still unanswered at its deadline
+// resets the socket (SO_LINGER 0) so nothing queued leaves late.
+func (d *Driver) SetSendGate(g nio.SendGate) {
+	d.gateMu.Lock()
+	d.sendGate = g
+	d.gateMu.Unlock()
+}
+
+var _ nio.SendGated = (*Driver)(nil)
+
+// RequestTimeout is source id's request timeout as the driver runs it (the
+// manifest's, or the default); 0 for an unknown source.
+func (d *Driver) RequestTimeout(id string) time.Duration {
+	if s, ok := d.bySource[id]; ok {
+		return s.cfg.Timeout
+	}
+	return 0
+}
+
+// WriteTimeouts is each source with a writable binding whose manifest sets
+// a request timeout, with that timeout: naut check compares it with a
+// redundant pair's send budget (design §3.4). A write on a pair is cut at
+// its send deadline whatever the timeout; only one the manifest sets is
+// reported, since a default is nothing the operator chose.
+func (d *Driver) WriteTimeouts() map[string]time.Duration {
+	out := map[string]time.Duration{}
+	for _, s := range d.sources {
+		if len(s.byName) > 0 && s.explicitTimeout {
+			out[s.cfg.ID] = s.cfg.Timeout
+		}
+	}
+	return out
+}
+
 // PlainWriteGate marks this driver's write gate as only a gate
 // (io.PlainGated): open, it acts as with none. naut run gives it one in a
 // project without redundancy too, open while the scans are live (#625).
@@ -531,18 +677,35 @@ var _ nio.PlainGated = (*Driver)(nil)
 // raced the close and recorded a value after it. Callers do not hold any
 // source's mu or wmu.
 func (d *Driver) gateOpen() bool {
+	open, _, _ := d.look()
+	return open
+}
+
+// look is gateOpen with the send budget (negative: no deadline) and the
+// lease's term the same read of the gate gave (io.SendGate), for a look
+// made right before a request.
+func (d *Driver) look() (bool, time.Duration, uint64) {
 	d.gateMu.Lock()
-	gate := d.writeGate
+	gate, send := d.writeGate, d.sendGate
 	d.gateMu.Unlock()
-	if gate == nil {
-		return true
+	if gate == nil && send == nil {
+		return true, -1, 0
 	}
-	open := gate()
+	open, budget, term := false, time.Duration(-1), uint64(0)
+	if send != nil {
+		open, budget, term = send()
+	} else {
+		open = gate()
+	}
 	// Steady state is one atomic load. A transition is made under turnMu,
 	// and gateShut is cleared only AFTER the forget: a second looker that
 	// finds the gate open meanwhile still sees gateShut, waits on turnMu,
 	// and so cannot re-assert the previous term's written (#600).
-	if shut := d.gateShut.Load(); shut == open {
+	if open && term != 0 && d.leaseTerm.Load() == 0 {
+		d.leaseTerm.CompareAndSwap(0, term) // the first term seen: nothing to forget
+	}
+	moved := open && term != 0 && d.leaseTerm.Load() != term && !mut("old_term_kept")
+	if shut := d.gateShut.Load(); shut == open || moved {
 		d.turnMu.Lock()
 		switch {
 		case !open && !d.gateShut.Load():
@@ -551,32 +714,45 @@ func (d *Driver) gateOpen() bool {
 			d.wmu.Lock()
 			d.baseline = false // a standby has no baseline (#606)
 			d.wmu.Unlock()
-		case open && d.gateShut.Load():
+		case open && (d.gateShut.Load() || term != 0 && d.leaseTerm.Load() != term && !mut("old_term_kept")):
 			d.forgetWritten()
+			if term != 0 {
+				d.leaseTerm.Store(term)
+			}
 			d.gateShut.Store(false)
 			d.wanted.Store(true)
 			d.log.Info("modbus: write gate open again; every output goes out with the next push")
 		}
 		d.turnMu.Unlock()
 	}
-	return open
+	return open, budget, term
 }
+
+// flushGenHook, when a test sets it, runs in flushWrites right after the
+// reopen generation is read, before the queue is taken.
+var flushGenHook func()
 
 // reopenHook, when a test sets it, runs at the start of forgetWritten: the
 // window another looker must not slip through, which must still see
 // gateShut set while it lasts.
 var reopenHook func()
 
-// forgetWritten empties every source's written: no value is the on-change
-// reference any more, so the next push sends them all, and no rewrite:
-// binding has anything to re-assert until it does.
+// forgetWritten empties every source's written and pending: no value is
+// the on-change reference any more, so the next push sends them all, no
+// rewrite: binding has anything to re-assert until it does, and no write
+// queued or requeued before the reopen goes out after it (#1040 review).
 func (d *Driver) forgetWritten() {
 	if reopenHook != nil {
 		reopenHook()
 	}
+	d.reopens.Add(1)
+	d.srcMu.RLock()
+	defer d.srcMu.RUnlock()
 	for _, s := range d.sources {
 		s.mu.Lock()
 		clear(s.written)
+		clear(s.pending) // a requeued write is the previous leadership's too (#1040)
+		clear(s.undecided)
 		s.mu.Unlock()
 	}
 }
@@ -608,6 +784,8 @@ func (d *Driver) InputNames() []string {
 // format or anything scaled. A source's __Online companion is BOOL and its
 // __Outages companion DINT. "" for a name the driver does not deliver.
 func (d *Driver) InputType(name string) string {
+	d.srcMu.RLock()
+	defer d.srcMu.RUnlock()
 	for _, s := range d.sources {
 		switch name {
 		case s.cfg.OnlineTagName():
@@ -617,23 +795,28 @@ func (d *Driver) InputType(name string) string {
 		}
 	}
 	for _, t := range d.manifest.Tags {
-		if t.Name != name {
-			continue
-		}
-		f, err := t.format()
-		if err != nil {
-			return ""
-		}
-		switch {
-		case f.Kind == "bool" || f.Kind == "bit":
-			return "BOOL"
-		case f.integer() && (t.Scale == 0 || t.Scale == 1) && t.Offset == 0:
-			return "DINT"
-		default:
-			return "REAL"
+		if t.Name == name {
+			return bindingType(t)
 		}
 	}
 	return ""
+}
+
+// bindingType is the IEC type a binding delivers and accepts (see
+// InputType); "" for a format that does not parse.
+func bindingType(t TagBinding) string {
+	f, err := t.format()
+	if err != nil {
+		return ""
+	}
+	switch {
+	case f.Kind == "bool" || f.Kind == "bit":
+		return "BOOL"
+	case f.integer() && (t.Scale == 0 || t.Scale == 1) && t.Offset == 0:
+		return "DINT"
+	default:
+		return "REAL"
+	}
 }
 
 // OutputNames returns the tags the driver accepts writes for: the writable
@@ -646,6 +829,8 @@ func (d *Driver) OutputNames() []string {
 
 // ScanClasses reports the resolved poll groups — for diagnostics and tests.
 func (d *Driver) ScanClasses() map[string][]string {
+	d.srcMu.RLock()
+	defer d.srcMu.RUnlock()
 	out := map[string][]string{}
 	for _, blk := range d.plan.Blocks {
 		for _, t := range blk.Bindings {
@@ -659,29 +844,84 @@ func (d *Driver) ScanClasses() map[string][]string {
 }
 
 // Plan returns the computed block-read plan (for `import --plan` and tests).
-func (d *Driver) Plan() Plan { return d.plan }
+func (d *Driver) Plan() Plan {
+	d.srcMu.RLock()
+	defer d.srcMu.RUnlock()
+	return d.plan
+}
 
 // ── lifecycle ────────────────────────────────────────────────────────────
 
 // Start launches one polling loop per source. It returns immediately; use
 // Health to observe connection state.
 func (d *Driver) Start(ctx context.Context) {
-	ctx, d.cancel = context.WithCancel(ctx)
+	d.lifeMu.Lock()
+	d.stopped = false // a driver may be started again after Stop
+	d.lifeMu.Unlock()
+	d.srcMu.Lock()
+	defer d.srcMu.Unlock()
+	d.runCtx, d.cancel = context.WithCancel(ctx)
 	d.wmu.Lock()
 	d.baseline = !d.sawShut.Load() // a standby has none (#606)
+	d.holdBaseline = false
+	for _, s := range d.sources {
+		s.mu.Lock()
+		s.recording = true // the baseline is armed again: reads count
+		s.mu.Unlock()
+	}
 	d.wmu.Unlock()
 	d.started.Store(true)
 	for _, s := range d.sources {
-		d.wg.Add(1)
-		go func(s *source) {
-			defer d.wg.Done()
-			d.run(ctx, s)
-		}(s)
+		d.startSource(s)
 	}
+}
+
+// DisarmBaseline makes the next WriteOutputs a command rather than the
+// start-up baseline (io.BaselineDisarmer): a driver swapped into a running
+// set (#706) starts from the current commands. Call it after Start, which
+// arms the baseline.
+func (d *Driver) DisarmBaseline() {
+	d.wmu.Lock()
+	d.baseline = false
+	d.wmu.Unlock()
+}
+
+// HoldBaseline makes the start-up baseline record and never send, whatever
+// the device holds (io.BaselineHolder): a driver swapped in under
+// HoldOutputsOnSwap. Call it after Start.
+func (d *Driver) HoldBaseline() {
+	d.wmu.Lock()
+	d.holdBaseline = true
+	d.wmu.Unlock()
+}
+
+// Started reports whether Start has run (io.StartReporter).
+func (d *Driver) Started() bool { return d.started.Load() }
+
+// startSource launches one source's loop under its own cancel, derived
+// from Start's context so Stop still ends it. After Stop it does nothing.
+func (d *Driver) startSource(s *source) {
+	d.lifeMu.Lock()
+	defer d.lifeMu.Unlock()
+	if d.stopped || s.held {
+		return
+	}
+	var ctx context.Context
+	ctx, s.cancel = context.WithCancel(d.runCtx)
+	s.done = make(chan struct{})
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		defer close(s.done)
+		d.run(ctx, s)
+	}()
 }
 
 // Stop tears every source loop down and waits.
 func (d *Driver) Stop() {
+	d.lifeMu.Lock()
+	d.stopped = true
+	d.lifeMu.Unlock()
 	if d.cancel != nil {
 		d.cancel()
 		d.wg.Wait()
@@ -724,6 +964,8 @@ func (d *Driver) ReadInputsInto(dst nio.Values) error {
 	// holds. Our key set only grows (values hold across disconnects), so
 	// equal sizes prove the sets match — the io.Memory trick.
 	if len(dst) != n {
+		d.srcMu.RLock()
+		defer d.srcMu.RUnlock()
 		delivered := make(map[string]bool, n)
 		for _, s := range d.sources {
 			delivered[s.cfg.OnlineTagName()] = true
@@ -746,6 +988,8 @@ func (d *Driver) ReadInputsInto(dst nio.Values) error {
 // snapshotInto fills dst with every delivered value plus the companions and
 // returns how many keys the driver delivered.
 func (d *Driver) snapshotInto(dst nio.Values) int {
+	d.srcMu.RLock()
+	defer d.srcMu.RUnlock()
 	n := 0
 	for _, s := range d.sources {
 		s.mu.Lock()
@@ -771,12 +1015,19 @@ func (d *Driver) snapshotInto(dst nio.Values) int {
 //  2. GATE. While the write gate is closed (not leader, logic faulted) no
 //     device command is queued or recorded — see SetWriteGate: the silence
 //     is what trips a device-side watchdog, by design.
-//  3. BASELINE. The first snapshot after Start is recorded, not written —
-//     it is the state of the world at t=0, not a set of commands. EXCEPT
+//  3. BASELINE. The first snapshot after Start is not a set of commands for
+//     an output the device already holds: each output is decided at the
+//     first live read of its coil/register (#1123). Equal to the program's
+//     value: recorded, nothing sent. Different: one command, so a controller
+//     that computes true while the coil holds false drives it. Not read yet:
+//     it waits for its first read (never taken as sent). Unreadable (the
+//     device refuses the read, NoPoll, WriteOnly): commanded once. EXCEPT
 //     bindings with Rewrite > 0: a keep-alive word must be asserted on
 //     connect (an SC10 drops its enable otherwise), so their baseline value
 //     is queued. A driver that has seen the write gate closed (a standby)
-//     has no baseline: its first push commands everything (#606).
+//     has no baseline: its first push commands everything (#606). Under
+//     HoldBaseline (a driver swapped in with HoldOutputsOnSwap) the
+//     baseline only records.
 //  4. CHANGE. Thereafter a value equal to the last handed-over value is not
 //     a command. A changed value is queued per source, last value per tag,
 //     and held across a disconnect — flushed when the source reconnects,
@@ -787,6 +1038,13 @@ func (d *Driver) snapshotInto(dst nio.Values) int {
 // registers changed in one snapshot go out as one FC16, never split
 // across two flushes by a poll that ran mid-snapshot (#592).
 func (d *Driver) WriteOutputs(vals nio.Values) error {
+	// The gate first, outside srcMu: a look that finds it reopened forgets
+	// every source's written (forgetWritten), which takes srcMu itself, and
+	// a reader must never re-enter srcMu while ReplaceSource waits for it
+	// (#880 review: a takeover during a replace hung the scan).
+	open := d.gateOpen()
+	d.srcMu.RLock()
+	defer d.srcMu.RUnlock()
 	kicked := map[*source]bool{}
 	for name, v := range vals {
 		if srcs, ok := d.enables[name]; ok {
@@ -809,38 +1067,200 @@ func (d *Driver) WriteOutputs(vals nio.Values) error {
 
 	d.wmu.Lock()
 	baseline := d.baseline
+	recordOnly := baseline && d.holdBaseline
 	d.baseline = false
 	d.wmu.Unlock()
 
-	if d.gateOpen() {
-		for _, s := range d.sources {
-			s.mu.Lock()
-			for _, name := range s.outputs {
-				v, ok := vals[name]
-				if !ok {
+	aware := d.scanAware.Load()
+	var told []func()
+	for _, s := range d.sources {
+		s.mu.Lock()
+		held := s.baseline
+		s.baseline = false
+		var share *FirstShare
+		if obs := s.observe; obs != nil {
+			s.observe = nil
+			share = &FirstShare{Queued: map[string]any{}, GateClosed: !open, Parked: !s.enabled}
+			told = append(told, func() { obs(*share) })
+		}
+		if !open {
+			s.mu.Unlock()
+			continue
+		}
+		for _, name := range s.outputs {
+			v, ok := vals[name]
+			if !ok {
+				continue
+			}
+			if _, waiting := s.undecided[name]; waiting {
+				// still waiting for a push computed from its live read: the
+				// latest value is the one to decide with, baseline push or not
+				s.undecided[name] = v
+				if dv, live := s.liveReadLocked(name, aware); live && s.decideLocked(name, dv) {
+					kicked[s] = true
+					if share != nil {
+						share.Queued[name] = v
+					}
+				}
+			} else if (held || recordOnly) && HeldAtBaseline(s.byName[name].b) {
+				// Record, never send. A tag with a command already
+				// queued keeps it: that one WAS asked for.
+				if _, queued := s.pending[name]; !queued {
+					s.written[name] = v
+				}
+			} else if baseline && HeldAtBaseline(s.byName[name].b) {
+				// Decided against what the device holds, on a push computed
+				// from its live read (#1123).
+				if _, queued := s.pending[name]; queued {
 					continue
 				}
-				if baseline && d.byName[name].b.Rewrite <= 0 {
-					// Record, never send. A tag with a command already
-					// queued keeps it: that one WAS asked for.
-					if _, queued := s.pending[name]; !queued {
-						s.written[name] = v
-					}
-				} else if prev, ok := s.written[name]; ok && sameScalar(prev, v) {
-					// unchanged since the last value we accounted for
-				} else {
-					s.written[name] = v
-					s.pending[name] = v
+				s.undecided[name] = v
+				if dv, live := s.liveReadLocked(name, aware); live && s.decideLocked(name, dv) {
 					kicked[s] = true
+					if share != nil {
+						share.Queued[name] = v
+					}
+				}
+			} else if prev, ok := s.written[name]; ok && sameScalar(prev, v) {
+				// unchanged since the last value we accounted for
+			} else {
+				s.written[name] = v
+				s.pending[name] = v
+				kicked[s] = true
+				if share != nil {
+					share.Queued[name] = v
 				}
 			}
-			s.mu.Unlock()
 		}
+		if share != nil {
+			for name := range s.undecided {
+				share.Undecided = append(share.Undecided, name)
+			}
+			sort.Strings(share.Undecided)
+		}
+		s.mu.Unlock()
 	}
 	for s := range kicked {
 		nudge(s.kick)
 	}
+	for _, f := range told {
+		f()
+	}
 	return nil
+}
+
+// devValue is what a poll read of one output's coil or register(s): the raw
+// words (or the bit) and the decoded value.
+type devValue struct {
+	words   []uint16
+	decoded any
+	// unreadable: the device answered the read without a usable value (a
+	// refused span, a value that does not decode): the output is commanded
+	// once, as one that cannot be read back.
+	unreadable bool
+}
+
+// decideLocked settles one undecided output against what the device holds:
+// recorded when equal, queued as one command when not (or when the device's
+// answer is unusable). Reports whether it queued. Caller holds s.mu.
+func (s *source) decideLocked(name string, dv devValue) bool {
+	v, ok := s.undecided[name]
+	if !ok {
+		return false
+	}
+	delete(s.undecided, name)
+	s.written[name] = v
+	if !dv.unreadable && s.holds(name, v, dv) {
+		return false
+	}
+	s.pending[name] = v
+	return true
+}
+
+// holds reports whether the device's read of name is the program's value v.
+// Registers are compared as the words the program's value would be written
+// as, so scale and rounding cannot make an equal value look different.
+func (s *source) holds(name string, v any, dv devValue) bool {
+	ob := s.byName[name]
+	if ob.b.Table == TableCoil || ob.f.Kind == "bit" {
+		on, err := toBool(v)
+		got, ok := dv.decoded.(bool)
+		return err == nil && ok && on == got
+	}
+	words, err := encodeRegisters(ob.f, v, s.cfg.WordOrder, s.cfg.ByteOrder, ob.b.Scale, ob.b.Offset)
+	if err != nil || len(words) != len(dv.words) {
+		return false
+	}
+	for i := range words {
+		if words[i] != dv.words[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *source) isOutput(name string) bool {
+	_, ok := s.byName[name]
+	return ok
+}
+
+// recordOutputLocked records what a poll read for one output, while the
+// start-up baseline still needs it. It decides nothing: the decision is made
+// on a push computed from the read (BeginScan). Only with no runtime driving
+// the driver (decide) is it decided here, as before BeginScan existed.
+func (s *source) recordOutputLocked(name string, dv devValue, decide bool) bool {
+	if !s.recording {
+		return false
+	}
+	if _, out := s.byName[name]; !out {
+		return false
+	}
+	s.devRead[name] = dv
+	return decide && s.decideLocked(name, dv)
+}
+
+// BeginScan is the driver's io.ScanBeginner: the runtime calls it before it
+// reads this scan's inputs. What the device has answered by now is delivered
+// to that read, so the start-up baseline's outputs are decided only on the
+// push that scan makes, never on one computed from init values before the
+// first read (#1123). It freezes, per source whose reads are all live, the
+// outputs with a read (and those that cannot be read, which are commanded
+// once), and asks the runtime for the whole output set when one is waiting.
+func (d *Driver) BeginScan() {
+	d.scanAware.Store(true)
+	d.wmu.Lock()
+	armed := d.baseline
+	d.wmu.Unlock()
+	d.srcMu.RLock()
+	defer d.srcMu.RUnlock()
+	for _, s := range d.sources {
+		s.mu.Lock()
+		if !armed && len(s.undecided) == 0 {
+			s.recording = false // nothing left to decide: stop recording reads
+			clear(s.devRead)
+			clear(s.scanRead)
+			s.mu.Unlock()
+			continue
+		}
+		clear(s.scanRead)
+		if s.liveLocked() {
+			for name, dv := range s.devRead {
+				s.scanRead[name] = dv
+			}
+			for name, ob := range s.byName {
+				if !ob.readable {
+					s.scanRead[name] = devValue{unreadable: true}
+				}
+			}
+			for name := range s.undecided {
+				if _, live := s.scanRead[name]; live {
+					d.wanted.Store(true) // a waiting output is decidable: push it
+					break
+				}
+			}
+		}
+		s.mu.Unlock()
+	}
 }
 
 // nudge wakes a source loop without blocking.
@@ -920,6 +1340,7 @@ func (d *Driver) run(ctx context.Context, s *source) {
 		}
 		s.mu.Lock()
 		s.answered = false
+		s.resetLiveLocked()
 		s.gwFailed, s.gwMisses = 0, 0
 		for _, br := range s.blocks {
 			br.gwFail = false
@@ -1281,12 +1702,20 @@ func (d *Driver) pollBlock(ctx context.Context, s *source, c conn, br *blockRun)
 			s.excs++
 			s.lastErr = fmt.Errorf("%s %d..%d: %w", br.Table, br.Start, int(br.Start)+int(br.Count)-1, err)
 			br.bad = true
+			queued, aware := false, d.scanAware.Load()
 			if gatewayNoAnswer(err) {
 				s.blockNoAnswerLocked(br, ctx.Err() == nil)
 			} else {
 				s.blockAnsweredLocked(br) // the device is there; this span is refused
+				br.live = true
+				for _, t := range br.Bindings { // unreadable: commanded once, not compared (#1123)
+					queued = s.recordOutputLocked(t.Name, devValue{unreadable: true}, !aware) || queued
+				}
 			}
 			s.mu.Unlock()
+			if queued {
+				nudge(s.kick)
+			}
 			if br.excCount == exceptionsToPark {
 				br.parkedUntil = time.Now().Add(s.cfg.RetryMin)
 				d.log.Warn("modbus: block parked after consecutive exceptions",
@@ -1321,21 +1750,34 @@ func (d *Driver) pollBlock(ctx context.Context, s *source, c conn, br *blockRun)
 	br.excCount = 0
 	br.bad = false
 	s.blockAnsweredLocked(br)
+	br.live = true
+	queued, aware := false, d.scanAware.Load()
 	for _, t := range br.Bindings {
 		off := int(t.Address) - int(br.Start)
 		if regs != nil {
 			f, _ := t.format()
-			v, derr := decodeRegisters(f, regs[off:off+f.Words()], s.cfg.WordOrder, s.cfg.ByteOrder, t.Scale, t.Offset)
+			words := regs[off : off+f.Words()]
+			v, derr := decodeRegisters(f, words, s.cfg.WordOrder, s.cfg.ByteOrder, t.Scale, t.Offset)
 			if derr != nil {
 				s.lastErr = fmt.Errorf("tag %s: %w", t.Name, derr)
+				queued = s.recordOutputLocked(t.Name, devValue{unreadable: true}, !aware) || queued
 				continue
 			}
 			s.snapshot[t.Name] = v
+			if s.recording && s.isOutput(t.Name) {
+				queued = s.recordOutputLocked(t.Name, devValue{words: append([]uint16(nil), words...), decoded: v}, !aware) || queued
+			}
 		} else {
 			s.snapshot[t.Name] = bits[off]
+			if s.recording && s.isOutput(t.Name) { // as the word branch: no work for inputs
+				queued = s.recordOutputLocked(t.Name, devValue{decoded: bits[off]}, !aware) || queued
+			}
 		}
 	}
 	s.mu.Unlock()
+	if queued {
+		nudge(s.kick)
+	}
 	return true
 }
 
@@ -1351,6 +1793,10 @@ func (d *Driver) pollBlock(ctx context.Context, s *source, c conn, br *blockRun)
 // the write gate closed the queue is dropped instead, and if the gate
 // closes partway through, the rest of the flush is (see SetWriteGate).
 func (d *Driver) flushWrites(ctx context.Context, s *source, c conn) bool {
+	gen := d.reopens.Load() // before the queue is taken: see send
+	if flushGenHook != nil {
+		flushGenHook()
+	}
 	s.mu.Lock()
 	if len(s.pending) == 0 {
 		s.mu.Unlock()
@@ -1372,7 +1818,7 @@ func (d *Driver) flushWrites(ctx context.Context, s *source, c conn) bool {
 	// (not recorded as written), so the next WriteOutputs push after the
 	// gate reopens commands the same value again. A drop is not a failure:
 	// no error is counted and __Online is left to the reads.
-	drop := func(names []string) {
+	drop := func(names []string, why string) {
 		s.mu.Lock()
 		for _, n := range names {
 			// Forget only what this flush dropped: a tag WriteOutputs has
@@ -1384,14 +1830,14 @@ func (d *Driver) flushWrites(ctx context.Context, s *source, c conn) bool {
 		}
 		s.mu.Unlock()
 		d.wanted.Store(true) // the commands it dropped: ask for them (#601)
-		d.log.Warn("modbus: write gate closed; queued writes dropped", "source", s.cfg.ID, "count", len(names))
+		d.log.Warn("modbus: queued writes dropped", "why", why, "source", s.cfg.ID, "count", len(names))
 	}
 	if !d.gateOpen() {
 		names := make([]string, 0, len(work))
 		for n := range work {
 			names = append(names, n)
 		}
-		drop(names)
+		drop(names, "the write gate is closed")
 		return true
 	}
 
@@ -1427,31 +1873,59 @@ func (d *Driver) flushWrites(ctx context.Context, s *source, c conn) bool {
 		s.mu.Unlock()
 	}
 
-	// gateClosed drops the write at bi/ri/ci and every one after it when
-	// the gate has closed since the flush began. The flush returns as soon
-	// as it does, so a drop is logged at most once per flush.
-	gateClosed := func(bi, ri, ci int) bool {
-		if d.gateOpen() {
-			return false
+	// send looks at the gate immediately before the request at bi/ri/ci
+	// (design §3.4): open, it returns the request's context, bounded by
+	// the gate's send budget; closed, or with the budget used up, it drops
+	// that write and every one after it, and the flush returns, so a drop
+	// is logged at most once per flush.
+	send := func(bi, ri, ci int) (context.Context, context.CancelFunc, bool) {
+		deadline, _, ok, done := fence.Begin(d.look, time.Now()) // the budget counts from before the read
+		if !ok || !fence.Started(deadline, time.Now()) {
+			done()
+			drop(rest(bi, ri, ci), "the write gate closed, or the send's budget ran out")
+			return nil, nil, false
 		}
-		drop(rest(bi, ri, ci))
-		return true
+		if d.reopens.Load() != gen && !mut("old_term_kept") {
+			done()
+			// A reopen since this flush read its generation (a lease lost
+			// and won again, seen now or by another look): none of the
+			// rest is sent. It is dropped, not just left: the queue may
+			// hold a write the push answering the reopen already queued
+			// and recorded as written, and a write kept as written would
+			// never go out until it changed (#1040 re-review). drop
+			// forgets it and asks for the outputs again.
+			drop(rest(bi, ri, ci), "the gate reopened since this flush began (the lease was lost and won again); the outputs are asked for again")
+			return nil, nil, false
+		}
+		wctx, cancel := fence.Context(ctx, deadline)
+		wctx = fence.WithDevice(wctx, d.CutName(s.cfg.ID))
+		// The caller's cancel, after the request has returned (answered,
+		// failed, or its socket reset), ends the send for a drain.
+		return wctx, func() { cancel(); done() }, true
 	}
 
 	// bit:N writables read-modify-write their register one at a time — the
 	// other 15 bits belong to the device (or to sibling bindings).
 	for i, bw := range bitWrites {
-		if gateClosed(i, 0, 0) {
+		rctx, cancel, ok := send(i, 0, 0)
+		if !ok {
 			return true
 		}
-		cur, err := readRegisters(ctx, c, s.cfg.UnitID, FCReadHoldingRegisters, bw.addr, 1)
+		cur, err := readRegisters(rctx, c, s.cfg.UnitID, FCReadHoldingRegisters, bw.addr, 1)
+		cancel()
 		if err == nil {
 			// Merge in normalized (big-endian) space, then restore the
 			// source's wire order — wireOrder is its own inverse.
 			w := wireOrder(cur, s.cfg.WordOrder, s.cfg.ByteOrder)[0]
 			w = setBit(w, bw.bit, bw.on)
 			out := wireOrder([]uint16{w}, s.cfg.WordOrder, s.cfg.ByteOrder)[0]
-			err = writeSingleRegister(ctx, c, s.cfg.UnitID, bw.addr, out)
+			// The write is its own send: the gate is looked at again.
+			wctx, cancel, ok := send(i, 0, 0)
+			if !ok {
+				return true
+			}
+			err = writeSingleRegister(wctx, c, s.cfg.UnitID, bw.addr, out)
+			cancel()
 		}
 		if !d.wroteOK(ctx, s, work, bw.names, retryAt, err) {
 			requeue(i, 0, 0)
@@ -1460,30 +1934,34 @@ func (d *Driver) flushWrites(ctx context.Context, s *source, c conn) bool {
 	}
 
 	for i, run := range regRuns {
-		if gateClosed(len(bitWrites), i, 0) {
+		wctx, cancel, ok := send(len(bitWrites), i, 0)
+		if !ok {
 			return true
 		}
 		var err error
 		if len(run.values) == 1 {
-			err = writeSingleRegister(ctx, c, s.cfg.UnitID, run.addr, run.values[0])
+			err = writeSingleRegister(wctx, c, s.cfg.UnitID, run.addr, run.values[0])
 		} else {
-			err = writeMultipleRegisters(ctx, c, s.cfg.UnitID, run.addr, run.values)
+			err = writeMultipleRegisters(wctx, c, s.cfg.UnitID, run.addr, run.values)
 		}
+		cancel()
 		if !d.wroteOK(ctx, s, work, run.names, retryAt, err) {
 			requeue(len(bitWrites), i, 0)
 			return false
 		}
 	}
 	for i, run := range coilRuns {
-		if gateClosed(len(bitWrites), len(regRuns), i) {
+		wctx, cancel, ok := send(len(bitWrites), len(regRuns), i)
+		if !ok {
 			return true
 		}
 		var err error
 		if len(run.values) == 1 {
-			err = writeSingleCoil(ctx, c, s.cfg.UnitID, run.addr, run.values[0])
+			err = writeSingleCoil(wctx, c, s.cfg.UnitID, run.addr, run.values[0])
 		} else {
-			err = writeMultipleCoils(ctx, c, s.cfg.UnitID, run.addr, run.values)
+			err = writeMultipleCoils(wctx, c, s.cfg.UnitID, run.addr, run.values)
 		}
+		cancel()
 		if !d.wroteOK(ctx, s, work, run.names, retryAt, err) {
 			requeue(len(bitWrites), len(regRuns), i)
 			return false
@@ -1532,6 +2010,7 @@ func (d *Driver) wroteOK(ctx context.Context, s *source, work map[string]any, na
 		s.mu.Lock()
 		s.writeAnsweredLocked()
 		tries := s.landedLocked(names)
+		s.safeLandedLocked(names, work)
 		s.mu.Unlock()
 		if tries > 0 {
 			d.log.Info("modbus: write delivered after it did not run", "source", s.cfg.ID, "tags", names, "attempts", tries)
@@ -1560,7 +2039,7 @@ func (d *Driver) wroteOK(ctx context.Context, s *source, work map[string]any, na
 					first = true
 				}
 				st.attempts++
-				if d.byName[n].b.Rewrite > 0 {
+				if s.byName[n].b.Rewrite > 0 {
 					continue // its own re-assert is its retry
 				}
 				st.value, st.retryAt = work[n], retryAt
@@ -1655,7 +2134,7 @@ func (d *Driver) stageWrites(s *source, work map[string]any) ([]regWrite, []coil
 	var coils []coilWrite
 	var bits []bitWrite
 	for name, v := range work {
-		ob := d.byName[name]
+		ob := s.byName[name]
 		t := ob.b
 		if t.Table == TableCoil {
 			on, err := toBool(v)
@@ -1855,6 +2334,49 @@ func (s *source) goOfflineLocked(outage bool) {
 		s.outages++
 	}
 	s.online = false
+	s.resetLiveLocked() // no read of the device is live any more (#1123)
+}
+
+// liveReadLocked is what the baseline may decide name against: with a
+// runtime driving the driver, what BeginScan froze for this scan; without
+// one, the latest read, and an output that cannot be read at once.
+func (s *source) liveReadLocked(name string, aware bool) (devValue, bool) {
+	if aware {
+		dv, ok := s.scanRead[name]
+		return dv, ok
+	}
+	if !s.byName[name].readable {
+		return devValue{unreadable: true}, true
+	}
+	dv, ok := s.devRead[name]
+	return dv, ok
+}
+
+// resetLiveLocked forgets every read of the device: a new connection starts
+// with none, and a dropped one has none that is live.
+func (s *source) resetLiveLocked() {
+	clear(s.devRead)
+	clear(s.scanRead)
+	for _, br := range s.blocks {
+		br.live = false
+	}
+}
+
+// liveLocked: the source is online and every block has been answered (or
+// reports no gateway answer) on this connection, so a scan reading it now reads all of it live. Caller holds mu.
+func (s *source) liveLocked() bool {
+	if !s.online {
+		return false
+	}
+	for _, br := range s.blocks {
+		// A block the gateway keeps answering 0x0A/0x0B for (a dead device
+		// behind it) is settled for the others: waiting on it would hold
+		// every output of a source that is otherwise reading.
+		if !br.live && !br.gwFail {
+			return false
+		}
+	}
+	return true
 }
 
 // Interface conformance: the optional io refinements the driver implements.
@@ -1863,3 +2385,12 @@ var (
 	_ nio.QualityReporter  = (*Driver)(nil)
 	_ nio.OutputsRequester = (*Driver)(nil)
 )
+
+// Manifest is the manifest the driver was built from: its sources and
+// bindings, for a caller that serves the same register map in process
+// (virtdev's in-process face reads through the driver's own Plan).
+func (d *Driver) Manifest() Manifest {
+	d.srcMu.RLock()
+	defer d.srcMu.RUnlock()
+	return d.manifest
+}

@@ -14,6 +14,7 @@ export { default as Pump } from './components/Pump.svelte';
 export { default as Valve } from './components/Valve.svelte';
 export { default as Pipe } from './components/Pipe.svelte';
 export { default as StatusPill } from './components/StatusPill.svelte';
+export { default as ReadoutRow } from './components/ReadoutRow.svelte';
 export { default as Sparkline } from './components/Sparkline.svelte';
 export { sparklineDomain, sparklineMetrics, sparklineGeometry } from './sparkline.js';
 export type {
@@ -51,6 +52,10 @@ export { default as FlowLink } from './components/FlowLink.svelte';
 // Process mimic: a P&ID-style graphic as data (*.mimic.json) rendered live —
 // the spatial parts of an HMI; screens/routing stay ordinary SvelteKit.
 export { default as Mimic } from './components/Mimic.svelte';
+// The panel a click on a mimic's equipment opens (its `panel`): readings
+// with sparklines, setpoints, commands, beside the drawing.
+export { default as EquipmentPanel } from './components/EquipmentPanel.svelte';
+export { sampleTag, tagHistory, HISTORY_SAMPLES } from './taghistory.svelte.js';
 
 // Coordinate canvas: a fixed, scaled plane of absolutely-placed symbols — the
 // shape every legacy HMI screen has. Bring your own spec and component
@@ -65,6 +70,7 @@ export type { CanvasSpec, CanvasNode, CanvasRegistry } from './canvas.js';
 export { default as WriteNumber } from './components/WriteNumber.svelte';
 export { default as WriteToggle } from './components/WriteToggle.svelte';
 export { default as OffPage } from './components/OffPage.svelte';
+export { routePipes, ROUTE_GRID, ROUTE_CLEAR, ROUTE_BEND, ROUTE_CROSS, ROUTE_NEAR, type RouteJob, type RouteEnd, type RouteInput, type RouteResult } from './route.js';
 export { default as SetpointGroup } from './components/SetpointGroup.svelte';
 export { default as CommandButton } from './components/CommandButton.svelte';
 
@@ -106,8 +112,24 @@ export { default as DriverStatusPanel } from './components/DriverStatusPanel.sve
 export { default as AlarmBanner } from './components/AlarmBanner.svelte';
 export { default as AlarmTable } from './components/AlarmTable.svelte';
 export { default as AlarmJournal } from './components/AlarmJournal.svelte';
+export { default as ChatterBadge } from './components/ChatterBadge.svelte';
+export { default as ChatterShelveDialog } from './components/ChatterShelveDialog.svelte';
+export { default as AlarmTuning } from './components/AlarmTuning.svelte';
+export { default as FloodBanner } from './components/FloodBanner.svelte';
 export { default as AckButton, worstFirst, ackLine } from './components/AckButton.svelte';
 export { AlarmClient, createAlarmClient, shouldRefetch, PRIORITY_ORDER, PRIORITY_META, PRIORITY_SIGN, STATE_META, DEFAULT_SHELVE_TIMES_S } from './alarms.svelte.js';
+// Substitute values (#707) — GET/POST/DELETE /api/substitutes. The client owns
+// the contract (requestId per action, unknown outcome, 409, kept:false).
+export { default as SubstitutesPanel } from './components/SubstitutesPanel.svelte';
+export { default as PortParameters } from './components/PortParameters.svelte';
+export { SubstituteClient, SubstituteSession, failureText, keptText, formatRemaining, unacked, validateStart } from './substitutes.js';
+export type { SubstituteEntry, SubstituteRule, SubstituteList, SubstituteLapse, SubstituteResult, PendingStart, SubstituteFailure } from './substitutes.js';
+
+// IO-Link device parameters (#705) — /api/iolink/{port}/params. The client owns
+// the contract (a refused write changed nothing; an uncertain one is neither a
+// failure nor a success) and PortParameters only renders its answers.
+export { PortParamClient, canRead, canWrite, valueLabel, identityTone, identityText, parseInput, failureText as paramFailureText } from './iolink.js';
+export type { ParamInfo, ParamList, ParamAnswer, ParamResult, ParamFailure, ParamValueName } from './iolink.js';
 export { default as AlarmSign } from './components/AlarmSign.svelte';
 export type {
 	Priority,
@@ -115,6 +137,12 @@ export type {
 	AlarmInstance,
 	AlarmBrief,
 	AlarmSummary,
+	AlarmChatter,
+	AlarmAdvice,
+	AlarmAdviceAnswer,
+	AlarmFlood,
+	AlarmFloodBrief,
+	AlarmFloodGroup,
 	AlarmEvent,
 	AlarmEventKind,
 	AlarmJournalFilter,
@@ -147,8 +175,8 @@ export type { ToastEntry } from './toast.svelte.js';
 // plant-affecting action. `confirm()` is promise-based, so a call site reads
 // `if (await confirm({…})) …` and cannot forget to ask.
 export { default as ConfirmDialog } from './components/ConfirmDialog.svelte';
-export { confirm, confirmState } from './confirm.svelte.js';
-export { createConfirmQueue, splitItems, getOperator, setOperator, DEFAULT_MAX_ITEMS } from './confirm.js';
+export { confirm, confirmState, askPassword } from './confirm.svelte.js';
+export { createConfirmQueue, splitItems, getOperator, setOperator, recordedAs, DEFAULT_MAX_ITEMS } from './confirm.js';
 export type { ConfirmOptions, ConfirmRequest, ConfirmQueue, QueueOptions } from './confirm.js';
 export { default as Tooltip } from './components/Tooltip.svelte';
 export { default as AppShell } from './components/AppShell.svelte';
@@ -171,6 +199,67 @@ export {
 	storyCount
 } from './catalog.js';
 export type { Story, Variant, StoryGroup, FormatPropsOptions } from './catalog.js';
+
+// Sign-in, elevation and a standby's referral (#708). `createAuth()` once in
+// the root layout (beside <ConfirmDialog/>, which asks for the password)
+// installs its fetch for every kit client. The controller decides every
+// request: what the kit greys out for a role is a convenience, never the
+// control.
+export { AuthClient, createAuth, currentAuth } from './auth.svelte.js';
+export { can, areaMatch, pathMatch, tagOf, deniedReason, whoIs } from './areas.js';
+export type { AuthOptions } from './auth.svelte.js';
+export {
+	AuthSession,
+	refusalMessage,
+	wantsElevation,
+	standbyLeader,
+	leaderTarget,
+	mayFollow,
+	signInHref,
+	holdsAnywhere,
+	needsPassword,
+	clockSkew,
+	FOLLOW_GUARD_MS,
+	providerElevation,
+	providerTarget,
+	signedInName,
+	signInLink,
+	confirmsAtProvider
+} from './auth.js';
+export type { Me, MeSession, Referral, PasswordAsk, ProviderAsk, AuthDeps } from './auth.js';
+export { kitFetch, setKitFetch } from './kitfetch.js';
+export { passwordState } from './auth.js';
+export { deniedFor, asksPassword } from './auth.svelte.js';
+export type { AuthView } from './authview.js';
+export { default as AccountChip } from './components/AccountChip.svelte';
+export { default as PushCard } from './components/PushCard.svelte';
+export { default as NotesPanel } from './components/NotesPanel.svelte';
+export { default as ShiftLog } from './components/ShiftLog.svelte';
+export { default as NotesIndex } from './components/NotesIndex.svelte';
+export { NotesClient, DraftKeeper, classifyFailure, notKeptText, canChange, groupByDay, dayKey, targetLabel, targetKey } from './notes.js';
+export type { Note, NoteTarget, NoteTargetKind, NoteRevision, NoteQuery, NoteAnswer, NoteOutcome, SupersededHistory, DayGroup, DraftStorage } from './notes.js';
+export { default as CheckoutPage } from './components/CheckoutPage.svelte';
+export { default as CheckoutBanner } from './components/CheckoutBanner.svelte';
+export { default as CameraPanel } from './components/CameraPanel.svelte';
+export { CameraClient, formatBps, camerasFor, watchingText, nextState as cameraNext, ptzMove, LIVE_CAPTION, LIVE_LIMIT, PTZ_HOLD_MS, PTZ_NUDGE_MS } from './camera.js';
+export { default as PtzPad } from './components/PtzPad.svelte';
+export { default as VirtualCamera } from './components/VirtualCamera.svelte';
+export { drawTestPattern } from './testpattern.js';
+export { playHls, parsePlaylist, codecFromInit, nextSegments, bufferTrim, liveSeek, BitrateMeter } from './hls.js';
+export type { HlsPlaylist, HlsSegment, HlsHandle, HlsOptions } from './hls.js';
+export type { Camera, CameraMode, CameraState, CameraEvent, PtzPreset, PtzCommand, PtzResult, PtzDirection } from './camera.js';
+export { SnapshotClient, parseSnaps, thumbSplit, NO_SNAP_VIEW } from './alarmsnaps.js';
+export type { AlarmSnap, SnapResult, SnapState } from './alarmsnaps.js';
+export { CheckoutClient, FORCE_SECONDS, forceValue, canIn, offersForce, countdown, clock, forceBanner, resultLine, needsNote, runLinks, offersSeal, SEAL_NOTICE } from './checkout.js';
+export type { CheckoutPoint, CheckoutResult, CheckoutRun, CheckoutRunView, CheckoutView, CheckoutForce, CheckoutAnswer, CountdownState, Progress as CheckoutProgress, PointKind } from './checkout.js';
+export { PushClient, pushState, readPushEnv, realPushBrowser, enablePush, disablePush, endpointId, keyBytes } from './push.js';
+export type { PushDevice, PushEnv, PushState, PushStateKind, PushBrowser, PushSub, EnableResult } from './push.js';
+export { default as ReferralBanner } from './components/ReferralBanner.svelte';
+// The audit journal (#709): GET /api/audit, read and shown.
+export { default as AuditTable } from './components/AuditTable.svelte';
+export { AuditClient, auditQuery, changeText, changeRaw, actorText } from './audit.js';
+export type { AuditEntry, AuditFilter, AuditAnswer, AuditClientOptions } from './audit.js';
+export type { Fetch } from './kitfetch.js';
 
 // Realtime client (generic over the frame shape)
 export { RealtimeClient, createRealtimeClient, TrendBuffer } from './realtime.svelte.js';
@@ -219,6 +308,8 @@ export {
 	resolveRuntimePorts,
 	resolvePipeEndpoints,
 	brokenPipes,
+	autoRoutes,
+	isPipeEnd,
 	pipeCrossings,
 	pipeTees,
 	TEE_NEAR,
@@ -232,13 +323,19 @@ export {
 	MIMIC_LOOKS,
 	PORT_STUB,
 	attachPipeEnds,
-	connectPorts
+	connectPorts,
+	panelFor,
+	labelState
 } from './mimic.js';
 export type {
 	MimicDoc,
 	MimicEquipment,
 	MimicPipe,
 	MimicLabel,
+	MimicPanel,
+	MimicLabelState,
+	MimicPanelReading,
+	MimicPanelSetpoint,
 	MimicUnit,
 	MimicPort,
 	MimicLook,
@@ -283,3 +380,50 @@ export type {
 // The house faces (Space Grotesk / IBM Plex Mono / Righteous), self-hosted via
 // @fontsource, are the optional sibling — theme.css only NAMES the families:
 //   import '@joyautomation/nautilus-hmi/fonts.css';
+
+// Setpoint parameters kept in step with Git (#718): GET /api/parameters with a
+// drift badge, and "use the repo value" through POST /api/parameters/import.
+export { default as ParameterList } from './components/ParameterList.svelte';
+export { ParametersClient, driftBadge, drifted, rangeText, takeRepoSet, takeRepo, valueText, refusedText } from './parameters.js';
+export type { Parameter, DriftState, WriteBack, ImportResult, ImportAnswer, ParametersAnswer, ParametersClientOptions, TakeOutcome } from './parameters.js';
+
+// What the alarm history shows for a paging (notify) row, and the kinds that fetch them (#616).
+export { chatterBadge, chatterText, floodText, groupsText, spanText, seenWhenText, chatteringIds, delaysText, adviceLine, focusSplit, reasonProblem, SHELVE_REASON_MAX, SHELVE_SUGGEST_S, detectionEvent, detectionOutcome } from './alarmchatter.js';
+export { DETECTION_KINDS, STATE_KINDS, journalKinds, visibleKind, pagingEvent, pagingOutcome } from './alarmjournal.js';
+export {
+	OOS_MAX_SECONDS,
+	OOS_DURATIONS_S,
+	suppressionBadge,
+	badgeText,
+	soonestFirst,
+	timeLeft,
+	equipmentChoices,
+	checkOutOfService,
+	takeOutOfService,
+	returnToService,
+	listOutOfService,
+	type OutOfService,
+	type SuppressionBadge
+} from './outofservice.js';
+export { default as OutOfServiceBadge } from './components/OutOfServiceBadge.svelte';
+export { default as OutOfServicePanel } from './components/OutOfServicePanel.svelte';
+export {
+	DEFAULT_TREND_MAX,
+	assetTitle,
+	assetTags,
+	assetAlarms,
+	assetSlug,
+	assetGroups,
+	areaRows,
+	indexAssets,
+	assetFromEquipment,
+	trendTags,
+	writableTags,
+	tagValue,
+	hasTag,
+	type AssetDescriptor,
+	type AreaDescriptor,
+	type AreaRow
+} from './asset.js';
+export { default as AssetPage } from './components/AssetPage.svelte';
+export { default as AreaPage } from './components/AreaPage.svelte';

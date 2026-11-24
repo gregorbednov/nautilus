@@ -93,7 +93,9 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 	c := f.Controller
 	p := &Project{Files: map[string][]byte{}}
 	im := &importer{file: f, opts: opts, proj: p, aois: map[string]*l5x.AddOnInstruction{}, ctrl: map[string]*l5x.Tag{},
-		moved: map[string]bool{}, external: map[string]bool{}}
+		moved: map[string]bool{}, external: map[string]bool{},
+		msgs: map[*l5x.Tag]*msgInfo{}, chanByKey: map[string]string{}, msgExtras: map[string]msgExtra{},
+		extraOwner: map[string]*l5x.Tag{}, timerRun: timersRun(f)}
 	for _, a := range c.AOIs {
 		im.aois[strings.ToLower(a.Name)] = a
 	}
@@ -118,6 +120,9 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 	for _, a := range c.AOIs {
 		im.importAOI(a)
 	}
+
+	// Which program sends each MESSAGE, before any program lowers (msg.go).
+	im.msgSenders = msgSenders(c)
 
 	// Programs: a PROGRAM per routine.
 	selected := map[string]bool{}
@@ -170,6 +175,23 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 			if t.Type == "" {
 				t.Type = im.tagType(src, t.Init)
 			}
+			// A typed array starts at the export's values. Without an
+			// init: it would never be seeded (a typed input no driver
+			// delivers is not), so the first rung reading it would fault
+			// the scan "undefined tag" on every scan (#774).
+			if t.Init == nil && strings.HasPrefix(t.Type, "ARRAY") {
+				var lost bool
+				t.Init, lost = arrayInit(src.Value, src.DataType)
+				if lost {
+					p.note("", -1, "init", t.Name+": starts at zero in nautilus; the export's values for it ("+logixTypeOf(src)+") are not carried")
+				}
+			}
+			// A structure starts at the export's values, member arrays
+			// included; one the export gives no values for still starts,
+			// at zero, so a read of it never faults "undefined tag".
+			if t.Init == nil && t.Type != "" && !strings.HasPrefix(t.Type, "ARRAY") && im.types[t.Type] {
+				t.Init = map[string]any{}
+			}
 			if why := im.notWritten(src, t); why != "" && !im.external[k] {
 				p.note("", -1, "tag", t.Name+" ("+logixTypeOf(src)+"): "+why)
 			}
@@ -219,6 +241,45 @@ func Import(f *l5x.File, opts Options) (*Project, error) {
 	return p, nil
 }
 
+// timersRun is the set of timers a TON, TOF or RTO runs anywhere in the
+// export, in a program's ladder or an Add-On Instruction's, lower-cased.
+func timersRun(f *l5x.File) map[string]bool {
+	run := map[string]bool{}
+	visit := func(r *l5x.Routine) {
+		if r.Type != "RLL" {
+			return
+		}
+		for _, rg := range r.Rungs {
+			terms, err := l5x.ParseRung(rg.Text)
+			if err != nil {
+				continue
+			}
+			walkTerms(terms, func(in *l5x.Instr) {
+				switch strings.ToUpper(in.Mnemonic) {
+				case "TON", "TOF", "RTO":
+					if len(in.Args) > 0 {
+						run[strings.ToLower(baseOf(strings.TrimSpace(in.Args[0])))] = true
+					}
+				}
+			})
+		}
+	}
+	if f.Controller == nil {
+		return run
+	}
+	for _, p := range f.Controller.Programs {
+		for _, r := range p.Routines {
+			visit(r)
+		}
+	}
+	for _, a := range f.Controller.AOIs {
+		for _, r := range a.Routines {
+			visit(r)
+		}
+	}
+	return run
+}
+
 // tagType is the type: a controller tag's tag-file entry needs so that a
 // write-back creates it with its Logix type: "" when its init: already
 // implies that type (a BOOL, a REAL, a STRING) or it has no nautilus type
@@ -250,6 +311,88 @@ func (im *importer) tagType(t *l5x.Tag, init any) string {
 		}
 	}
 	return typ
+}
+
+// arrayInit is an array tag's init: its elements as the export holds
+// them, trimmed after the last non-zero one (the loader pads a short list
+// with zeros, so an all-zero array is the one-word []). Each element must
+// be a value of the array's elementary type; when one is not (an array of
+// structures, a SINT array the export spells as characters) the array
+// starts at zero, and lost reports that the export had values for it.
+func arrayInit(v any, dtype string) (init []any, lost bool) {
+	list, _ := v.([]any)
+	out := make([]any, len(list))
+	last := -1
+	for i, e := range list {
+		x, ok := elemValue(e, strings.ToUpper(dtype))
+		if !ok {
+			return []any{}, !allZero(list)
+		}
+		out[i] = x
+		if !isZero(x) {
+			last = i
+		}
+	}
+	return out[:last+1], false
+}
+
+// elemValue is e as a value of the elementary type dtype, or false.
+func elemValue(e any, dtype string) (any, bool) {
+	switch dtype {
+	case "BOOL":
+		switch x := e.(type) {
+		case bool:
+			return x, true
+		case int64:
+			return x != 0, true
+		}
+	case "REAL", "LREAL":
+		switch x := e.(type) {
+		case float64:
+			return x, true
+		case int64:
+			return float64(x), true
+		}
+	case "SINT", "INT", "DINT", "LINT", "USINT", "UINT", "UDINT", "ULINT":
+		if x, ok := e.(int64); ok {
+			return x, true
+		}
+	}
+	return nil, false
+}
+
+func isZero(v any) bool {
+	switch x := v.(type) {
+	case bool:
+		return !x
+	case int64:
+		return x == 0
+	case float64:
+		return x == 0
+	case string:
+		return x == ""
+	case nil:
+		return true
+	case map[string]any:
+		for _, m := range x {
+			if !isZero(m) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		return allZero(x)
+	}
+	return false
+}
+
+func allZero(list []any) bool {
+	for _, e := range list {
+		if !isZero(e) {
+			return false
+		}
+	}
+	return true
 }
 
 // notWritten says why a write-back cannot create a controller tag no
@@ -314,12 +457,18 @@ func (p *Project) Reasons() []string {
 }
 
 type importer struct {
-	file  *l5x.File
-	opts  Options
-	proj  *Project
-	aois  map[string]*l5x.AddOnInstruction
-	ctrl  map[string]*l5x.Tag
-	types map[string]bool
+	// realNoted: the REAL-to-integer store note is given (once).
+	realNoted bool
+	// timerRun names every timer a TON, TOF or RTO runs anywhere in the
+	// export, lower-cased (#793): a write to its ACC or PRE has no
+	// nautilus form.
+	timerRun map[string]bool
+	file     *l5x.File
+	opts     Options
+	proj     *Project
+	aois     map[string]*l5x.AddOnInstruction
+	ctrl     map[string]*l5x.Tag
+	types    map[string]bool
 	// written collects controller tags the imported logic drives, for
 	// the tag file's roles.
 	written map[string]bool
@@ -338,6 +487,18 @@ type importer struct {
 	usesDialect bool
 	// used marks file names taken, so two routines never collide.
 	used map[string]bool
+	// msgs is what the import made of each MESSAGE tag (msg.go); channels
+	// the channels: entries their peers became, chanByKey by host/slot;
+	// msgExtras the MSG parameters only Logix needs, by instance name, for
+	// target.logix.messages.
+	msgs      map[*l5x.Tag]*msgInfo
+	channels  []msgChannel
+	chanByKey map[string]string
+	msgExtras map[string]msgExtra
+	// msgSenders lists, per MESSAGE tag, the program of each MSG that
+	// sends it; extraOwner the tag each msgExtras entry came from.
+	msgSenders map[*l5x.Tag][]string
+	extraOwner map[string]*l5x.Tag
 }
 
 // declaredTypes lists the names a generated ST file declares: the
@@ -393,6 +554,18 @@ func (im *importer) manifest(tasks []manifestTask) []byte {
 		b.WriteString("\n")
 	}
 	b.WriteString("tag-files: [tags/logix.yaml]\n")
+	if len(im.channels) > 0 {
+		// The peers the export's MSG instructions reach: what each READ
+		// and WRITE block's ID names (msg.go).
+		b.WriteString("# The controllers the MSG instructions reach, for the READ and WRITE blocks.\nchannels:\n")
+		for _, ch := range im.channels {
+			fmt.Fprintf(&b, "  - { name: %s, type: cip, host: %s", ch.name, ch.host)
+			if ch.slot >= 0 {
+				fmt.Fprintf(&b, ", slot: %d", ch.slot)
+			}
+			b.WriteString(" }\n")
+		}
+	}
 	b.WriteString("target:\n  logix:\n")
 	fmt.Fprintf(&b, "    controller: %s\n", c.Name)
 	if c.ProcessorType != "" {
@@ -433,6 +606,30 @@ func (im *importer) manifest(tasks []manifestTask) []byte {
 			fmt.Fprintf(&b, "      - { name: %s", l5x.Ident(t.Name))
 			if d := strings.TrimSpace(t.Description); d != "" {
 				fmt.Fprintf(&b, ", desc: %s", yamlQuote(d))
+			}
+			b.WriteString(" }\n")
+		}
+	}
+	if len(im.msgExtras) > 0 {
+		// What a Logix MSG holds that the block and its channel do not, so
+		// the write-back gives each MESSAGE tag back as it was.
+		names := make([]string, 0, len(im.msgExtras))
+		for k := range im.msgExtras {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		b.WriteString("    messages:\n")
+		for _, k := range names {
+			x := im.msgExtras[k]
+			fmt.Fprintf(&b, "      - { name: %s", k)
+			if x.connected != "" {
+				fmt.Fprintf(&b, ", connected-flag: %s", yamlQuote(x.connected))
+			}
+			if x.cache != "" {
+				fmt.Fprintf(&b, ", cache-connections: %s", yamlQuote(x.cache))
+			}
+			if x.path != "" {
+				fmt.Fprintf(&b, ", connection-path: %s", yamlQuote(x.path))
 			}
 			b.WriteString(" }\n")
 		}

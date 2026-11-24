@@ -13,9 +13,8 @@ import (
 	"time"
 )
 
-// Client is an EtherNet/IP originator: it speaks TCP to a target device,
-// runs RegisterSession + Forward_Open, and (for Class 1) drives an O→T
-// producer and consumes T→O frames over the shared UDP port via Class1Mux.
+// Client is an EtherNet/IP originator: it speaks TCP to a target device
+// and runs RegisterSession + Forward_Open.
 //
 // One Client per target IP. Concurrent Forward_Open calls on the same
 // session are not supported — wrap with a mutex if you need them.
@@ -52,7 +51,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	c.mu.Lock()
 	c.tcp = conn
 	c.mu.Unlock()
-	if err := c.registerSession(); err != nil {
+	if err := c.registerSession(ctx); err != nil {
 		_ = conn.Close()
 		c.mu.Lock()
 		c.tcp = nil
@@ -84,17 +83,18 @@ func (c *Client) SessionHandle() uint32 {
 	return c.sessHdl
 }
 
-func (c *Client) registerSession() error {
+func (c *Client) registerSession(ctx context.Context) error {
 	body := make([]byte, 4)
 	binary.LittleEndian.PutUint16(body[0:2], 1) // protocol version
 	binary.LittleEndian.PutUint16(body[2:4], 0) // options
 	hdr := EncapHeader{Command: CmdRegisterSession}
+	defer arm(ctx, c.tcp)()
 	if _, err := c.tcp.Write(EncodeFrame(hdr, body)); err != nil {
-		return err
+		return cancelled(ctx, err)
 	}
 	rhdr, _, err := c.readFrame()
 	if err != nil {
-		return err
+		return cancelled(ctx, err)
 	}
 	if rhdr.Status != EncapStatusSuccess {
 		return fmt.Errorf("register session: status 0x%x", rhdr.Status)
@@ -130,18 +130,13 @@ func (c *Client) sendCommand(ctx context.Context, cmd uint16, data []byte) (Mess
 		SessionHandle: c.sessHdl,
 	}
 	binary.LittleEndian.PutUint64(hdr.SenderContext[:], c.ctxToken)
-	deadline := time.Now().Add(10 * time.Second)
-	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
-		deadline = d
-	}
-	_ = c.tcp.SetWriteDeadline(deadline)
+	defer arm(ctx, c.tcp)()
 	if _, err := c.tcp.Write(EncodeFrame(hdr, data)); err != nil {
-		return MessageRouterResponse{}, err
+		return MessageRouterResponse{}, cancelled(ctx, err)
 	}
-	_ = c.tcp.SetReadDeadline(deadline)
 	rhdr, payload, err := c.readFrame()
 	if err != nil {
-		return MessageRouterResponse{}, err
+		return MessageRouterResponse{}, cancelled(ctx, err)
 	}
 	if rhdr.Status != EncapStatusSuccess {
 		return MessageRouterResponse{}, fmt.Errorf("encap status 0x%x", rhdr.Status)
@@ -154,6 +149,52 @@ func (c *Client) sendCommand(ctx context.Context, cmd uint16, data []byte) (Mess
 		return MessageRouterResponse{}, fmt.Errorf("unexpected reply CPF: %d items", len(items))
 	}
 	return decodeMRResponse(items[1].Data)
+}
+
+// requestTimeout bounds one request when its context has no sooner
+// deadline.
+const requestTimeout = 10 * time.Second
+
+// arm bounds one request on conn: its context's deadline or requestTimeout,
+// whichever comes first, and it ends the request at once when the context
+// is cancelled (a driver's Stop), rather than leaving a read on a device
+// that stopped answering to run out its deadline (#932). The returned
+// func disarms the cancel; call it when the request is done.
+func arm(ctx context.Context, conn net.Conn) (disarm func()) {
+	deadline := time.Now().Add(requestTimeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	_ = conn.SetDeadline(deadline)
+	fired := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(fired)
+		if testHookCancelFired != nil {
+			testHookCancelFired()
+		}
+		_ = conn.SetDeadline(time.Now())
+	})
+	return func() {
+		if !stop() {
+			// The cancel came as the request finished: let its
+			// SetDeadline(now) land before returning, or it could land on
+			// the next request on this connection and fail it.
+			<-fired
+		}
+	}
+}
+
+// testHookCancelFired, when set (by tests), runs in arm's cancel callback
+// before it sets the deadline.
+var testHookCancelFired func()
+
+// cancelled says why a request failed when its context ended it: the
+// cancel, not the deadline it was given.
+func cancelled(ctx context.Context, err error) error {
+	if cerr := ctx.Err(); cerr != nil {
+		return fmt.Errorf("%w (%v)", cerr, err)
+	}
+	return err
 }
 
 func (c *Client) readFrame() (EncapHeader, []byte, error) {
@@ -221,8 +262,6 @@ func decodeMRResponse(b []byte) (MessageRouterResponse, error) {
 //	0x2C cfg    logical conn pt  = configuration assembly
 //	0x2C oToT   logical conn pt  = O→T (output) assembly
 //	0x2C tToO   logical conn pt  = T→O (input) assembly
-//
-// Caller is responsible for building the path with BuildConnectionPath helper.
 func (c *Client) ForwardOpenOriginator(ctx context.Context, req ForwardOpenRequest, path []byte) (ForwardOpenResponse, error) {
 	// Connection-Manager request: wrap the Forward_Open service body and
 	// address it at class 6 / instance 1.
@@ -265,32 +304,4 @@ func (c *Client) ForwardCloseOriginator(ctx context.Context, connSerial, vendor 
 		return fmt.Errorf("forward_close: status 0x%02x", mr.GeneralStatus)
 	}
 	return nil
-}
-
-// BuildConnectionPath builds the EPATH that Forward_Open uses to identify
-// the configuration + O→T + T→O assembly instances on the target. cfg=0
-// omits the configuration segment (rare; some drives require it, set to the
-// EDS-declared ConfigInst).
-func BuildConnectionPath(cfg, oToT, tToO uint16) []byte {
-	// Class 0x04 (Assembly), instance 1 anchor for the connection points.
-	// Most drives accept just three connection-point segments without the
-	// class/instance anchor; we include both forms via testing if needed.
-	p := []byte{
-		0x20, byte(ClassAssembly), // logical class 0x04
-		0x24, 0x01, // logical instance 1
-	}
-	if cfg != 0 {
-		p = append(p, connPointSegment(cfg)...)
-	}
-	p = append(p, connPointSegment(oToT)...)
-	p = append(p, connPointSegment(tToO)...)
-	return p
-}
-
-func connPointSegment(cp uint16) []byte {
-	if cp <= 0xFF {
-		return []byte{0x2C, byte(cp)} // 8-bit connection point
-	}
-	// 16-bit conn point: type byte + pad + LE u16.
-	return []byte{0x2D, 0x00, byte(cp & 0xFF), byte(cp >> 8)}
 }

@@ -239,8 +239,9 @@ old drop-and-re-raise had no next scan to be re-raised by. See `runtime/tags.go`
 generations".)
 
 Writable bindings generate as `role: output` with an `init:` (the manifest's, else the type
-zero) so the tag exists from scan one; `RoleOutput` is unseeded by default
-(`runtime/tagdef.go:119-122`) and an unwritten output is simply omitted from the Values map.
+zero) so the tag exists from scan one; an untyped `RoleOutput` with no init is unseeded
+(`runtime/tagdef.go`, expandTags), and an unwritten output — that, or a typed one still at the
+zero it was seeded with — is simply omitted from the Values map.
 
 ## 5. Manifest, schema, project wiring
 
@@ -463,7 +464,7 @@ new codegen dir); {D1, D3}.
    separate code paths). Proved on a 3-project bench
    (twin/ 1s-scan edge on `RiverbendTwin` → site/ host-as-edge on `RiverbendWTP`, `driver:
    sparkplug-host` consuming `RiverbendTwin` primary: false → host/ central consumer of
-   `RiverbendWTP`), broker `tcp://10.154.92.220:1883`:
+   `RiverbendWTP`), broker `tcp://192.0.2.40:1883`:
    - **Node-level publish republishes the WHOLE tag store by default** (`sparkplug/birth.go`'s
      `birth()` calls `n.rt.Tags().Snapshot()`; `SparkplugConfig.Device`'s doc comment: "Empty =
      everything publishes at node level") — including the sparkplug-host driver's own INPUT tags,

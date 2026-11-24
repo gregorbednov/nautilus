@@ -3,16 +3,66 @@
 All notable changes to the **nautilus IEC 61131-3** extension are documented
 here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.21.2] - 2026-11-18
+
+Works with naut 0.21.0, and is the one to use with naut 0.22.0: a 0.22.0
+controller with a token, reached by a DNS name, answers only requests that
+carry the token, and this release sends it on every request (below).
+
+### Added
+
+- **The `nautilus.yaml` schema knows naut 0.22.0's new keys.** A
+  `type: runtime` driver with its `tags:` (`task:`, and a `status:` of
+  `demoted`, `faulting`, `logic-errors`, `late` or `overruns`), a task's
+  `priority-guard: rt-limit:`, and the update times a Siemens IO system
+  allows for a `profinet-manifest` device (16 ms to 512 ms, powers of two).
+
+### Added
+
+- **`nautilus.yaml`: `devices:`.** The schema knows a project's devices
+  declared by profile (naut newer than 0.21.0): `name`, `profile`,
+  `endpoint`, `unit-id`, `points`, `params`, `desc`, with hovers that
+  say what each row derives (a struct tag of the profile's type and a
+  command tag per writable point).
+
+### Fixed
+
+- **Enter indents after `IF … THEN`, and `END_IF` outdents again.** The
+  indentation rules were written with `(?i)`, which JavaScript's RegExp
+  rejects, so VS Code dropped both, on the desktop as well as in the
+  playground. They now use `{ pattern, flags: "i" }` (#903).
+
+- **The token goes with every request to the controller, and only
+  there.** With `nautilus.token` set, live values, the tag table, online
+  edit, the FBD preview, SFC commands, the mimic editor and the page
+  preview now send it on reads and on the live stream, not only on writes.
+  A controller with a token answers a name it doesn't trust (anything but
+  `localhost`, an IP, or a name in its `NAUTILUS_ALLOWED_HOSTS`) only when
+  the request carries the token (#819), so a `nautilus.runtimeUrl` by DNS
+  name would otherwise get 403 on every read.
+- **A workspace can't send your token elsewhere.** The token goes only to
+  `nautilus.runtimeUrl`. A token from your user settings goes to a
+  `runtimeUrl` that a workspace's settings chose only after you answer
+  *Send it to …* once for that address (remembered). In a remote window
+  (dev container, SSH, WSL), where a repository's `devcontainer.json` can
+  set user-scope settings, any `runtimeUrl` but the default needs that
+  approval. In an untrusted workspace, its own `nautilus.runtimeUrl` and
+  `nautilus.token` are ignored (restricted settings).
+
+## [0.21.1] - 2026-11-17
 
 Works with naut 0.20.0: Toggle Bit and the diagram live actions use the
 controller's tag API the extension already writes through. The AGENTS.md
-offer needs the next naut, the first with `naut agents`. Deleting one leg
+offer needs naut 0.21.0, the first with `naut agents`. Deleting one leg
 of a ladder branch (its ✕) needs a naut newer than 0.21.0, whose
 `naut ld edit` has `deleteLeg`; an older one refuses the edit.
 
 ### Added
 
+- **Test files: `devices: true` and `plant:`.** The schema knows the keys a
+  test file uses to run against a project's virtual devices
+  (`virtual-devices.yaml`, naut newer than 0.21.0): `devices: true` at the
+  top, `plant:` in a step to make the process plug or trip.
 - **Mimic editor: `SetpointGroup` in the palette.** The kit's setpoint
   panel, with sample props; it reads live values.
 

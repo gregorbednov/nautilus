@@ -78,11 +78,17 @@ func (s *Server) handleForce(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `expected {"name": ..., "value": ...}`, http.StatusBadRequest)
 		return
 	}
-	if err := s.rt.Tags().Force(req.Name, req.Value); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if code, msg := s.authorize(r, PermForce, req.Name); code != 0 {
+		http.Error(w, msg, code)
 		return
 	}
-	audit(r, "force: set", "tag", req.Name, "value", req.Value)
+	if err := s.rt.Tags().Force(req.Name, req.Value); err != nil {
+		if !refuseSwitching(w, err) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+	logAction(r, "force: set", "tag", req.Name, "value", req.Value)
 	s.handleForces(w, r)
 }
 
@@ -95,11 +101,15 @@ func (s *Server) handleUnforce(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
+	if code, msg := s.authorize(r, PermForce, name); code != 0 {
+		http.Error(w, msg, code)
+		return
+	}
 	if !s.rt.Tags().Unforce(name) {
 		http.Error(w, fmt.Sprintf("%s is not forced", name), http.StatusNotFound)
 		return
 	}
-	audit(r, "force: removed", "tag", name)
+	logAction(r, "force: removed", "tag", name)
 	s.handleForces(w, r)
 }
 
@@ -111,8 +121,34 @@ func (s *Server) handleUnforceAll(w http.ResponseWriter, r *http.Request) {
 	if s.refuseForce(w) {
 		return
 	}
-	n := s.rt.Tags().UnforceAll()
-	audit(r, "force: cleared all", "removed", n)
+	// Clearing every force needs force over every tag that is forced: an
+	// engineer in one area clears all of that area's forces, and is refused
+	// when another area's tag is forced too.
+	checked := s.rt.Tags().ForcedValues()
+	for name := range checked {
+		if code, msg := s.authorize(r, PermForce, name); code != 0 {
+			http.Error(w, msg, code)
+			return
+		}
+	}
+	if s.unforceAllChecked != nil {
+		s.unforceAllChecked()
+	}
+	// Under an auth: block only the forces checked above are cleared: one
+	// set meanwhile, perhaps in an area this principal may not force, is
+	// left for its own clear (#1035). Without one there is nothing per tag
+	// to check, and every force goes.
+	var n int
+	if s.policy == nil {
+		n = s.rt.Tags().UnforceAll()
+	} else {
+		for name := range checked {
+			if s.rt.Tags().Unforce(name) {
+				n++
+			}
+		}
+	}
+	logAction(r, "force: cleared all", "removed", n)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]int{"removed": n})
 }
@@ -180,21 +216,23 @@ func (s *Server) sfcCommand(w http.ResponseWriter, r *http.Request, step bool) {
 		did, err = p.FireTransition(req.Transition)
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		if !refuseSwitching(w, err) {
+			http.Error(w, err.Error(), http.StatusConflict)
+		}
 		return
 	}
 	if step {
-		audit(r, "sfc: set active step", "pou", p.POU(), "step", did)
+		logAction(r, "sfc: set active step", "pou", p.POU(), "step", did)
 	} else {
-		audit(r, "sfc: fired transition", "pou", p.POU(), "transition", did)
+		logAction(r, "sfc: fired transition", "pou", p.POU(), "transition", did)
 	}
 	info, _ := p.SFC()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
 }
 
-// audit leaves one log line per operator action that changes what the
+// logAction leaves one log line per operator action that changes what the
 // controller does outside its own logic — who (remote address) and what.
-func audit(r *http.Request, msg string, args ...any) {
+func logAction(r *http.Request, msg string, args ...any) {
 	slog.Info(msg, append(args, "remote", r.RemoteAddr)...)
 }

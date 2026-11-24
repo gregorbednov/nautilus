@@ -8,6 +8,11 @@
 //   ?p=<id>           a saved project (/playground/p/<id> on the docs site;
 //                     playground/share keeps them)
 //   #project=<code>   a share link: the project itself (keep.js)
+//   tutorial=1        the docs site's interactive tutorial frames this page:
+//                     nothing is kept here (the tutorial keeps the learner's
+//                     files) and window.nautilusPlayground.lesson swaps the
+//                     project in place (load) and runs a step's hidden tests
+//                     (check), so the workbench is never reloaded.
 //
 // The visitor's edits are kept in their browser, apart from the project
 // they started from (keep.js): a reload or a later visit brings them back.
@@ -75,7 +80,6 @@ import { SearchProviderType } from '@codingame/monaco-vscode-api/vscode/vs/workb
 import { Schemas } from '@codingame/monaco-vscode-api/vscode/vs/base/common/network';
 
 const ENGINE = new URL('../', location.href); // the package's dist/: worker.js, naut.wasm, examples/
-const EXTENSION = new URL('./extension/', location.href); // the extension's web build and assets
 const PLAYGROUND_URL = 'http://playground.nautilus'; // the extension's controller URL (src/web/engine.ts)
 const SAVED = new URL('/playground/api/p', location.origin); // playground/share, beside the docs site
 
@@ -312,7 +316,8 @@ async function main() {
 		loadSource(params)
 	]);
 	source.project.version = await kept.fingerprint(source.project.files);
-	const copy = await kept.mine(source.key);
+	const tutorial = params.get('tutorial') === '1';
+	const copy = tutorial ? null : await kept.mine(source.key);
 	// What opens: their copy if they have one, else the source as published.
 	const project = copy ? { ...source.project, files: copy.files } : source.project;
 	const keep = keeper(pg, source, copy);
@@ -355,7 +360,8 @@ async function main() {
 	};
 	window.nautilusPlayground = { title: project.title, files: () => pg.files(), shareLink };
 	registerPlaygroundCommands(source, keep, shareLink);
-	registerFileSystemOverlay(1, new EngineFileSystem(pg, '/project', keep.edited));
+	const efs = new EngineFileSystem(pg, '/project', tutorial ? () => {} : keep.edited);
+	registerFileSystemOverlay(1, efs);
 
 	await initUserConfiguration(
 		JSON.stringify({
@@ -383,6 +389,11 @@ async function main() {
 			'editor.experimental.asyncTokenization': false,
 			'security.workspace.trust.enabled': false,
 			'telemetry.telemetryLevel': 'off',
+			// The YAML extension: no telemetry (or its opt-in prompt), and no
+			// schemastore.org catalog fetched by every visitor; the schemas
+			// are the nautilus extension's own.
+			'redhat.telemetry.enabled': false,
+			'yaml.schemaStore.enable': false,
 			'terminal.integrated.defaultProfile.linux': 'nautilus',
 			'terminal.integrated.defaultProfile.osx': 'nautilus',
 			'terminal.integrated.defaultProfile.windows': 'nautilus',
@@ -449,16 +460,32 @@ async function main() {
 	// Its files carry the build's ?v= like the engine's, so a returning
 	// visitor gets the extension that matches this build, not a cached one.
 	const v = params.get('v');
-	const extUrl = (f) => new URL(f + (v ? '?v=' + encodeURIComponent(v) : ''), EXTENSION).href;
-	const manifest = await (await fetch(extUrl('package.json'))).json();
-	// The Marketplace extension is desktop-only for now (no "browser" entry,
-	// so vscode.dev does not offer it without an engine); the playground
-	// supplies the engine, so it names the web build itself.
-	manifest.browser = './out/web/extension.js';
-	const files = await (await fetch(extUrl('files.json'))).json();
-	const ext = registerExtension(manifest, ExtensionHostKind.LocalWebWorker, { system: true });
-	for (const f of files) ext.registerFileUrl('/' + f, extUrl(f));
-	await ext.whenReady();
+	const served = async (dir, fix) => {
+		const url = (f) => new URL(f + (v ? '?v=' + encodeURIComponent(v) : ''), new URL(dir, location.href)).href;
+		const manifest = await (await fetch(url('package.json'))).json();
+		fix(manifest, url);
+		const files = await (await fetch(url('files.json'))).json();
+		const ext = registerExtension(manifest, ExtensionHostKind.LocalWebWorker, { system: true });
+		for (const f of files) ext.registerFileUrl('/' + f, url(f));
+		return ext.whenReady();
+	};
+	await Promise.all([
+		// The Marketplace extension is desktop-only for now (no "browser" entry,
+		// so vscode.dev does not offer it without an engine); the playground
+		// supplies the engine, so it names the web build itself.
+		// Its YAML schemas by their URL here: in a browser the YAML server
+		// fetches a schema over http(s) and cannot read an extension's
+		// own ./schemas/... (extension-file://).
+		served('./extension/', (m, url) => {
+			m.browser = './out/web/extension.js';
+			for (const s of m.contributes.yamlValidation ?? []) s.url = url(s.url.replace(/^\.\//, ''));
+		}),
+		// Red Hat's YAML extension (scripts/app.sh): completion, hover and
+		// validation from the nautilus extension's yamlValidation schemas.
+		// Colouring stays VS Code's own grammar, which the nautilus test
+		// grammar injects into, so its grammar (not shipped) is left out.
+		served('./yaml-extension/', (m) => delete m.contributes.grammars)
+	]);
 	await openProject(project);
 	await terminalBelow(await getService(ICommandService));
 	splash?.remove();
@@ -471,6 +498,7 @@ async function main() {
 	const commands = await getService(ICommandService);
 	relayWebviewKeys(commands, await getService(IKeybindingService));
 	const notifications = await getService(INotificationService);
+	if (tutorial) window.nautilusPlayground.lesson = lessonApi(pg, efs, commands);
 	Object.assign(window.nautilusPlayground, {
 		/** The framing page's Share button copied a link. */
 		shared: () => notifications.info(SHARED),
@@ -479,6 +507,43 @@ async function main() {
 		views: await views
 	});
 	window.dispatchEvent(new Event('nautilus-playground-ready'));
+}
+
+/**
+ * What the tutorial shell calls (same origin, through the iframe):
+ *   load({files, open})  replace the project in place and run it
+ *   files()              the learner's files as they stand (saved first)
+ *   check(tests)         write the step's hidden test files, run the
+ *                        engine's tests (naut test), remove them again;
+ *                        resolves to the acceptance records
+ */
+function lessonApi(pg, efs, commands) {
+	return {
+		async load({ files, open }) {
+			const before = Object.keys(await pg.files());
+			await commands.executeCommand('workbench.action.closeAllEditors');
+			await pg.setProject(files);
+			efs.replaced(before, Object.keys(files));
+			await openProject({ files, open });
+			await commands.executeCommand('nautilus.playground.run');
+		},
+		async files() {
+			await commands.executeCommand('workbench.action.files.saveAll');
+			return pg.files();
+		},
+		async check(tests) {
+			await commands.executeCommand('workbench.action.files.saveAll');
+			// What the learner is looking at runs again, so the live tags follow the program Check judged.
+			await commands.executeCommand('nautilus.playground.run');
+			const names = Object.keys(tests);
+			try {
+				for (const n of names) await pg.writeFile(n, tests[n]);
+				return await pg.test();
+			} finally {
+				for (const n of names) await pg.removeFile(n).catch(() => {});
+			}
+		}
+	};
 }
 
 /** Said whenever a share link is copied: a saved project is public to its link. */

@@ -53,8 +53,18 @@ import (
 // StructDef, and a function-block instance is never equal to anything,
 // because an FB is identity (its retained frame), not a value.
 type Tags struct {
-	mu   sync.RWMutex
-	vals map[string]*tagVal
+	// comm serves the programs' READ and WRITE blocks (channels.go); nil
+	// when the runtime has no channels.
+	comm *commHub
+	// red is a pair's redundancy state the system functions read
+	// (redstate.go); all zero outside a pair.
+	red redState
+	// switching: a planned switchover is under way (switch.go): writes,
+	// forces and substitutes from outside the programs are refused
+	// (ErrSwitching). Set under mu, read under it.
+	switching atomic.Bool
+	mu        sync.RWMutex
+	vals      map[string]*tagVal
 	// fold maps ir.NameKey(name) to the spelling a tag was created under.
 	// Tag names are IEC identifiers, so they are case-insensitive (#197):
 	// a lookup that misses vals exactly falls back here, and a write in
@@ -71,6 +81,13 @@ type Tags struct {
 	// depth (#247) — and an array index counts from the declared lower
 	// bound. Set once in New, read-only after.
 	types map[string]*ir.Type
+	// ranges maps ir.NameKey(tag) to the bounds an external write must
+	// stay inside (TagMeta.Min/Max, #718). Set once in New, read-only
+	// after; only Write consults it.
+	ranges map[string]TagRange
+	// paramNote, when set, hears each external write that landed: the
+	// parameters' edit attribution (#718). Set once in New.
+	paramNote func(path, by string, val any)
 	// divZero counts every integer or REAL division (or MOD) by zero the
 	// VM has evaluated against this store, controller-wide, since start
 	// (ir.DivZeroCounter). Surfaced as ScanStats.DivZero.
@@ -100,6 +117,34 @@ type Tags struct {
 	// the feature. forceRev bumps on every change to the table.
 	forces   map[string]*forceSet
 	forceRev uint64
+	// forceSeq numbers each force set, so one can be told from another (UnforceIf).
+	forceSeq uint64
+	// subs is the substitute table, keyed by ROOT tag (see substitute.go),
+	// with tagVal.substituted beside it as for forces. subRev bumps on
+	// every change to the table (under mu; atomic so SubstituteRevision,
+	// read once per alarm per scan, takes no lock).
+	subs   map[string]*subSet
+	subRev atomic.Uint64
+	// The substitute companions and the expiry pulse (substitute_expiry.go):
+	// each substitutable root's __Substituted flag, the resource-wide
+	// flags' stored names ("" when undeclared), the pulse, and subBusy,
+	// which a scan loads to skip the substitute step when there is
+	// nothing to time.
+	subComp                      []subCompanion
+	subUnackedTag, subExpiredTag string
+	// subFaultTag is __Substitute_Fault's stored name; subLoadFault is
+	// set while the last retain load failed (substitute_retain.go).
+	subFaultTag  string
+	subLoadFault bool
+	// subSaveFault is set while a stop or acknowledgement the API took
+	// is not yet saved (substitute_durable.go).
+	subSaveFault bool
+	// subSyncFault is set while a takeover's catch-up of the
+	// operator-intent log has not succeeded (substitute_intent.go).
+	subSyncFault       bool
+	pulseOn, pulseSeen bool
+	pulseAt            time.Duration
+	subBusy            atomic.Bool
 }
 
 // tagVal is one stored tag: its value and the store generation at which
@@ -113,6 +158,19 @@ type tagVal struct {
 	gen    uint64
 	out    bool // this tag is bound to a driver output; see Tags.outGen
 	forced bool // the tag has an entry in Tags.forces; see force.go
+	// substituted: the tag has an entry in Tags.subs; see substitute.go
+	substituted bool
+	// owned: a substitute companion, which only the runtime sets. A write
+	// to it from anyone else is refused (Tags.Write, Force) or dropped (a
+	// program's), as a write to a forced tag is. See substitute_expiry.go.
+	owned bool
+	// releases: the takeover hold's release tag (hold.go). The program
+	// writes it; a write or a force from anyone else is refused.
+	releases bool
+	// held: an output seeded at its type's zero (no init:) that nothing has
+	// written yet. The logic and every reader see the zero; readMany, the
+	// driver push, leaves it out until the first write. See Tags.hold.
+	held bool
 }
 
 // Sample is a tag's value together with the store generation it was written
@@ -174,6 +232,18 @@ func (t *Tags) WriteGlobal(name string, v ir.Value) error {
 func (t *Tags) writeLocked(name string, v ir.Value) bool {
 	if cur, key, ok := t.lookupLocked(name); ok {
 		name = key
+		if cur.owned {
+			return false
+		}
+		if cur.substituted {
+			// A substituted input: what the writer delivered becomes its
+			// LIVE value, and the substitutes are laid over it, under any
+			// force (the force's actual is the substituted view). See
+			// substitute.go.
+			ss := t.subs[name]
+			ss.live, ss.wrote = v, true
+			v = ss.apply(v)
+		}
 		if cur.forced {
 			// A forced tag: what the writer asked for becomes the tag's
 			// ACTUAL value, and the forces are laid back over it — see
@@ -202,7 +272,12 @@ func (t *Tags) writeLocked(name string, v ir.Value) bool {
 // storeLocked stores v into an existing tag unless it equals what is there,
 // stamping a fresh generation when it changes. Caller holds t.mu.
 func (t *Tags) storeLocked(name string, cur *tagVal, v ir.Value) bool {
-	if sameValue(&cur.v, &v) {
+	if cur.held {
+		// The first write of a held output, whatever it writes — the zero
+		// it already holds included — is what the driver has been waiting
+		// for: it was absent from every push until now, so it is a change.
+		cur.held = false
+	} else if sameValue(&cur.v, &v) {
 		return false
 	}
 	t.gen++
@@ -265,6 +340,27 @@ func (t *Tags) markOutputs(names []string) {
 			// Whatever it holds now is a value the driver has not been told
 			// about, so the first scan after registration must send it.
 			t.outGen = t.gen
+		}
+	}
+}
+
+// hold marks seeded outputs as not yet the driver's: each exists at the
+// seed it was given, the logic reads and writes it like any tag, and
+// readMany leaves it out of the driver push until its first write — by the
+// logic, an operator, a force — clears the mark (storeLocked). The seed is
+// the zero an IEC variable starts at, not a command: an output with no
+// init: used to be absent until the logic wrote it, and a driver is handed
+// it no earlier now (nautilus#696). Names that do not exist are ignored.
+func (t *Tags) hold(names []string) {
+	if len(names) == 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, n := range names {
+		// Folded: a seed may have landed under another spelling of the name.
+		if tv, _, ok := t.lookupLocked(n); ok {
+			tv.held = true
 		}
 	}
 }
@@ -342,13 +438,14 @@ func (t *Tags) setMany(names []string, in map[string]any) uint64 {
 // readMany fills dst with the named tags' driver-facing values under a
 // SINGLE lock — compound values (UDTs, arrays) as ir.Value so typed drivers
 // keep field names and integer widths, scalars as plain Go values. Names
-// that do not exist are skipped, and dst is cleared of anything stale.
+// that do not exist, or are held (Tags.hold), are skipped, and dst is
+// cleared of anything stale.
 func (t *Tags) readMany(names []string, dst map[string]any) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	for _, name := range names {
 		tv, _, ok := t.lookupLocked(name)
-		if !ok {
+		if !ok || tv.held {
 			delete(dst, name)
 			continue
 		}
@@ -597,8 +694,20 @@ func (t *Tags) SetPath(path string, v any) error {
 // every leaf to its declared type's range and an enumeration to its
 // members (ir.SetFieldTypedStrict): the front door's rule, not SetPath's.
 func (t *Tags) setPathLocked(path string, v any, strict bool) error {
+	key, nv, err := t.planPathLocked(path, v, strict)
+	if err != nil {
+		return err
+	}
+	t.writeLocked(key, nv)
+	return nil
+}
+
+// planPathLocked is setPathLocked without the store: the tag a write would
+// set and the value it would give it, or the error the write would answer.
+// Caller holds t.mu.
+func (t *Tags) planPathLocked(path string, v any, strict bool) (string, ir.Value, error) {
 	if path == "" {
-		return fmt.Errorf("no tag name")
+		return "", ir.Value{}, fmt.Errorf("no tag name")
 	}
 	// A tag whose own NAME contains a dot wins over member resolution.
 	// Nothing in nautilus creates one today, but a driver is free to name a
@@ -610,47 +719,51 @@ func (t *Tags) setPathLocked(path string, v any, strict bool) error {
 				err = ir.EnumMemberOnly(t.types[ir.NameKey(key)], v, "tag "+key)
 			}
 			if err != nil {
-				return err
+				return "", ir.Value{}, err
 			}
-			t.writeLocked(key, ev)
-			return nil
+			return key, ev, nil
 		}
-		return t.setFieldLocked(key, t.writeBase(key, cur), nil, v, strict)
+		nv, err := t.planFieldLocked(key, t.writeBase(key, cur), nil, v, strict)
+		return key, nv, err
 	}
 	root, segs := ir.SplitAddress(path)
 	if len(segs) == 0 {
-		return &UndefinedTagError{root}
+		return "", ir.Value{}, &UndefinedTagError{root}
 	}
 	cur, root, ok := t.lookupLocked(root)
 	if !ok {
-		return &UndefinedTagError{root}
+		return "", ir.Value{}, &UndefinedTagError{root}
 	}
-	return t.setFieldLocked(root, t.writeBase(root, cur), segs, v, strict)
+	nv, err := t.planFieldLocked(root, t.writeBase(root, cur), segs, v, strict)
+	return root, nv, err
 }
 
 // writeBase is the value a member write edits: the stored value, or for a
-// forced tag its ACTUAL value — editing the stored one would copy the forced
-// members into what the tag returns to when the force is removed.
+// forced or substituted tag its LIVE value — editing the stored one would
+// copy the forced or substituted members into what the tag returns to when
+// they end.
 func (t *Tags) writeBase(root string, cur *tagVal) ir.Value {
-	if cur.forced {
-		return t.forces[root].actual
-	}
-	return cur.v
+	return t.liveLocked(root, cur)
 }
 
 // setFieldLocked applies one member write to a tag already read under the
 // lock, and stores the result. Caller holds t.mu.
 func (t *Tags) setFieldLocked(root string, cur ir.Value, path []string, v any, strict bool) error {
-	set := ir.SetFieldTyped
-	if strict {
-		set = ir.SetFieldTypedStrict
-	}
-	nv, err := set(cur, t.types[ir.NameKey(root)], path, v, "tag "+root)
+	nv, err := t.planFieldLocked(root, cur, path, v, strict)
 	if err != nil {
 		return err
 	}
 	t.writeLocked(root, nv)
 	return nil
+}
+
+// planFieldLocked is setFieldLocked without the store.
+func (t *Tags) planFieldLocked(root string, cur ir.Value, path []string, v any, strict bool) (ir.Value, error) {
+	set := ir.SetFieldTyped
+	if strict {
+		set = ir.SetFieldTypedStrict
+	}
+	return set(cur, t.types[ir.NameKey(root)], path, v, "tag "+root)
 }
 
 // ReadPath resolves a tag or a member path — "Tag" or "Tag.Member.Sub" — the

@@ -632,6 +632,11 @@ func runLogixWrite(args []string) int {
 				fmt.Fprintf(os.Stderr, "naut logix write: %s: %v\n", filepath.Join(dir, project.ManifestName), err)
 				return 2
 			}
+			// Where a READ or WRITE points, for any program of the project.
+			opts.Channels = writerChannels(m.Channels)
+			if m.Target != nil && m.Target.Logix != nil {
+				opts.Messages = writerMessages(m.Target.Logix.Messages)
+			}
 		}
 		// The project's deployed program: write what `naut logix deploy`
 		// would send — the target: logix envelope, the task's rate and the
@@ -668,6 +673,7 @@ func runLogixWrite(args []string) int {
 	if w := writer.LocalModuleWarning(opts.ProcessorType); w != "" && opts.Hardware == nil {
 		fmt.Fprintln(os.Stderr, "naut logix write: warning:", w)
 	}
+	opts.Warn = func(w string) { fmt.Fprintln(os.Stderr, "naut logix write: warning:", w) }
 	doc, diags, err := writer.WriteProgram(path, string(raw), opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", path, err)

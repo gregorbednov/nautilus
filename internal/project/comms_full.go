@@ -9,6 +9,7 @@ import (
 	"github.com/joyautomation/nautilus/opcua"
 	"github.com/joyautomation/nautilus/optommp"
 	"github.com/joyautomation/nautilus/plcnext"
+	"github.com/joyautomation/nautilus/profinet"
 	"github.com/joyautomation/nautilus/prom"
 	"github.com/joyautomation/nautilus/redfish"
 	"github.com/joyautomation/nautilus/replay"
@@ -21,9 +22,12 @@ import (
 // Unknown driver types (a Go-tier io.Driver, which never comes through the
 // manifest loader) are not.
 func commsDriver(d nio.Driver) bool {
+	if u, ok := d.(interface{ Unwrap() nio.Driver }); ok {
+		return commsDriver(u.Unwrap())
+	}
 	switch d.(type) {
 	case *modbus.Driver, *eip.Driver, *sphost.Driver, *opcua.Driver,
-		*snmp.Driver, *redfish.Driver, *prom.Driver:
+		*snmp.Driver, *redfish.Driver, *prom.Driver, *profinet.DeviceDriver:
 		return true
 	case *plcnext.Driver, *optommp.Driver, *replay.Driver, *nio.Memory:
 		return false

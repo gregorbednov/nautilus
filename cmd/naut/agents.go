@@ -30,6 +30,7 @@ import (
 	"strings"
 
 	"github.com/joyautomation/nautilus/internal/lsp"
+	"github.com/joyautomation/nautilus/internal/project"
 )
 
 const (
@@ -63,6 +64,18 @@ var agentsPrevious = map[string]string{
 	"27c8be051e99ad18b7e4be03f1c7c7cedce4bf1a4dbccaeaf0ced7b10fbcdc83": "#683, 2026-11-14",
 	"6e72b62574da6eab309b1921f5c378192a2f5911794bab5c2489efbfbc2127ac": "#684, 2026-11-14",
 	"bc415b0fbb9d69a72aed28ac1d6c45d440c01e5a43ddfee7b349351635da8465": "#685, 2026-11-14",
+	"daee8ac3136a6c59d77c73b376499ab67c6f929936bdf5d7594705c05a420726": "#689, 2026-11-14",
+	"49ca1271bf5c8b1fe7d61a939529a83a46cf3e665d50f1fd381201e117fe1bdb": "panels, 2026-11-15",
+	"fe1c1a177f900b6315a6816239f016883e17824419697ed32e0f0b1a299ddfba": "tank marks, 2026-11-15",
+	"730f32f5079ce9becdd91e6610d425f4caec003cf9deb85ac2df4b8f4489963a": "operator cues, 2026-11-15",
+	"6289dbfe81240e561f74429f3120150cab6f9b0b1179000d4212ab77bc2f6915": "kit pass, 2026-11-15",
+	"ff1fcb05159816e0bb65530b81671ad551644e498dfb243e530bbc2449d36cc8": "web text, 2026-11-15",
+	"6feb178febd78f2c86f2e94f12ff43a50e95bb2f34bc9b71306136198dee879b": "ranges, 2026-11-15",
+	"9c470e2c1045d75cff72039e397e9cd27957f86a7515cc0db15c78c8576be692": "pump stack, 2026-11-16",
+	"4abb24568714bf891d333ed924c8dbf8885e7602480c907834b07281c485a527": "plain On/Off, 2026-11-16",
+	"26b563d51068d64cc392fc5c8b5deffed38ea440b9c4d8ef9604b86633651dc4": "intuitive labels, 2026-11-16",
+	"7853952eb79b350e6c2f45058c6daa75274d591a6c2ac250481db35dcad6b815": "#697, 2026-11-16",
+	"52a38d7987d10ec03b530d28cba5d2881a9b55a44e75deef24197a604cced6f6": "before the project-aware sections, #1076, 2026-11-20",
 }
 
 // agentsState is what a project's AGENTS.md is, as far as naut is concerned.
@@ -107,8 +120,96 @@ func embeddedText(name string) string {
 	return oneNewline(lf(string(raw)))
 }
 
-// agentsText is this naut's guidance.
-func agentsText() string { return embeddedText("AGENTS.md.tmpl") }
+// agentsFeatures is what a project uses, which decides what its guidance
+// carries: the AI reads AGENTS.md on every turn, so a project with no
+// screens does not pay for 180 lines about them. A kind the project does
+// not use gets a short stub that says how to get the full text.
+type agentsFeatures struct{ ST, LD, FBD, SFC, Screens bool }
+
+// agentsAll is every section: the text of a project with none of the
+// signs below (no program yet, so no way to know what it will use).
+var agentsAll = agentsFeatures{true, true, true, true, true}
+
+// agentsFeaturesFor reads a project directory for the files each section is
+// about. A project with no program file at all gets every section.
+func agentsFeaturesFor(dir string) agentsFeatures {
+	var f agentsFeatures
+	root := os.DirFS(dir)
+	// The loader's own rules (project.scanScreens): no dot-directories,
+	// node_modules, build or dist, and no nested project (it has its own
+	// nautilus.yaml). Extensions are compared lower-cased, as the loader
+	// does, so Main.ST counts.
+	fs.WalkDir(root, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		n := d.Name()
+		if d.IsDir() {
+			if p != "." {
+				if strings.HasPrefix(n, ".") || n == "node_modules" || n == "build" || n == "dist" {
+					return fs.SkipDir
+				}
+				if _, err := fs.Stat(root, p+"/"+project.ManifestName); err == nil {
+					return fs.SkipDir
+				}
+			}
+			return nil
+		}
+		switch n = strings.ToLower(n); {
+		case strings.HasSuffix(n, ".st"):
+			f.ST = true
+		case strings.HasSuffix(n, ".ld"):
+			f.LD = true
+		case strings.HasSuffix(n, ".fbd"):
+			f.FBD = true
+		case strings.HasSuffix(n, ".sfc"):
+			f.SFC = true
+		case strings.HasSuffix(n, ".mimic.json"):
+			f.Screens = true
+		}
+		return nil
+	})
+	if !f.ST && !f.LD && !f.FBD && !f.SFC {
+		return agentsAll
+	}
+	return f
+}
+
+// agentsStub is what a section the project does not use says in its place.
+func agentsStub(title, kind, doc string) string {
+	return "## " + title + " (not used in this project yet)\n\n" +
+		"No " + kind + " here, so its rules are left out to keep this file short. Once you add\n" +
+		"the first one, run `naut agents` and the full rules appear in this file.\n" +
+		"Until then: " + doc + "\n"
+}
+
+// agentsText is this naut's guidance for a project that uses f.
+func agentsText(f agentsFeatures) string {
+	const docs = "https://nautilus.joyautomation.com"
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(embeddedText("AGENTS.md.tmpl"), "\n"))
+	for _, sec := range []struct {
+		on                bool
+		file, title, kind string
+		doc               string
+	}{
+		{f.ST, "st.md", "Structured Text (`.st`)", "Structured Text file", docs + "/languages/structured-text/"},
+		{f.LD, "ld.md", "Ladder (`.ld`)", "ladder program", docs + "/languages/ladder/"},
+		{f.FBD, "fbd.md", "Function Block Diagram (`.fbd`)", "function block diagram", docs + "/languages/function-block/"},
+		{f.SFC, "sfc.md", "Sequential Function Chart (`.sfc`)", "sequential function chart", docs + "/languages/sfc/"},
+		{f.Screens, "screens.md", "Operator screens", "operator screen (`*.mimic.json`; this section does not cover 3D scenes or a hand-built `hmi/` app)", docs + "/guides/operator-screens/"},
+	} {
+		b.WriteString("\n\n")
+		if sec.on {
+			b.WriteString(strings.TrimRight(embeddedText("agents/"+sec.file), "\n"))
+		} else {
+			b.WriteString(strings.TrimRight(agentsStub(sec.title, sec.kind, sec.doc), "\n"))
+		}
+	}
+	b.WriteString("\n\n")
+	b.WriteString(embeddedText("agents/tail.md"))
+	return oneNewline(b.String())
+}
 
 // claudeText is the CLAUDE.md a project gets when it has none.
 func claudeText() string { return embeddedText("CLAUDE.md.tmpl") }
@@ -131,9 +232,9 @@ func sha(s string) string {
 
 // agentsBlock is the nautilus text between its markers. The version on the
 // begin line is for people; staleness is decided by the text alone.
-func agentsBlock() string {
+func agentsBlock(f agentsFeatures) string {
 	return agentsBeginMark + " (naut " + lsp.Version + "): `naut agents` keeps the text between these markers current. Write this project's own notes above or below them. -->\n" +
-		agentsText() + agentsEndMark + "\n"
+		agentsText(f) + agentsEndMark + "\n"
 }
 
 // agentsSpan finds the nautilus block in an LF document: the byte offsets
@@ -174,8 +275,8 @@ func agentsSpan(doc string) (start, end int, body string, found bool, err error)
 // knownPrefix finds a text some naut wrote at the start of an unmarked LF
 // document: today's (current true) or an earlier one. It returns the
 // length of that text in doc, so what follows it is the project's own.
-func knownPrefix(doc string) (n int, current, ok bool) {
-	if cur := agentsText(); strings.HasPrefix(oneNewline(doc), cur) {
+func knownPrefix(doc string, f agentsFeatures) (n int, current, ok bool) {
+	if cur := agentsText(f); strings.HasPrefix(oneNewline(doc), cur) {
 		return min(len(cur), len(doc)), true, true
 	}
 	// An earlier text is known only by its hash: try every line boundary.
@@ -199,19 +300,19 @@ func knownPrefix(doc string) (n int, current, ok bool) {
 
 // agentsClassify says what an existing AGENTS.md is; err explains a
 // conflict.
-func agentsClassify(doc string) (agentsState, error) {
+func agentsClassify(doc string, f agentsFeatures) (agentsState, error) {
 	doc = lf(doc)
 	_, _, body, found, err := agentsSpan(doc)
 	if err != nil {
 		return agentsConflict, err
 	}
 	if found {
-		if oneNewline(body) == agentsText() {
+		if oneNewline(body) == agentsText(f) {
 			return agentsCurrent, nil
 		}
 		return agentsStale, nil
 	}
-	if _, current, ok := knownPrefix(doc); ok {
+	if _, current, ok := knownPrefix(doc, f); ok {
 		if current {
 			return agentsUnstamped, nil
 		}
@@ -235,12 +336,12 @@ const (
 // agentsRender returns the AGENTS.md to write, given the one that exists
 // (exists false: none), and a word for what changed. changed is false when
 // the file is already current and stamped, so nothing need be written.
-func agentsRender(existing string, exists bool, mode agentsMode) (out, did string, changed bool, err error) {
+func agentsRender(f agentsFeatures, existing string, exists bool, mode agentsMode) (out, did string, changed bool, err error) {
 	if !exists {
-		return agentsBlock(), "wrote", true, nil
+		return agentsBlock(f), "wrote", true, nil
 	}
 	doc := lf(existing)
-	state, cerr := agentsClassify(doc)
+	state, cerr := agentsClassify(doc, f)
 	switch state {
 	case agentsCurrent:
 		return existing, "already current", false, nil
@@ -250,13 +351,13 @@ func agentsRender(existing string, exists bool, mode agentsMode) (out, did strin
 			did = "stamped"
 		}
 		if start, end, _, found, _ := agentsSpan(doc); found {
-			return eol(doc[:start]+agentsBlock()+doc[end:], existing), did, true, nil
+			return eol(doc[:start]+agentsBlock(f)+doc[end:], existing), did, true, nil
 		}
-		n, _, _ := knownPrefix(doc)
-		return eol(agentsBlock()+doc[n:], existing), did, true, nil
+		n, _, _ := knownPrefix(doc, f)
+		return eol(agentsBlock(f)+doc[n:], existing), did, true, nil
 	}
 	if mode == agentsForce {
-		return eol(agentsBlock(), existing), "replaced", true, nil
+		return eol(agentsBlock(f), existing), "replaced", true, nil
 	}
 	if state == agentsConflict {
 		return "", "", false, fmt.Errorf("%s: %v; move your own notes out of the nautilus text (above or below it), then run naut agents -force to replace the file", agentsFileName, cerr)
@@ -266,7 +367,7 @@ func agentsRender(existing string, exists bool, mode agentsMode) (out, did strin
 		if !strings.HasSuffix(doc, "\n") {
 			sep = "\n\n"
 		}
-		return eol(doc+sep+agentsBlock(), existing), "added the nautilus guidance below your text", true, nil
+		return eol(doc+sep+agentsBlock(f), existing), "added the nautilus guidance below your text", true, nil
 	}
 	return "", "", false, fmt.Errorf("%s is not one naut wrote, so naut agents leaves it alone: -append adds the nautilus guidance below your text, -force replaces the file", agentsFileName)
 }
@@ -319,7 +420,7 @@ func agentsInspect(dir string) (as agentsState, why error, cs claudeState, err e
 	}
 	as = agentsMissing
 	if ok {
-		as, why = agentsClassify(doc)
+		as, why = agentsClassify(doc, agentsFeaturesFor(dir))
 	}
 	cdoc, ok, err := readIfThere(filepath.Join(dir, claudeFileName))
 	if err != nil {
@@ -377,7 +478,7 @@ func agentsWrite(dir string, mode agentsMode) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	out, did, changed, err := agentsRender(old, exists, mode)
+	out, did, changed, err := agentsRender(agentsFeaturesFor(dir), old, exists, mode)
 	if err != nil {
 		return nil, err
 	}

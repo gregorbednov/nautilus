@@ -61,6 +61,9 @@ type scanView struct {
 	alias map[string]string
 	// firstScan answers ir.ScanInfo for the scan in progress (Program.Run).
 	firstScan bool
+	// The ir.RedundancyInfo answers for the scan in progress (redstate.go).
+	takeoverScan, hotTakeover, peerReady, hold bool
+	takeovers                                  int64
 }
 
 func newScanView(store *Tags) *scanView {
@@ -100,9 +103,9 @@ func (v *scanView) snapshot(names []string) {
 // suppressed and generations stamped by writeLocked, exactly as a direct
 // write would be. A tag the program assigned only members of is merged
 // onto what the store holds now when it changed since the snapshot, or is
-// forced (merged onto its actual value, so the forced members do not leak
-// into what the tag returns to when the force is removed); see
-// membermerge.go.
+// forced or substituted (merged onto its live value, so the forced or
+// substituted members do not leak into what the tag returns to when the
+// force or substitute ends); see membermerge.go and substitute.go.
 func (v *scanView) commit() {
 	if len(v.dirty) == 0 {
 		return
@@ -112,7 +115,7 @@ func (v *scanView) commit() {
 		val := v.vals[name]
 		if m != nil {
 			if !m.all {
-				if cur, key, ok := v.store.lookupLocked(name); ok && (cur.gen > v.snapGen || cur.forced) {
+				if cur, key, ok := v.store.lookupLocked(name); ok && (cur.gen > v.snapGen || cur.forced || cur.substituted) {
 					val = m.merge(v.store.writeBase(key, cur), val)
 				}
 			}
@@ -190,6 +193,19 @@ func (v *scanView) DivZero() { v.store.DivZero() }
 
 // Now forwards the VM's optional ir.WallClock: LOCAL_TIME.
 func (v *scanView) Now() time.Time { return v.store.Now() }
+
+// PostRead, PostWrite and Poll forward the VM's optional ir.Channels: the
+// READ and WRITE blocks. A store without channels refuses every post with
+// ir.CommNoChannel.
+func (v *scanView) PostRead(channel, variable string, shape ir.Value, elem string) (int64, int) {
+	return v.store.comm.PostRead(channel, variable, shape, elem)
+}
+
+func (v *scanView) PostWrite(channel, variable string, data ir.Value, elem string) (int64, int) {
+	return v.store.comm.PostWrite(channel, variable, data, elem)
+}
+
+func (v *scanView) Poll(ticket int64) (ir.CommResult, bool) { return v.store.comm.Poll(ticket) }
 
 // FirstScan is the VM's optional ir.ScanInfo: FIRST_SCAN().
 func (v *scanView) FirstScan() bool { return v.firstScan }

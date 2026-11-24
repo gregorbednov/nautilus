@@ -121,7 +121,7 @@
 
         --brand: #1f7a46;
 
-        --s1: #2a6fc9;
+        --s1: #2768c0;
         --s2: #9c6a00;
         --s3: #157a55;
         --s5: #6357cf;
@@ -379,6 +379,9 @@
       .phlegend .io { margin-left: auto; font-weight: 600; }
       .phlegend .io.bad { color: var(--crit); }
       .phlegend .io.ok { color: var(--good); }
+      #io-config { margin-top: 6px; font-weight: 600; color: var(--crit); }
+      #cluster-warn { margin: 0 0 1rem; padding: 0.6rem 0.8rem; border: 1px solid var(--crit); border-radius: 6px; font-weight: 600; color: var(--crit); }
+      #cluster-warn p { margin: 0; }
 
       /* ── field-driver status cards ────────────────────────────────────── */
       .drivers { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.7rem; margin-top: 0.75rem; }
@@ -530,6 +533,7 @@
         </div>
       </header>
       <p class="tagline">Your control logic is running. This page is served by the built-in tag API.</p>
+      <div id="cluster-warn" role="alert" style="display:none"></div>
 
       <section>
         <h2>Scan diagnostics</h2>
@@ -562,6 +566,9 @@
             <span><i class="ph-write"></i>output write <b id="ph-write-v">—</b></span>
             <span class="io" id="ph-io">—</span>
           </div>
+          <!-- Live I/O configuration (#706): shown while what runs is not
+               the manifest the controller booted from. -->
+          <div class="io bad" id="io-config" style="display:none"></div>
         </div>
         <!-- Tasks: shown only when the resource runs more than one program.
              The main task (which owns field I/O) leads; additional tasks
@@ -695,6 +702,22 @@
       let inputSet = new Set();
       let outputSet = new Set();
       let hasMeta = false;
+      // Standing warnings of the redundancy (GET /api/cluster): a redundant
+      // pair's retained values not replicated yet (#710), for one.
+      function loadClusterWarnings() {
+        fetch("/api/cluster")
+          .then((r) => r.json())
+          .then((st) => {
+            const w = st.warnings ?? [];
+            const el = $("cluster-warn");
+            el.innerHTML = w.map((m) => `<p>Redundancy: ${esc(m)}</p>`).join("");
+            el.style.display = w.length ? "" : "none";
+          })
+          .catch(() => {});
+      }
+      loadClusterWarnings();
+      setInterval(loadClusterWarnings, 30000);
+
       fetch("/api/meta")
         .then((r) => r.json())
         .then((m) => {
@@ -774,6 +797,21 @@
         renderTable();
       }
 
+      // refusalText is what a refused write says on its cell: the
+      // controller's own reason (its JSON "error": sign in, confirm your
+      // password, not your role, a token), never a guess at the cause.
+      function refusalText(status, body) {
+        let detail = String(body || "").trim();
+        try {
+          const j = JSON.parse(detail);
+          if (j && typeof j.error === "string") detail = j.error.trim();
+        } catch {}
+        if (detail) return (status >= 500 ? "write failed — " : "write refused — ") + detail;
+        if (status === 401) return "write refused — sign in (/signin), or send a token";
+        if (status === 403) return "write refused — not permitted";
+        return `write failed (${status})`;
+      }
+
       async function writeTag(name, value) {
         writeErrors.delete(name);
         try {
@@ -782,15 +820,7 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name, value }),
           });
-          if (!res.ok) {
-            const detail = (await res.text()).trim();
-            failWrite(
-              name,
-              res.status === 401 || res.status === 403
-                ? "write refused — this controller requires an auth token"
-                : detail || `write failed (${res.status})`,
-            );
-          }
+          if (!res.ok) failWrite(name, refusalText(res.status, await res.text()));
         } catch {
           failWrite(name, "write failed — controller unreachable");
         }
@@ -1150,11 +1180,19 @@
         if (s.tasks && s.tasks.length) {
           tw.style.display = "";
           // Thread placement, when asked for: "cpu 3 · fifo 50", flagged
-          // when the OS refused it (the task is then running unpinned).
+          // when the OS refused it (REFUSED: running unpinned at normal
+          // priority) or the priority was withdrawn mid-run (DEMOTED, by
+          // the priority guard). Same rules as hmi/src/lib/sched.ts.
           const sched = (s) => {
             if (!s || (!s.cpus?.length && !s.priority)) return "";
             const what = [s.cpus?.length ? "cpu " + s.cpus.join(",") : "", s.priority ? "fifo " + s.priority : ""].filter(Boolean).join(" · ");
-            return s.error ? ` <small class="io bad" title="${esc(s.error)}">${what} REFUSED</small>` : ` <small>${what}</small>`;
+            let verdict = s.error ? "REFUSED" : "";
+            if (s.demoted) {
+              const e = s.error || "";
+              const cause = /overran|has run for more than/.test(e) ? "overrun" : /SIGXCPU|RLIMIT_RTTIME/.test(e) ? "CPU limit" : "";
+              verdict = cause ? `DEMOTED (${cause})` : "DEMOTED";
+            }
+            return verdict ? ` <small class="io bad" title="${esc(s.error || "")}">${what} ${verdict}</small>` : ` <small>${what}</small>`;
           };
           const row = (t) =>
             `<tr><td>${esc(t.name)}${sched(t.sched)}</td>` +
@@ -1189,7 +1227,29 @@
         lastLocals = frame.locals ?? {};
         renderScan(frame.scan);
         renderDrivers(frame.drivers ?? []);
+        renderConfig(frame.config);
         renderTable();
+      }
+
+      // What runs against the manifest (live I/O configuration, #706).
+      function renderConfig(c) {
+        const el = $("io-config");
+        const differs = c?.differs ?? [];
+        const discarded = c?.discarded ?? [];
+        if (!c || (!differs.length && !c.fault && !discarded.length)) {
+          el.style.display = "none";
+          return;
+        }
+        const names = [...new Set(differs.map((d) => d.device ? d.driver + "/" + d.device : d.driver))];
+        let text = differs.length ? "I/O CONFIG DIFFERS FROM THE MANIFEST for " + names.join(", ") : "";
+        if (differs.length && c.notKept) text += " (NOT KEPT ACROSS A RESTART — " + c.notKept + ")";
+        if (c.fault) text += (text ? " · " : "") + "I/O APPLY FAULT — " + c.fault;
+        if (discarded.length) {
+          const what = discarded.map((d) => d.driver ? (d.device ? d.driver + "/" + d.device : d.driver) : "a pending apply");
+          text += (text ? " · " : "") + "KEPT I/O CHANGE NOT BROUGHT BACK for " + what.join(", ") + " — " + discarded[0].why;
+        }
+        el.textContent = text;
+        el.style.display = "";
       }
 
       // ── field drivers ────────────────────────────────────────────────
@@ -1226,7 +1286,7 @@
               (dv.detail ? `<span class="dv">${esc(dv.detail)}</span>` : "") + `</div>`).join("") + `</div>`
           : "";
         return `<div class="dcard st-${esc(d.state)}">` +
-          `<div class="dhead"><span class="dname"><span class="dtxt" title="${esc(d.name)}">${esc(d.name)}</span><span class="dkind">${esc(KIND_LABEL[d.kind] ?? d.kind)}</span></span>${badge(d.state)}</div>` +
+          `<div class="dhead"><span class="dname"><span class="dtxt" title="${esc(d.name)}">${esc(d.name)}</span><span class="dkind">${esc(KIND_LABEL[d.kind] ?? d.kind)}</span>${d.differs ? `<span class="dkind" title="This driver runs an I/O configuration applied live that is not the manifest's: naut pull --io brings it back into the project">differs</span>` : ""}</span>${badge(d.state)}</div>` +
           `<div class="ddetail">${esc(d.detail)}</div>` +
           `<div class="dmsg">${esc(d.message)}${uptime(d)}</div>` +
           (d.lastError ? `<div class="derr" title="${esc(d.lastError)}">${esc(d.lastError)}</div>` : "") +

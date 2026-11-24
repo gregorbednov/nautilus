@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/joyautomation/nautilus/alarm"
 	"github.com/joyautomation/nautilus/internal/hmibuild"
 	"github.com/joyautomation/nautilus/internal/project"
 	"github.com/joyautomation/nautilus/internal/stproject"
@@ -22,27 +24,36 @@ import (
 	"github.com/joyautomation/nautilus/lang/st"
 	"github.com/joyautomation/nautilus/logix/writer"
 	opcuaserver "github.com/joyautomation/nautilus/opcua/server"
+	"github.com/joyautomation/nautilus/quorum/node"
+	"github.com/joyautomation/nautilus/retain"
 	"github.com/joyautomation/nautilus/runtime"
+	swriter "github.com/joyautomation/nautilus/siemens/writer"
 	"github.com/joyautomation/nautilus/sparkplug"
+	"github.com/joyautomation/nautilus/virtdev"
 )
 
-// runCheck compiles every .st file under the given paths (files or
+// runCheck compiles every program (.st, .ld, .fbd, .sfc) under the given paths (files or
 // directories; default ".") and prints gcc-style diagnostics:
 //
 //	path/to/program.st:12:5: undeclared identifier "y" ...
 //
+// checkVerbose is naut check -v.
+var checkVerbose bool
+
 // Exit code 0 = clean, 1 = diagnostics found, 2 = usage/IO error.
 func runCheck(args []string) int {
 	fset := flag.NewFlagSet("check", flag.ContinueOnError)
 	manifest := fset.String("m", "", manifestFlagUsage)
 	render := fset.Bool("render", true, "render the operator screen in the browser on this machine (Chrome, Chromium or Edge; NAUT_BROWSER names one) and report a page that throws or is blank, a pipe that draws nothing, a drawing far outside its box, sideways scroll on a phone")
-	target := fset.String("target", "", "also check the sources against a deploy target (experimental): \"logix\" runs the Allen-Bradley writer's rules, so a construct the L5X writer cannot express is a diagnostic here, not a download failure")
+	target := fset.String("target", "", "also check the sources against a deploy target (experimental): \"logix\" runs the Allen-Bradley writer's rules and \"siemens\" the S7-1500 SCL writer's, so a construct the target's writer cannot express is a diagnostic here, not a download failure")
+	verbose := fset.Bool("v", false, "verbose: list every site behind a summary warning (the Siemens target's REAL → integer conversions)")
 	if err := fset.Parse(args); err != nil {
 		return 2
 	}
 	renderScreens = *render
-	if *target != "" && *target != "logix" {
-		fmt.Fprintf(os.Stderr, "naut check: unknown target %q (the targets are: logix)\n", *target)
+	checkVerbose = *verbose
+	if *target != "" && *target != "logix" && *target != "siemens" {
+		fmt.Fprintf(os.Stderr, "naut check: unknown target %q (the targets are: logix, siemens)\n", *target)
 		return 2
 	}
 	paths0 := fset.Args()
@@ -54,8 +65,13 @@ func runCheck(args []string) int {
 	// the keystroke, not on the flag.
 	if *target == "" {
 		if dir, ok := manifestDir(paths0, *manifest); ok {
-			if m, err := project.ReadManifest(os.DirFS(dir), *manifest); err == nil && m.Target != nil && m.Target.Logix != nil {
-				*target = "logix"
+			if m, err := project.ReadManifest(os.DirFS(dir), *manifest); err == nil && m.Target != nil {
+				switch {
+				case m.Target.Logix != nil:
+					*target = "logix"
+				case m.Target.Siemens != nil:
+					*target = "siemens"
+				}
 			}
 		}
 	}
@@ -63,8 +79,17 @@ func runCheck(args []string) int {
 	if len(paths) == 0 {
 		paths = []string{"."}
 	}
+	// The Siemens writer works on a whole project (its tags DB, its tasks'
+	// OBs), so its rules need the manifest.
+	if *target == "siemens" {
+		if _, ok := manifestDir(paths, *manifest); !ok {
+			fmt.Fprintf(os.Stderr, "naut check: --target siemens checks a project: run it on the directory that holds %s\n", manifestLabel(*manifest))
+			return 2
+		}
+	}
 
 	var files []string
+	var deviceDirs []string // directories that may have virtual devices: a virtual-devices.yaml or a nautilus.yaml
 	for _, p := range paths {
 		info, err := os.Stat(p)
 		if err != nil {
@@ -87,6 +112,9 @@ func runCheck(args []string) int {
 				}
 				return nil
 			}
+			if d.Name() == virtdev.FileName || d.Name() == project.ManifestName || (*manifest != "" && d.Name() == filepath.Base(*manifest)) {
+				deviceDirs = appendDeviceDir(deviceDirs, filepath.Dir(path))
+			}
 			if ext := strings.ToLower(filepath.Ext(path)); ext == ".st" || ext == ".fbd" || ext == ".ld" || ext == ".sfc" {
 				files = append(files, path)
 			}
@@ -98,7 +126,55 @@ func runCheck(args []string) int {
 		}
 	}
 
+	// A project's virtual devices compile into a plant of their own: their
+	// process model and project-local simulators are not the controller's
+	// programs, so they leave the per-file pass and the plant is compiled
+	// whole instead, its errors reported against virtual-devices.yaml.
+	plantBad := 0
+	if len(deviceDirs) > 0 {
+		skip := map[string]bool{}
+		for _, dir := range deviceDirs {
+			where := filepath.Join(dir, virtdev.FileName)
+			if _, err := os.Stat(where); err != nil {
+				where = filepath.Join(dir, project.ManifestName)
+			}
+			// A manifest that does not read is reported by its own check;
+			// the plant is then virtual-devices.yaml's entries alone, so
+			// its sources still stay out of the controller's pass.
+			devs, _ := manifestDevices(dir, plantManifest(dir, paths, *manifest))
+			set, err := composeVirtualDevices(dir, devs)
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				plantBad++
+				fmt.Printf("%s: %v\n", where, err)
+				continue
+			}
+			for _, f := range set.SourceFiles() {
+				if abs, err := filepath.Abs(f); err == nil {
+					skip[abs] = true
+				}
+			}
+			if err := checkPlant(set); err != nil {
+				plantBad++
+				fmt.Printf("%s: the virtual devices' plant does not compile: %v\n", where, err)
+			}
+		}
+		kept := files[:0]
+		for _, f := range files {
+			if abs, err := filepath.Abs(f); err == nil && skip[abs] {
+				continue
+			}
+			kept = append(kept, f)
+		}
+		files = kept
+	}
+
 	if len(files) == 0 {
+		if plantBad > 0 {
+			return 1
+		}
 		// A manifest that cannot be read is the project's whole problem, and
 		// check is the CI gate: a tree with nothing to compile must not pass
 		// just because the file that names the programs is empty or malformed.
@@ -112,7 +188,7 @@ func runCheck(args []string) int {
 		return 0
 	}
 
-	bad, blankWarns := 0, 0
+	bad, blankWarns := plantBad, 0
 	// #199: an error inside a library is reported once, on the library's
 	// own line — by that file's own check when it is one of the files
 	// checked, else from the first program that composes it. The programs
@@ -375,7 +451,7 @@ func runCheck(args []string) int {
 	// (tag-files) and verification landed together.
 	manifestErrs, manifestWarns := 0, 0
 	if bad == 0 {
-		manifestErrs, manifestWarns = checkManifest(paths, *manifest)
+		manifestErrs, manifestWarns = checkManifest(paths, *manifest, *target)
 		bad += manifestErrs
 	}
 	manifestWarns += blankWarns
@@ -418,6 +494,49 @@ func checkLogixTarget(f, source string, libs []string) bool {
 	return len(diags) > 0
 }
 
+// checkSiemensTarget reports every construct the S7-1500 SCL writer
+// (siemens/writer) refuses in the project in dir, in check's gcc-style
+// lines: the writer itself runs, so check and the deploy share one rule
+// table. A diagnostic with no line (a task, a block name) is reported
+// against the manifest. Returns the number of errors.
+func checkSiemensTarget(dir, manifestName, manifestFile string) int {
+	in, err := siemensWriterInput(dir, manifestName)
+	if err != nil {
+		fmt.Printf("%s: siemens target: %s\n", manifestFile, err)
+		return 1
+	}
+	out, diags, err := swriter.Write(in)
+	if err != nil {
+		fmt.Printf("%s: siemens target: %s\n", manifestFile, err)
+		return 1
+	}
+	report := func(d swriter.Diag, level string) {
+		where := d.Path
+		if where == "" || where == project.ManifestName {
+			where = manifestFile
+		}
+		if d.Line > 0 {
+			fmt.Printf("%s:%d:1: %ssiemens target: %s [%s]\n", where, d.Line, level, d.Message, d.Rule)
+		} else {
+			fmt.Printf("%s: %ssiemens target: %s [%s]\n", where, level, d.Message, d.Rule)
+		}
+	}
+	for _, d := range diags {
+		report(d, "")
+	}
+	// Where the CPU can behave differently from nautilus (writer.Output
+	// Warnings): warnings, not errors.
+	for _, l := range siemensWarningLines(out.Warnings, func(p string) string {
+		if p == "" || p == project.ManifestName {
+			return manifestFile
+		}
+		return p
+	}, checkVerbose) {
+		fmt.Println(l)
+	}
+	return len(diags)
+}
+
 // checkManifest cross-checks a manifest project's declared tags against the
 // tags its programs actually bind, in both directions. Returns (errors,
 // warnings).
@@ -432,7 +551,7 @@ func checkLogixTarget(f, source string, libs []string) bool {
 //   - the manifest declares a tag no program binds → warning. Often correct
 //     (driver- or HMI-only tags are real), so it cannot be an error — but it
 //     is also what a stale generated tag file looks like.
-func checkManifest(paths []string, manifestName string) (errs, warns int) {
+func checkManifest(paths []string, manifestName, target string) (errs, warns int) {
 	dir, ok := manifestDir(paths, manifestName)
 	if !ok {
 		return 0, 0 // not a manifest project; compiling the files was the whole job
@@ -448,6 +567,18 @@ func checkManifest(paths []string, manifestName string) (errs, warns int) {
 	// missing secret file, a weak SNMP auth. Warnings, never errors — this
 	// runs on laptops that have none of the secrets a controller will.
 	for _, w := range driverWarnings(proj.Runtime.Driver) {
+		warns++
+		fmt.Printf("%s: warning: %s\n", loc.file, w)
+	}
+	for _, w := range sendBudgetWarnings(proj) {
+		warns++
+		fmt.Printf("%s: warning: %s\n", loc.file, w)
+	}
+	for _, w := range leaseWarnings(proj) {
+		warns++
+		fmt.Printf("%s: warning: %s\n", loc.file, w)
+	}
+	for _, w := range peerTLSWarnings(proj, os.Getenv) {
 		warns++
 		fmt.Printf("%s: warning: %s\n", loc.file, w)
 	}
@@ -468,6 +599,21 @@ func checkManifest(paths []string, manifestName string) (errs, warns int) {
 			fmt.Printf("%s: warning: server.hmi: %s is older than %s — run npm run build in %s\n",
 				loc.file, proj.HMIDir, src, project.HMIBuildHint(proj.HMIDir))
 		}
+	}
+
+	// A deploy target's own section (target.siemens's station spec, its
+	// agent URL): loading is lenient so the editor keeps every tag while
+	// a station is half typed, and the problems are errors here.
+	if raw, rerr := project.ReadManifest(os.DirFS(dir), manifestName); rerr == nil {
+		for _, p := range raw.Target.Problems() {
+			errs++
+			fmt.Printf("%s: error: %s\n", loc.file, p)
+		}
+	}
+
+	// The Siemens writer's rules, on the project it would write.
+	if target == "siemens" {
+		errs += checkSiemensTarget(dir, manifestName, loc.file)
 	}
 
 	// The first task's name: key is a footgun, not a choice: Load (like
@@ -494,6 +640,22 @@ func checkManifest(paths []string, manifestName string) (errs, warns int) {
 		// here means the composed resource failed for some other reason.
 		fmt.Printf("%s: %s\n", loc.tag(tagNamedInError(err)), err)
 		return 1, 0
+	}
+
+	// A pair's state stream (#710 S1b): an image too big to send at all,
+	// or too big for the budget at 10 a second.
+	for _, w := range streamWarnings(proj) {
+		warns++
+		fmt.Printf("%s: warning: %s\n", loc.file, w)
+	}
+
+	// A READ or WRITE whose ID names no channel would fail every request
+	// with STATUS -1; say so now, with the fix.
+	for _, id := range rt.UnknownChannels() {
+		errs++
+		fmt.Printf("%s: error: a READ or WRITE names channel %q, which channels: does not "+
+			"declare — add it to %s (name: %s, type: cip, host: …) or fix the ID\n",
+			loc.file, id, manifestLabel(manifestName), id)
 	}
 
 	// A protocol input reads as its init: (or the zero of its type) until
@@ -527,6 +689,23 @@ func checkManifest(paths []string, manifestName string) (errs, warns int) {
 	for _, w := range sparkplug.WritableWarnings(rt, proj.SparkplugWritable()) {
 		warns++
 		fmt.Printf("%s: warning: %s\n", loc.file, w)
+	}
+	// Under an auth: block a command writes only what auth.sparkplug
+	// allows (#708 PR 8b): sparkplug.writable with no grant opens nothing.
+	if sparkplugGrantMissing(proj) {
+		warns++
+		fmt.Printf("%s: warning: sparkplug.writable opens tags, but the auth: block's sparkplug: grants no write "+
+			"(no grant, or a role without write such as viewer), so every Sparkplug command write is refused; "+
+			"set `sparkplug: operator` (or a role with write, with areas) under auth:\n", loc.file)
+	}
+
+	// What the auth: block's compiler found odd but not wrong: an
+	// auth.oidc.groups key that looks like a display name.
+	if proj.Auth != nil {
+		for _, w := range proj.Auth.Warnings() {
+			warns++
+			fmt.Printf("%s: warning: %s\n", loc.file, w)
+		}
 	}
 
 	// opcua.writable against the tags it is meant to open: a pattern that
@@ -582,11 +761,12 @@ func checkManifest(paths []string, manifestName string) (errs, warns int) {
 		}
 	}
 
-	// An output with no init: is never seeded: it holds nothing until a
-	// program writes it, and a read before that faults the scan with
-	// "undefined tag" (nautilus#560). A seal-in reads its own coil first,
-	// so it faults on scan one and — the faulting rung being the one that
-	// writes the tag — on every scan after. Only a program's own earlier
+	// An UNTYPED output with no init: is never seeded: it holds nothing
+	// until a program writes it, and a read before that faults the scan
+	// with "undefined tag" (nautilus#560). A typed one starts at the zero
+	// of its type (nautilus#696), so its reads are never early. A seal-in
+	// reads its own coil first, so it faults on scan one and — the faulting
+	// rung being the one that writes the tag — on every scan after. Only a program's own earlier
 	// write counts: tasks start concurrently. An error when some path the
 	// scan can take reaches the read unwritten; a warning when it is
 	// unwritten only if a loop runs zero times.
@@ -599,7 +779,7 @@ func checkManifest(paths []string, manifestName string) (errs, warns int) {
 		writtenAnywhere[ir.NameKey(name)] = true
 	}
 	for _, d := range proj.Runtime.Tags {
-		if d.Role != runtime.RoleOutput || d.Init != nil {
+		if d.Role != runtime.RoleOutput || d.Init != nil || d.Type != "" {
 			continue
 		}
 		var sure, maybe []runtime.EarlyRead
@@ -613,14 +793,15 @@ func checkManifest(paths []string, manifestName string) (errs, warns int) {
 		switch {
 		case len(sure) > 0:
 			errs++
-			fmt.Printf("%s: error: output %q has no init:, and %s — an output with no init: holds "+
-				"nothing until it is written, so that read faults the scan with \"undefined tag %s\"; "+
-				"give it an init:%s\n",
+			fmt.Printf("%s: error: output %q has no init: or type:, and %s — an untyped output with "+
+				"no init: holds nothing until it is written, so that read faults the scan with "+
+				"\"undefined tag %s\"; give it an init:%s, or a type: to start it at that type's zero\n",
 				loc.tag(d.Name), d.Name, earlyReads(sure, writtenAnywhere[ir.NameKey(d.Name)]), d.Name, initHint(d, rt))
 		case len(maybe) > 0:
 			warns++
-			fmt.Printf("%s: warning: output %q has no init:, and %s — if a read comes first it "+
-				"faults the scan with \"undefined tag %s\"; give it an init:%s\n",
+			fmt.Printf("%s: warning: output %q has no init: or type:, and %s — if a read comes "+
+				"first it faults the scan with \"undefined tag %s\"; give it an init:%s, or a "+
+				"type: to start it at that type's zero\n",
 				loc.tag(d.Name), d.Name, earlyReads(maybe, true), d.Name, initHint(d, rt))
 		}
 	}
@@ -643,6 +824,14 @@ func checkManifest(paths []string, manifestName string) (errs, warns int) {
 		// be read by logic, and an output that nothing writes ships its seed
 		// to the field forever.
 		if d.Role == runtime.RoleInput {
+			continue
+		}
+		// A device's command tag that no program writes is not shipped
+		// either: the driver records its first push as the baseline and
+		// sends only changes, so an unwritten command never reaches the
+		// device. A profile offers every writable point; a project uses
+		// some (device-library.md §3.2).
+		if proj.Devices().IsCommand(d.Name) {
 			continue
 		}
 		warns++
@@ -682,9 +871,76 @@ func checkManifest(paths []string, manifestName string) (errs, warns int) {
 		fmt.Printf("%s: warning: %s\n", loc.file, m)
 	}
 	if proj.Alarms != nil {
+		// The contacts and secrets on this machine, when it has them: a
+		// person a level pages with no address for the channel is an
+		// error here, a failed send (no-contact) on a running controller.
+		sd, _ := controllerStateDir("the alarm contacts", proj.AuthStateDir, proj.Name, dir, true, os.Getenv)
+		cerrs, cwarns := checkContacts(proj.Alarms, sd, false)
+		// Web Push pages a person's phone: with no one able to sign in, no
+		// phone can be subscribed and every page fails no-contact.
+		if proj.Alarms.Channels != nil && proj.Alarms.Channels.Push != nil && (proj.Auth == nil || !(proj.Auth.HasUsers() || proj.Auth.OIDC())) {
+			cwarns = append(cwarns, "alarms.channels.push: nobody can sign in (no auth: users or auth.oidc), and a push subscription belongs to a signed-in person, so every page would fail no-contact: add an auth: block with users (naut users add)")
+		}
+		aerr2, awarn2 := ackLinkChecks(proj)
+		cerrs, cwarns = append(cerrs, aerr2...), append(cwarns, awarn2...)
+		for _, m := range cwarns {
+			warns++
+			fmt.Printf("%s: warning: %s\n", loc.file, m)
+		}
+		for _, m := range cerrs {
+			errs++
+			fmt.Printf("%s: error: %s\n", loc.file, m)
+		}
 		// The count is the auditable half of "a few rules cover thousands
 		// of alarms": `naut alarms list` dumps what they became.
 		fmt.Printf("%s: %d alarm definitions\n", loc.file, len(defs))
+	}
+
+	// Substitutes: every rule's value really fits its tag's type (the rules
+	// themselves were resolved against the input tags when the project
+	// loaded, so one matching nothing is already an error).
+	for _, m := range proj.CheckSubstitutes(rt) {
+		errs++
+		fmt.Printf("%s: error: %s\n", loc.file, m)
+	}
+	if n := len(proj.Substitutes()); n > 0 {
+		fmt.Printf("%s: %d substitutable inputs\n", loc.file, n)
+	}
+
+	// Checkout (#719): the sheet's points name tags the project has, a
+	// forced point is a declared output, and a single-person sign-off warns.
+	cerrs, cwarns := proj.CheckCheckout(rt)
+	for _, m := range cerrs {
+		errs++
+		fmt.Printf("%s: error: %s\n", loc.file, m)
+	}
+	for _, m := range cwarns {
+		fmt.Printf("%s: warning: %s\n", loc.file, m)
+	}
+	if sh := proj.CheckoutSheet(); sh != nil {
+		fmt.Printf("%s: %d checkout points\n", loc.file, len(sh.Points))
+	}
+
+	// Cameras (#724): each names equipment the plant has, and a camera that
+	// needs credentials has them in the secrets file.
+	camErrs, camWarns := proj.CheckCameras()
+	ce, cw := checkCameraAlarms(proj, defs)
+	camErrs, camWarns = append(camErrs, ce...), append(camWarns, cw...)
+	if len(proj.Cameras) > 0 {
+		sd, _ := controllerStateDir("the camera credentials", proj.AuthStateDir, proj.Name, dir, true, os.Getenv)
+		e2, w2 := checkCameraSecrets(proj, sd, false)
+		camErrs, camWarns = append(camErrs, e2...), append(camWarns, w2...)
+	}
+	for _, m := range camErrs {
+		errs++
+		fmt.Printf("%s: error: %s\n", loc.file, m)
+	}
+	for _, m := range camWarns {
+		warns++
+		fmt.Printf("%s: warning: %s\n", loc.file, m)
+	}
+	if n := len(proj.Cameras); n > 0 {
+		fmt.Printf("%s: %d cameras\n", loc.file, n)
 	}
 
 	// Scenes: every *.scene.json at the root really binds struct tags the
@@ -724,6 +980,24 @@ func checkManifest(paths []string, manifestName string) (errs, warns int) {
 	}
 	for _, r := range mreports {
 		fmt.Printf("%s: screen %s: %d equipment, %d pipes\n", loc.file, r.File, r.Equipment, r.Pipes)
+	}
+
+	// The plant model (plant:): its own rules, its tags and devices, the
+	// alarms' equipment and what the drawings name (docs/design/plant-model.md).
+	var eqKeys []string
+	for _, d := range defs {
+		eqKeys = append(eqKeys, alarm.EquipmentOf(d))
+	}
+	if prep, perrs, pwarns := proj.CheckPlant(os.DirFS(dir), rt, eqKeys); proj.Plant != nil {
+		for _, m := range perrs {
+			errs++
+			fmt.Printf("%s: error: %s\n", loc.file, m)
+		}
+		for _, m := range pwarns {
+			warns++
+			fmt.Printf("%s: warning: %s\n", loc.file, m)
+		}
+		fmt.Printf("%s: plant: %s, %d %s, %s, %s\n", loc.file, plural(prep.Areas, "area"), prep.Equipment, map[bool]string{true: "piece of equipment", false: "pieces of equipment"}[prep.Equipment == 1], plural(prep.Flows, "flow"), plural(prep.Types, "asset type"))
 	}
 	if src := hmiSource(proj); src != "" {
 		res, err := buildHMI(proj, dir)
@@ -1028,6 +1302,77 @@ func caseOnlyBindings(tags []runtime.TagDef, d nio.Driver) []caseMismatch {
 	return out
 }
 
+// shortestMeasuredLease is the shortest pair lease measured on ARM-class
+// controllers under normal scan load with no lapse (#710's soak): naut
+// check warns below it.
+const shortestMeasuredLease = time.Second
+
+// leaseWarnings: a pair's explicit lease under shortestMeasuredLease.
+func leaseWarnings(proj *project.Project) []string {
+	r := proj.Redundancy
+	if !r.Pair() || r.Lease == "" {
+		return nil
+	}
+	lease := r.LeaseTime()
+	if lease >= shortestMeasuredLease || mutNaut("lease_check_unwarned") {
+		return nil
+	}
+	dn, ms := r.FenceParts()
+	return []string{fmt.Sprintf("redundancy.lease %s is under %s, the shortest lease measured on ARM controllers: a leader stalled over about %s (a busy host, a slow disk) stops writing its outputs and loses its lease, and a link outage to the peer and the witness of about %s costs the lease and the plant a takeover. Use it only where the hosts and the links have been measured at it; the witness takes the same --lease", lease, shortestMeasuredLease, stallTolerance(lease, dn+ms).Round(time.Millisecond), (lease / 2).Round(time.Millisecond))}
+}
+
+// stallTolerance is the shortest stall of a leader that closes its write
+// gate (its lease follows): a lease runs lease×(1-ρ) from the send of the
+// round that renewed it, the gate closes the fence margin before its end,
+// and a renewal goes every quarter lease, so a stall that starts just
+// before a renewal was due has the rest. One that starts just after has a
+// quarter lease more. A link outage costs less: a lost renewal is retried
+// only at the next quarter lease, so about half a lease can cost it.
+func stallTolerance(lease, fence time.Duration) time.Duration {
+	return time.Duration(float64(lease)*(1-node.DefaultRho)) - fence - lease/4
+}
+
+// sendBudgetWarnings names, on a redundant pair, each source that takes
+// writes whose manifest SETS a request timeout longer than the pair's send
+// budget (a default is nothing the operator chose; every write on a pair
+// is cut at its send deadline whatever the timeout)
+// (design §3.4): on a healthy leader, a write such a device answers that
+// slowly is abandoned at its deadline and its connection reset (a Modbus
+// write is then sent again; an SNMP or Redfish command is reported
+// failed).
+func sendBudgetWarnings(proj *project.Project) []string {
+	if !proj.Redundancy.Pair() {
+		return nil
+	}
+	budget, lease := proj.Redundancy.SendBudget(), proj.Redundancy.LeaseTime()
+	var out []string
+	var walk func(prefix string, d nio.Driver)
+	walk = func(prefix string, d nio.Driver) {
+		switch drv := d.(type) {
+		case *nio.Multi:
+			for _, c := range drv.Children() {
+				walk(prefix+c.Name+": ", c.Driver)
+			}
+		case interface {
+			WriteTimeouts() map[string]time.Duration
+		}:
+			wt := drv.WriteTimeouts()
+			ids := make([]string, 0, len(wt))
+			for id := range wt {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			for _, id := range ids {
+				if t := wt[id]; t > budget {
+					out = append(out, fmt.Sprintf("%ssource %s: the request timeout it sets (%s) is longer than this pair's send budget (as little as %s at the %s lease): every write is cut at that budget, so on a healthy leader a write the device answers slower is abandoned at its deadline and its connection reset (a Modbus or EtherNet/IP write is sent again; an SNMP or Redfish command is reported outcome unknown). Lower the source's timeout below the budget if the device answers in time, or lengthen redundancy.lease", prefix, id, t, budget.Round(time.Millisecond), lease))
+				}
+			}
+		}
+	}
+	walk("", proj.Runtime.Driver)
+	return out
+}
+
 // driverWarnings collects Warnings() from a driver, recursing into a
 // multi-driver set so each child's findings carry its name.
 func driverWarnings(d nio.Driver) []string {
@@ -1047,3 +1392,85 @@ func driverWarnings(d nio.Driver) []string {
 	}
 	return nil
 }
+
+// checkPlant compiles a set's plant: its simulators and process model over
+// the devices' tags.
+func checkPlant(set *virtdev.Set) error {
+	plant, err := virtdev.NewPlant(set)
+	if err != nil {
+		return err
+	}
+	_, err = runtime.New(plant.Options())
+	return err
+}
+
+// appendDeviceDir adds dir, once, to the directories whose virtual devices
+// check compiles: one with a virtual-devices.yaml, or a nautilus.yaml (its
+// devices: rows are virtual devices too; one without any has none).
+func appendDeviceDir(dirs []string, dir string) []string {
+	for _, d := range dirs {
+		if d == dir {
+			return dirs
+		}
+	}
+	return append(dirs, dir)
+}
+
+// plantManifest is the manifest whose devices: dir's virtual devices come
+// from: -m's for the project it names, nautilus.yaml for any other.
+func plantManifest(dir string, paths []string, manifest string) string {
+	if manifest == "" {
+		return ""
+	}
+	if mdir, ok := manifestDir(paths, manifest); ok && filepath.Clean(mdir) == filepath.Clean(dir) {
+		return manifest
+	}
+	return ""
+}
+
+// streamWarnings sizes a pair's state stream image (#710 S1b) from the
+// project's frames and retained tags at their initial values (strings
+// empty, so a project that fills long STRINGs streams more): a warning
+// when it is over runtime.MaxImageBytes (the leader would send none), or
+// when ten a second would be over redundancy.stream-budget (the leader
+// sends them less often, so a takeover's values are older).
+func streamWarnings(proj *project.Project) []string {
+	if !proj.Redundancy.Pair() {
+		return nil
+	}
+	// A runtime of its own with a store that keeps nothing: the image's
+	// retain section is what a controller with a retain: section saves.
+	opts := proj.Runtime
+	if proj.Retain != nil {
+		opts.Retain = sizingStore{}
+	}
+	rt, err := runtime.New(opts)
+	if err != nil {
+		return nil // the check reports the compile error itself
+	}
+	img, err := rt.ImageNow()
+	if err != nil {
+		return []string{fmt.Sprintf("redundancy: the state stream's image could not be sized: %v", err)}
+	}
+	var tb *runtime.ImageTooBigError
+	b, err := runtime.EncodeImage(nil, img)
+	switch {
+	case errors.As(err, &tb):
+		return []string{fmt.Sprintf("redundancy: the state stream's image is about %d bytes (%s), over the %d-byte limit: the leader would send none, and a takeover would load the standby's own older retained values. Make the retained and program state smaller (fewer or shorter arrays and STRINGs)", tb.Bytes, tb.What, runtime.MaxImageBytes)}
+	case err != nil:
+		return []string{fmt.Sprintf("redundancy: the state stream's image could not be sized: %v", err)}
+	}
+	budget := proj.Redundancy.StreamBudgetBytes()
+	if int64(len(b))*10 > budget {
+		every := time.Duration(int64(len(b)) * int64(time.Second) / budget)
+		return []string{fmt.Sprintf("redundancy: the state stream's image is about %d bytes, so ten a second (%d B/s) is over redundancy.stream-budget (%d B/s): the leader sends one every %s instead of every 100 ms, and a setpoint written in that time before a crash is lost. Raise stream-budget if the link carries it, or make the state smaller", len(b), int64(len(b))*10, budget, every.Round(time.Millisecond))}
+	}
+	return nil
+}
+
+// sizingStore is a retain store that holds nothing (streamWarnings).
+type sizingStore struct{}
+
+func (sizingStore) Load() (retain.State, error) { return retain.State{}, nil }
+func (sizingStore) Save(retain.State) error     { return nil }
+func (sizingStore) Kind() string                { return "none" }

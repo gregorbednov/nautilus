@@ -4,13 +4,12 @@
 // session, requests strictly sequential; the connection is client.go, the
 // value codec value.go.
 //
-// Reads are polled, not subscribed. Each scan class is one batched Read
-// service call on its own timer — the same shape eip and modbus have, and
-// for the hundreds of tags a gateway or a skid exposes it is a few
-// kilobytes a second. Subscriptions (monitored items, the Publish queue)
-// are the protocol's own change-notification mechanism and would cut that
-// further for very large sites; they are deliberately NOT in this first cut,
-// because the polled path has no reconnect-era state to get wrong.
+// Reads are polled by default: each scan class is one batched Read service
+// call on its own timer — the same shape eip and modbus have, and for the
+// hundreds of tags a gateway or a skid exposes it is a few kilobytes a
+// second. WithReadMode(ReadModeSubscribe) makes each scan class an OPC UA
+// subscription instead (subscribe.go), with the same session, priming,
+// quality, reconnect and write rules; only how values arrive differs.
 //
 // New NEVER dials. buildDriver runs inside `naut check` and `naut build`,
 // i.e. in CI with no server in sight, so everything that can fail on bad
@@ -30,6 +29,7 @@ import (
 	"time"
 
 	"github.com/gopcua/opcua/ua"
+	"github.com/joyautomation/nautilus/internal/fence"
 	nio "github.com/joyautomation/nautilus/io"
 )
 
@@ -117,6 +117,17 @@ func WithMaxNodes(n int) Option {
 // WithScanRate sets the default scan class's poll interval (default 1s).
 func WithScanRate(r time.Duration) Option { return func(d *Driver) { d.scanRate = r } }
 
+// WithReassertOnReconnect sets whether a re-established session commands
+// every output again, changed or not (default true, #1061). A server that
+// restarted with its state reset holds its start-up values, and an
+// unchanged commanded value is otherwise never a command, so the program
+// and the server would disagree until the value next moved. The re-send
+// goes through the write gate like any push, so on a pair only the leader
+// sends it.
+func WithReassertOnReconnect(on bool) Option {
+	return func(d *Driver) { d.reassert = on }
+}
+
 // WithScanClass defines (or redefines) a scan class and its poll interval.
 // The default class exists implicitly; NoPoll cannot be given a rate.
 func WithScanClass(name string, rate time.Duration) Option {
@@ -166,7 +177,13 @@ type Driver struct {
 	retryMin  time.Duration
 	retryMax  time.Duration
 	maxNodes  int
-	log       *slog.Logger
+	readMode  string
+	// reassert: a session after the first re-sends every output (#1061).
+	reassert bool
+	// refreshFloor is refreshEvery's floor (defaultRefreshFloor; tests
+	// lower it).
+	refreshFloor time.Duration
+	log          *slog.Logger
 
 	classRates  map[string]time.Duration
 	assignments []classAssignment
@@ -182,6 +199,8 @@ type Driver struct {
 	mu       sync.Mutex
 	snapshot nio.Values
 	online   bool
+	// live is the connected session, for Call; nil between sessions.
+	live     *Session
 	answered bool // a read succeeded on this session (resets backoff)
 	primed   bool // every scan class has been read once on this session
 	state    string
@@ -195,6 +214,15 @@ type Driver struct {
 
 	gateMu    sync.Mutex
 	writeGate func() bool
+	// sendGate is a pair's gate with its send budget and term
+	// (SetSendGate); leaseTerm the term the last open look saw (0: none
+	// yet); reopens counts forgetWritten, so a flush that took its queue
+	// before a reopen sends none of it after (design §3.4).
+	sendGate    nio.SendGate
+	leaseTerm   atomic.Uint64
+	reopens     atomic.Uint64
+	aborts      atomic.Uint64 // fenced writes whose socket was reset in place, after the failure
+	timerAborts atomic.Uint64 // ... and by the timer at the deadline (ArmAbort)
 	// gateShut is true from the first look that finds the gate closed to
 	// the first that finds it open again (see gateOpen); sawShut stays true
 	// once any look has found it closed: this replica has been a standby,
@@ -208,11 +236,38 @@ type Driver struct {
 
 	wmu      sync.Mutex
 	baseline bool
+	// holdBaseline (under wmu): the baseline only records (a held swap,
+	// io.BaselineHolder) instead of deciding against the server.
+	holdBaseline bool
+	// undecided holds the start-up baseline's outputs whose node the server
+	// has not answered yet: the program's first value, decided against the
+	// server's value at the first read of that node (#1121). Guarded by mu.
+	undecided map[string]any
+	// scanLive is what BeginScan froze for the scan in progress: the
+	// outputs whose node (or, for one never read, the whole session) is
+	// live, so a push from this scan was computed from what the server
+	// answered. The baseline decides only against it (#1123). Under mu.
+	scanLive map[string]bool
+	// scanAware: BeginScan has been called, so a runtime drives this driver.
+	// Without one the baseline decides at the read itself, as before.
+	scanAware atomic.Bool
 
 	started atomic.Bool
-	reads   atomic.Uint64
-	writes  atomic.Uint64
-	errs    atomic.Uint64
+	// connected counts sessions established (onConnect).
+	connected atomic.Uint64
+	reads     atomic.Uint64
+	writes    atomic.Uint64
+	errs      atomic.Uint64
+	// notifications counts data change notifications (read-mode: subscribe).
+	notifications atomic.Uint64
+	// probeByRead: the server refused SetPublishingMode once, so every
+	// subscribed session on this driver is probed with a Read (subscribe.go).
+	probeByRead atomic.Bool
+	// itemCap: the most monitored items per call the server took, once it
+	// refused more with Bad_TooManyOperations (0: none learned). Kept
+	// across sessions: that refusal is a service fault, which closes
+	// gopcua's client, so the session it was learned on is gone.
+	itemCap atomic.Int64
 
 	kick   chan struct{}
 	cancel context.CancelFunc
@@ -225,6 +280,16 @@ type serverInfo struct {
 	mode       string
 	namespaces []string
 	maxNodes   int
+	// maxItems caps monitored items per CreateMonitoredItems call
+	// (read-mode: subscribe); subscriptions and revised are what the
+	// server granted on this session: how many, and each class's revised
+	// publishing interval.
+	maxItems      int
+	subscriptions int
+	revised       map[string]time.Duration
+	// probe is how the subscribed session is being checked (probeRead or
+	// probeSetPublishingMode); empty until the first probe answers.
+	probe string
 }
 
 // binding is one manifest binding plus its live state. node is the id as
@@ -232,8 +297,11 @@ type serverInfo struct {
 // Quality. All guarded by Driver.mu once Start has run.
 type binding struct {
 	TagBinding
-	node      *ua.NodeID
-	bad       bool
+	node *ua.NodeID
+	bad  bool
+	// subst: the last value came with Uncertain_SubstituteValue — the server
+	// says it is standing in for the real reading. Kept, reported Substituted.
+	subst     bool
 	delivered bool
 	// answered: the server has answered this binding on THIS session. A
 	// value carried over from the last session is Stale until it has.
@@ -243,6 +311,10 @@ type binding struct {
 	// neither read nor written until a connect finds the URI again —
 	// reading the stale index could return another namespace's node.
 	missing bool
+	// notMonitored: the server refused this binding's monitored item on
+	// THIS session (read-mode: subscribe). It stays Bad: a refresh read
+	// answering Good must not hide that it is no longer followed.
+	notMonitored bool
 }
 
 // scanClass is one poll group and its schedule, owned by the session loop.
@@ -264,22 +336,27 @@ func New(endpoint string, m Manifest, opts ...Option) (*Driver, error) {
 		return nil, fmt.Errorf("opcua-client: manifest: %w", err)
 	}
 	d := &Driver{
-		endpoint:   endpoint,
-		name:       defaultName,
-		manifest:   m,
-		scanRate:   defaultScanRate,
-		retryMin:   defaultRetryMin,
-		retryMax:   defaultRetryMax,
-		maxNodes:   defaultMaxNodes,
-		log:        slog.Default(),
-		classRates: map[string]time.Duration{},
-		byName:     map[string]*binding{},
-		snapshot:   nio.Values{},
-		state:      "connecting",
-		pending:    map[string]any{},
-		written:    map[string]any{},
-		baseline:   true,
-		kick:       make(chan struct{}, 1),
+		endpoint:     endpoint,
+		name:         defaultName,
+		manifest:     m,
+		scanRate:     defaultScanRate,
+		retryMin:     defaultRetryMin,
+		retryMax:     defaultRetryMax,
+		maxNodes:     defaultMaxNodes,
+		readMode:     ReadModePoll,
+		reassert:     true,
+		refreshFloor: defaultRefreshFloor,
+		log:          slog.Default(),
+		classRates:   map[string]time.Duration{},
+		byName:       map[string]*binding{},
+		snapshot:     nio.Values{},
+		state:        "connecting",
+		pending:      map[string]any{},
+		written:      map[string]any{},
+		undecided:    map[string]any{},
+		scanLive:     map[string]bool{},
+		baseline:     true,
+		kick:         make(chan struct{}, 1),
 	}
 	for _, o := range opts {
 		o(d)
@@ -292,6 +369,13 @@ func New(endpoint string, m Manifest, opts ...Option) (*Driver, error) {
 	}
 	if d.retryMax < d.retryMin {
 		d.retryMax = d.retryMin
+	}
+	switch d.readMode {
+	case "":
+		d.readMode = ReadModePoll
+	case ReadModePoll, ReadModeSubscribe:
+	default:
+		return nil, fmt.Errorf("opcua-client: read-mode %q: want %q or %q", d.readMode, ReadModePoll, ReadModeSubscribe)
 	}
 	policyURI, mode, err := d.conn.Security.parse()
 	if err != nil {
@@ -517,6 +601,27 @@ func (d *Driver) PlainWriteGate() {}
 
 var _ nio.PlainGated = (*Driver)(nil)
 
+// SetSendGate installs a pair's gate with its send budget and term
+// (io.SendGated, design §3.4): read immediately before every write
+// request (each chunk), which runs to the budget as its deadline; one
+// unanswered then has its socket reset in place (Connect.Fence), and the
+// session is dialled again. With it installed, the session's socket is
+// dialled with SO_LINGER 0, so every close of it is a reset.
+func (d *Driver) SetSendGate(g nio.SendGate) {
+	d.gateMu.Lock()
+	d.sendGate = g
+	d.gateMu.Unlock()
+}
+
+var _ nio.SendGated = (*Driver)(nil)
+
+// paired reports whether a pair's send gate is installed.
+func (d *Driver) paired() bool {
+	d.gateMu.Lock()
+	defer d.gateMu.Unlock()
+	return d.sendGate != nil
+}
+
 // gateOpen reports whether commands may leave the driver right now. Every
 // call is also a look at the gate: a look that finds it closed disarms the
 // start-up baseline, and the first that finds it open again forgets every
@@ -524,13 +629,31 @@ var _ nio.PlainGated = (*Driver)(nil)
 // the push that answers sends them all. WriteOutputs, the only reader of
 // written, looks first. Callers do not hold d.mu or d.wmu.
 func (d *Driver) gateOpen() bool {
+	open, _, _ := d.look()
+	return open
+}
+
+// look is gateOpen with the send budget and the lease's term the same
+// read gave (io.SendGate). A look that finds the gate open under another
+// term than the last is a reopen too, closed between two looks or not: the
+// lease was lost and won again (#1040).
+func (d *Driver) look() (bool, time.Duration, uint64) {
 	d.gateMu.Lock()
-	gate := d.writeGate
+	gate, send := d.writeGate, d.sendGate
 	d.gateMu.Unlock()
-	if gate == nil {
-		return true
+	if gate == nil && send == nil {
+		return true, -1, 0
 	}
-	open := gate()
+	open, budget, term := false, time.Duration(-1), uint64(0)
+	if send != nil {
+		open, budget, term = send()
+	} else {
+		open = gate()
+	}
+	if open && term != 0 && d.leaseTerm.Load() == 0 {
+		d.leaseTerm.CompareAndSwap(0, term) // the first term seen: nothing to forget
+	}
+	moved := open && term != 0 && d.leaseTerm.Load() != term && !mut("old_term_kept")
 	// Steady state is one atomic load. A transition is made under turnMu,
 	// and gateShut is cleared only after the forget, so a second looker
 	// that finds the gate open meanwhile waits for the forget. (Here the
@@ -538,7 +661,7 @@ func (d *Driver) gateOpen() bool {
 	// slipped through would at worst skip an unchanged value that the
 	// push answering wanted then sends, so this mirrors modbus rather than
 	// guarding a hazard of its own.)
-	if shut := d.gateShut.Load(); shut == open {
+	if shut := d.gateShut.Load(); shut == open || moved {
 		d.turnMu.Lock()
 		switch {
 		case !open && !d.gateShut.Load():
@@ -547,22 +670,29 @@ func (d *Driver) gateOpen() bool {
 			d.wmu.Lock()
 			d.baseline = false // a standby has no baseline (#606)
 			d.wmu.Unlock()
-		case open && d.gateShut.Load():
+		case open && (d.gateShut.Load() || term != 0 && d.leaseTerm.Load() != term && !mut("old_term_kept")):
 			d.forgetWritten()
+			if term != 0 {
+				d.leaseTerm.Store(term)
+			}
 			d.gateShut.Store(false)
 			d.wanted.Store(true)
 			d.log.Info("opcua-client: write gate open again; every output goes out with the next push", "driver", d.name)
 		}
 		d.turnMu.Unlock()
 	}
-	return open
+	return open, budget, term
 }
 
-// forgetWritten empties written: no value is the on-change reference any
-// more, so the next push sends them all.
+// forgetWritten empties written and pending: no value is the on-change
+// reference any more, so the next push sends them all, and no write queued
+// or requeued before the reopen goes out after it (#1040).
 func (d *Driver) forgetWritten() {
+	d.reopens.Add(1)
 	d.mu.Lock()
 	clear(d.written)
+	clear(d.pending)
+	clear(d.undecided)
 	d.mu.Unlock()
 }
 
@@ -605,6 +735,7 @@ func (d *Driver) Start(ctx context.Context) {
 	ctx, d.cancel = context.WithCancel(ctx)
 	d.wmu.Lock()
 	d.baseline = !d.sawShut.Load() // a standby has none (#606)
+	d.holdBaseline = false
 	d.wmu.Unlock()
 	d.started.Store(true)
 	d.wg.Add(1)
@@ -613,6 +744,29 @@ func (d *Driver) Start(ctx context.Context) {
 		d.run(ctx)
 	}()
 }
+
+// DisarmBaseline makes the next WriteOutputs a command rather than the
+// start-up baseline (io.BaselineDisarmer): a driver swapped into a running
+// set (#706) starts from the current commands. Call it after Start, which
+// arms the baseline.
+func (d *Driver) DisarmBaseline() {
+	d.wmu.Lock()
+	d.baseline = false
+	d.wmu.Unlock()
+}
+
+// HoldBaseline makes the start-up baseline record and never send, whatever
+// the server holds (io.BaselineHolder): a driver swapped in under
+// HoldOutputsOnSwap commands nothing until an output changes. Call it after
+// Start.
+func (d *Driver) HoldBaseline() {
+	d.wmu.Lock()
+	d.holdBaseline = true
+	d.wmu.Unlock()
+}
+
+// Started reports whether Start has run (io.StartReporter).
+func (d *Driver) Started() bool { return d.started.Load() }
 
 // Stop tears the session loop down and waits.
 func (d *Driver) Stop() {
@@ -678,18 +832,27 @@ func (d *Driver) snapshotInto(dst nio.Values) int {
 //
 //  1. GATE. While the write gate is closed (not leader, logic faulted) no
 //     command is queued or recorded.
-//  2. BASELINE. The first snapshot after Start is recorded, not written —
-//     it is the state of the world at t=0, not a set of commands. A
-//     driver that has seen the write gate closed (a standby) has none: its
-//     first push commands everything (#606).
+//  2. BASELINE. The first snapshot after Start is not a set of commands
+//     for an output the server already holds: each output is decided at
+//     the first read of its node (#1121). Equal to the program's value:
+//     recorded, nothing sent. Different: one command, so a controller that
+//     computes true while the server holds false drives it. A node not read
+//     yet waits for its first read (never taken as sent); one the server
+//     answers without a good value (no read access) or that is never
+//     polled is commanded once. A driver that has seen the write gate
+//     closed (a standby) has no baseline: its first push commands
+//     everything (#606). Under HoldBaseline (a driver swapped in with
+//     HoldOutputsOnSwap) the baseline only records, whatever the server holds.
 //  3. CHANGE. Thereafter a value equal to the last handed-over value is not
 //     a command. A changed value is queued, last value per tag, and held
 //     across a disconnect — flushed when the session reconnects.
 func (d *Driver) WriteOutputs(vals nio.Values) error {
 	d.wmu.Lock()
 	baseline := d.baseline
+	recordOnly := baseline && d.holdBaseline
 	d.baseline = false
 	d.wmu.Unlock()
+	aware := d.scanAware.Load()
 	if !d.gateOpen() {
 		return nil
 	}
@@ -700,10 +863,25 @@ func (d *Driver) WriteOutputs(vals nio.Values) error {
 		if !ok || !b.Writable {
 			continue
 		}
-		if baseline {
+		if _, waiting := d.undecided[name]; waiting {
+			// still waiting for a push computed from its live read: the
+			// latest value is the one to decide with, baseline push or not
+			d.undecided[name] = v
+			kicked = d.decidableLocked(b, aware) && d.decideLocked(b) || kicked
+			continue
+		}
+		if recordOnly {
+			// Record, never send. A tag with a command already queued
+			// keeps it: that one WAS asked for.
 			if _, queued := d.pending[name]; !queued {
 				d.written[name] = v
 			}
+		} else if baseline {
+			if _, queued := d.pending[name]; queued {
+				continue
+			}
+			d.undecided[name] = v
+			kicked = d.decidableLocked(b, aware) && d.decideLocked(b) || kicked
 		} else if prev, ok := d.written[name]; ok && sameScalar(prev, v) {
 			// unchanged since the last value we accounted for
 		} else {
@@ -717,6 +895,114 @@ func (d *Driver) WriteOutputs(vals nio.Values) error {
 		nudge(d.kick)
 	}
 	return nil
+}
+
+// decidableLocked: b's undecided output may be decided now. With a runtime
+// driving the driver, only when BeginScan froze it live for this scan;
+// without one, at once for a node that was never read and otherwise once the
+// live session has read it.
+func (d *Driver) decidableLocked(b *binding, aware bool) bool {
+	if aware {
+		return d.scanLive[b.Name]
+	}
+	return b.ScanClass == NoPoll || (d.online && b.answered)
+}
+
+// BeginScan is the driver's io.ScanBeginner: the runtime calls it before it
+// reads this scan's inputs. What the server has answered by now is delivered
+// to that read, so the start-up baseline's outputs are decided only on the
+// push that scan makes, never on one computed from init values before the
+// first read (#1123). While the session is live and every polled node has
+// been answered, it freezes the outputs as decidable, and asks the runtime
+// for the whole output set when one is waiting.
+func (d *Driver) BeginScan() {
+	d.scanAware.Store(true)
+	d.wmu.Lock()
+	armed := d.baseline
+	d.wmu.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	clear(d.scanLive)
+	if !armed && len(d.undecided) == 0 {
+		return
+	}
+	if !d.online {
+		return
+	}
+	for _, b := range d.bindings {
+		if b.ScanClass != NoPoll && !b.missing && !b.answered {
+			return // part of the session is still unread: not live yet
+		}
+	}
+	for _, b := range d.bindings {
+		if b.Writable {
+			d.scanLive[b.Name] = true
+		}
+	}
+	for name := range d.undecided {
+		if d.scanLive[name] {
+			d.wanted.Store(true)
+			break
+		}
+	}
+}
+
+// decideLocked settles one undecided output against what the server
+// holds: recorded when equal, queued as one command when not (or when the
+// server's value is unusable). Reports whether it queued. Caller holds
+// d.mu.
+func (d *Driver) decideLocked(b *binding) bool {
+	v, ok := d.undecided[b.Name]
+	if !ok {
+		return false
+	}
+	delete(d.undecided, b.Name)
+	d.written[b.Name] = v
+	if sv, have := d.snapshot[b.Name]; have && !b.bad && sameServerValue(sv, v) {
+		return false
+	}
+	d.pending[b.Name] = v
+	return true
+}
+
+// sameServerValue compares the value read from the server with the
+// program's: like sameScalar, but a program INT and a server Double that
+// hold the same number are equal.
+func sameServerValue(server, program any) bool {
+	if sameScalar(server, program) {
+		return true
+	}
+	a, aok := asFloat(server)
+	b, bok := asFloat(program)
+	return aok && bok && a == b
+}
+
+func asFloat(v any) (float64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case float32:
+		return float64(x), true
+	case int:
+		return float64(x), true
+	case int8:
+		return float64(x), true
+	case int16:
+		return float64(x), true
+	case int32:
+		return float64(x), true
+	case int64:
+		return float64(x), true
+	case uint8:
+		return float64(x), true
+	case uint16:
+		return float64(x), true
+	case uint32:
+		return float64(x), true
+	case uint64:
+		return float64(x), true
+	}
+	return 0, false
 }
 
 func nudge(ch chan struct{}) {
@@ -758,7 +1044,11 @@ func (d *Driver) run(ctx context.Context) {
 	backoff := d.retryMin
 	for ctx.Err() == nil {
 		d.gateOpen() // a look (see SetWriteGate), on every connect attempt
-		sess, err := Dial(ctx, d.endpoint, d.conn)
+		conn := d.conn
+		if d.paired() {
+			conn.Fence = new(fence.Socket) // this session's socket (design §3.4)
+		}
+		sess, err := Dial(ctx, d.endpoint, conn)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -780,15 +1070,24 @@ func (d *Driver) run(ctx context.Context) {
 			continue
 		}
 
+		d.setLive(sess)
 		d.onConnect(ctx, sess)
-		d.serve(ctx, sess)
+		if d.readMode == ReadModeSubscribe {
+			d.serveSubscribed(ctx, sess)
+		} else {
+			d.serve(ctx, sess)
+		}
 
 		// Offline first: Close can take its timeout, and the values must
 		// not read Good meanwhile.
 		// The state row goes down with __Online, not after Close.
 		d.mu.Lock()
+		// The ladder resets once the session was of use: a read answered
+		// (poll), or the subscriptions made (subscribe; a server that
+		// answers the priming read but refuses to subscribe climbs it).
+		answered := d.answered && (d.readMode != ReadModeSubscribe || d.primed)
 		d.online, d.primed = false, false
-		answered := d.answered
+		d.live = nil // no call may start on a session that is going away
 		d.mu.Unlock()
 		if ctx.Err() == nil {
 			d.setState("error", nil)
@@ -821,30 +1120,42 @@ func (d *Driver) onConnect(ctx context.Context, sess *Session) {
 		mode:       modeName(sess.Endpoint.SecurityMode),
 		namespaces: nss,
 		maxNodes:   d.maxNodes,
+		maxItems:   d.maxNodes,
 	}
 	index := make(map[string]uint16, len(nss))
 	for i, uri := range nss {
 		index[uri] = uint16(i)
 	}
-	// MaxNodesPerRead is Server/ServerCapabilities/OperationLimits; a
-	// server that does not publish it (or answers 0) keeps our default.
+	// MaxNodesPerRead and MaxMonitoredItemsPerCall are Server/
+	// ServerCapabilities/OperationLimits; a server that does not publish
+	// one (or answers 0) keeps our default.
 	rctx, cancel := context.WithTimeout(ctx, d.conn.Timeout)
-	resp, err := sess.Client.Read(rctx, &ua.ReadRequest{NodesToRead: []*ua.ReadValueID{{
-		NodeID: ua.NewNumericNodeID(0, maxNodesPerReadNode), AttributeID: ua.AttributeIDValue}}})
+	resp, err := sess.Client.Read(rctx, &ua.ReadRequest{NodesToRead: []*ua.ReadValueID{
+		{NodeID: ua.NewNumericNodeID(0, maxNodesPerReadNode), AttributeID: ua.AttributeIDValue},
+		{NodeID: ua.NewNumericNodeID(0, maxMonitoredItemsPerCallNode), AttributeID: ua.AttributeIDValue},
+	}})
 	cancel()
-	if err == nil && len(resp.Results) == 1 && good(resp.Results[0].Status) && resp.Results[0].Value != nil {
-		if n, ok := toValue(resp.Results[0].Value); ok {
-			if lim, _ := toInt(n); lim > 0 && int(lim) < info.maxNodes {
-				info.maxNodes = int(lim)
+	limit := func(i int, into *int) {
+		if err != nil || len(resp.Results) != 2 || !good(resp.Results[i].Status) || resp.Results[i].Value == nil {
+			return
+		}
+		if n, ok := toValue(resp.Results[i].Value); ok {
+			if lim, _ := toInt(n); lim > 0 && int(lim) < *into {
+				*into = int(lim)
 			}
 		}
+	}
+	limit(0, &info.maxNodes)
+	limit(1, &info.maxItems)
+	if c := int(d.itemCap.Load()); c > 0 && c < info.maxItems {
+		info.maxItems = c
 	}
 
 	d.mu.Lock()
 	remapped := 0
 	missing := 0
 	for _, b := range d.bindings {
-		b.bad, b.answered, b.missing = false, false, false
+		b.bad, b.subst, b.answered, b.missing, b.notMonitored = false, false, false, false, false
 		if b.Namespace == "" {
 			continue
 		}
@@ -867,8 +1178,20 @@ func (d *Driver) onConnect(ctx context.Context, sess *Session) {
 	d.online, d.answered, d.primed = true, false, false
 	d.mu.Unlock()
 	d.setState("connected", nil)
+	if d.connected.Add(1) > 1 && d.reassert {
+		// The server may have restarted with its state reset: forget what
+		// was written so the next push commands every output (#1061). A
+		// gate that is closed drops that push (WriteOutputs), as ever.
+		// Commands queued during the outage stay queued: they flush now,
+		// and the push replaces them with the program's current value.
+		d.mu.Lock()
+		clear(d.written)
+		d.mu.Unlock()
+		d.wanted.Store(true)
+		d.log.Info("opcua-client: session re-established; every output goes out with the next push", "driver", d.name)
+	}
 	d.log.Info("opcua-client: connected", "driver", d.name, "endpoint", d.endpoint,
-		"policy", info.policy, "mode", info.mode, "tags", len(d.bindings), "remapped", remapped, "missing", missing, "maxNodes", info.maxNodes)
+		"policy", info.policy, "mode", info.mode, "readMode", d.readMode, "tags", len(d.bindings), "remapped", remapped, "missing", missing, "maxNodes", info.maxNodes)
 }
 
 // serverStateNode is Server_ServerStatus_State (ns=0;i=2259), the liveness
@@ -1049,33 +1372,64 @@ func (d *Driver) pollClass(ctx context.Context, sess *Session, c *scanClass) boo
 		}
 		d.answered = true
 		for i, b := range chunk {
-			dv := resp.Results[i]
-			b.answered = true
-			if dv == nil || !good(dv.Status) {
-				if !b.bad {
-					if dv != nil {
-						d.lastErr = fmt.Errorf("tag %s: %v", b.Name, dv.Status)
-					}
-				}
-				b.bad = true
-				continue
-			}
-			v, ok := toValue(dv.Value)
-			if !ok {
-				if !b.bad {
-					d.lastErr = fmt.Errorf("tag %s: value is not a scalar built-in", b.Name)
-				}
-				b.bad = true
-				continue
-			}
-			b.bad = false
-			b.delivered = true
-			d.snapshot[b.Name] = v
+			d.apply(b, resp.Results[i])
 		}
 		d.mu.Unlock()
 		start = end
 	}
 	return true
+}
+
+// apply takes one node's value as the server reported it — a Read result
+// or a data change notification, the same rules for both — into the
+// binding's state and the snapshot. A non-good status or a value that is
+// not a scalar built-in makes the binding Bad, keeping its last value.
+// Caller holds d.mu.
+func (d *Driver) apply(b *binding, dv *ua.DataValue) {
+	b.answered = true
+	// The server has answered this node: a start-up baseline output waiting
+	// on it is decided now, with the value just taken or, when none came
+	// (no read access), commanded once (#1121).
+	defer func() {
+		if d.scanAware.Load() {
+			return // decided on a push computed from this read (BeginScan)
+		}
+		if _, waiting := d.undecided[b.Name]; waiting && d.decideLocked(b) {
+			nudge(d.kick)
+		}
+	}()
+	if b.notMonitored {
+		b.bad = true
+		return
+	}
+	if dv != nil && substituted(dv.Status) {
+		// Not Bad: the server stands behind the number as a deliberate
+		// stand-in. Keep it and say so (#707); a non-scalar is still Bad.
+		if v, ok, _ := d.valueOf(b, dv.Value); ok {
+			b.bad, b.subst, b.delivered = false, true, true
+			d.snapshot[b.Name] = v
+			return
+		}
+	}
+	b.subst = false
+	if dv == nil || !good(dv.Status) {
+		if !b.bad && dv != nil {
+			d.lastErr = fmt.Errorf("tag %s: %v", b.Name, dv.Status)
+		}
+		b.bad = true
+		return
+	}
+	v, ok, why := d.valueOf(b, dv.Value)
+	if !ok {
+		if !b.bad {
+			d.lastErr = fmt.Errorf("tag %s: %w", b.Name, why)
+		}
+		b.bad = true
+		return
+	}
+	b.bad = false
+	b.delivered = true
+	d.snapshot[b.Name] = v
 }
 
 // flushWrites pushes the pending writes with the Write service. Returns
@@ -1084,6 +1438,7 @@ func (d *Driver) pollClass(ctx context.Context, sess *Session, c *scanClass) boo
 // a healthy session: it is dropped (re-queueing would loop forever) and
 // reported.
 func (d *Driver) flushWrites(ctx context.Context, sess *Session) bool {
+	gen := d.reopens.Load() // before the queue is taken: see the chunk loop
 	d.mu.Lock()
 	if len(d.pending) == 0 {
 		d.mu.Unlock()
@@ -1093,6 +1448,9 @@ func (d *Driver) flushWrites(ctx context.Context, sess *Session) bool {
 	d.pending = map[string]any{}
 	limit := d.server.maxNodes
 	d.mu.Unlock()
+	if testHookAfterSwap != nil {
+		testHookAfterSwap()
+	}
 	if limit <= 0 {
 		limit = 1
 	}
@@ -1102,14 +1460,21 @@ func (d *Driver) flushWrites(ctx context.Context, sess *Session) bool {
 	// send what it queued while it led. Dropped commands are forgotten
 	// (not recorded as written), so the same value is a command again
 	// once the gate reopens.
-	if !d.gateOpen() {
+	forget := func(names []string) {
 		d.mu.Lock()
-		for name := range work {
+		for _, name := range names {
 			delete(d.written, name)
 		}
 		d.mu.Unlock()
 		d.wanted.Store(true) // the commands it dropped: ask for them (#601)
-		d.log.Warn("opcua-client: write gate closed; queued writes dropped", "driver", d.name, "count", len(work))
+	}
+	if !d.gateOpen() {
+		all := make([]string, 0, len(work))
+		for name := range work {
+			all = append(all, name)
+		}
+		forget(all)
+		d.log.Warn("opcua-client: write gate closed; queued writes dropped", "driver", d.name, "count", len(all))
 		return true
 	}
 
@@ -1149,7 +1514,17 @@ func (d *Driver) flushWrites(ctx context.Context, sess *Session) bool {
 	}
 
 	requeue := func(from int) {
+		if testHookBeforeRequeue != nil {
+			testHookBeforeRequeue()
+		}
 		d.mu.Lock()
+		if d.reopens.Load() != gen && !mut("old_term_kept") {
+			// A reopen since this flush took its queue (a lease lost and
+			// won again): the rest is the previous leadership's (#1047
+			// review), never put back.
+			d.mu.Unlock()
+			return
+		}
 		for _, n := range names[from:] {
 			if _, exists := d.pending[n]; !exists {
 				d.pending[n] = work[n]
@@ -1159,10 +1534,57 @@ func (d *Driver) flushWrites(ctx context.Context, sess *Session) bool {
 	}
 
 	for start := 0; start < len(items); {
+		// The gate is read immediately before every chunk, the first too
+		// (design §3.4): a demotion while a batch is on the wire stops the
+		// rest of it (G1c, #861), and each chunk runs to the gate's send
+		// budget as its deadline.
+		deadline, _, ok, done := fence.Begin(d.look, time.Now()) // the budget counts from before the read
+		if !ok || !fence.Started(deadline, time.Now()) {
+			done()
+			// Part of the batch may already have reached the server: say
+			// how much, and name what did not, so an operator can tell
+			// what the PLC got.
+			rest := names[start:]
+			forget(rest)
+			d.log.Warn("opcua-client: write gate closed mid-batch; the rest dropped",
+				"driver", d.name, "sent", start, "dropped", len(rest), "tags", rest)
+			return true
+		}
+		if d.reopens.Load() != gen && !mut("old_term_kept") {
+			done()
+			// A reopen since this flush took its queue (the lease lost and
+			// won again): the rest is the previous leadership's. Forgotten
+			// as written, and the outputs asked for again (#1040).
+			forget(names[start:])
+			d.log.Warn("opcua-client: the gate reopened since this flush began; the rest dropped and the outputs asked for again",
+				"driver", d.name, "dropped", len(names)-start)
+			return true
+		}
 		end := min(start+limit, len(items))
 		wctx, cancel := context.WithTimeout(ctx, d.conn.Timeout)
+		wctx, fcancel := fence.Context(wctx, deadline)
+		stop := fence.ArmAbort(sess.Fence, deadline)
+		fence.BeforeSend()
 		resp, err := sess.Client.Write(wctx, &ua.WriteRequest{NodesToWrite: items[start:end]})
+		fired := stop()
+		if fired {
+			d.timerAborts.Add(1)
+		}
+		if !deadline.IsZero() && (fired || (err != nil && !time.Now().Before(deadline))) {
+			fence.Cut(d.name) // began, and its deadline passed: one write cut
+		}
+		fcancel()
 		cancel()
+		if err != nil && !deadline.IsZero() && sess.Fence != nil {
+			// A fenced write that failed (its deadline passed with it, or
+			// its answer, still out): reset the socket in place so nothing
+			// the kernel holds of it leaves after the lease; the session is
+			// dialled again.
+			if sess.Fence.Abort() {
+				d.aborts.Add(1)
+			}
+		}
+		done() // answered, or failed and reset: ended for a drain
 		if err != nil {
 			d.errs.Add(1)
 			if ctx.Err() == nil {
@@ -1190,6 +1612,11 @@ func (d *Driver) flushWrites(ctx context.Context, sess *Session) bool {
 	}
 	return true
 }
+
+// testHookAfterSwap and testHookBeforeRequeue, when set (by tests), run in
+// flushWrites right after it takes its queue, and right before it puts a
+// failed chunk back.
+var testHookAfterSwap, testHookBeforeRequeue func()
 
 // setState records a state transition with its start time; lastErr is
 // kept when err is nil so the reason survives into the backoff wait.

@@ -45,23 +45,34 @@ into another's.
 | Context | Packages | Language | Upstream of | Translation |
 |---|---|---|---|---|
 | **Languages** | `lang/st` `lang/ld` `lang/fbd` `lang/sfc` `lang/ir` `lang/fbcatalog` `lang/stgen` `internal/stproject` | IEC 61131-3: POU, program, function block, task, retain, rung, network, step, transition. `lang/ir` is the substrate every other context shares for types and values. | Runtime, Authoring, Logix target, every codegen | `lang/l5x` turns a Logix export into ladder and ST (an importer, see Logix target) |
-| **Runtime** | `runtime` `io` `retain` `leader` | scan, task, tag store, quality, generation, lateness, force, retained, coordinator. `io.Driver` is the published seam; `io.Quality` the one quality enum. | Operator surface, Sparkplug edge, Verification, Logix facade | Manifest tags become `runtime.TagDef` in `internal/project` |
-| **Field drivers** | `modbus/…` `eip/…` (`cip`, `logix`, `codegen`) `optommp/…` `plcnext/…` `sparkplug/host/…` `replay` (and the pending `opcua` client) | each protocol's own: register, coil, holding; CIP path, symbol, UDT; metric, NBIRTH. | nothing above the seam | **Anti-corruption layer.** The protocol's names stop at the package. What crosses is `io.Driver` upward and `internal/tagfile.Tag` into the tag file. |
+| **Runtime** | `runtime` `io` `retain` `leader` | scan, task, tag store, quality, generation, lateness, force, retained, coordinator, elector. `io.Driver` is the published seam; `io.Quality` the one quality enum; `leader.Elector` the one interface both electors (the Kubernetes Lease and the quorum pair) meet. | Operator surface, Sparkplug edge, Verification, Logix facade | Manifest tags become `runtime.TagDef` in `internal/project` |
+| **Field drivers** | `modbus/…` `eip/…` (`cip`, `logix`, `codegen`) `optommp/…` `plcnext/…` `profinet/…` `sparkplug/host/…` `replay` (and the pending `opcua` client) | each protocol's own: register, coil, holding; CIP path, symbol, UDT; AR, IOCR, IOPS, station name; metric, NBIRTH. | nothing above the seam | **Anti-corruption layer.** The protocol's names stop at the package. What crosses is `io.Driver` upward and `internal/tagfile.Tag` into the tag file. |
 | **IT drivers** | `hw` `snmp/…` `redfish/…` `prom/…` | source, scan class, the shared UDT set (SwitchPort, PSU, …), counter→rate. `hw` is to these what `runtime` is to the languages. | nothing above the seam | Same ACL rule as field drivers; `hw` owns the shared UDTs so a port is one struct whether it came from IF-MIB or REST |
 | **Sparkplug edge** | `sparkplug` `sparkplug/spb` | node, device, metric, birth, rebirth, NCMD, RBE. | Sparkplug host (payload codec) | The one adapter that imports `runtime` directly: it publishes a runtime's store, so it is downstream of Runtime, not a driver |
-| **Alarms** | `alarm` | ISA-18.2: definition, rule, active, unacked, shelved, journal, notifier. | Operator surface | Imports only `lang/ir` and `retain`; the manifest hands it a tag store. It does not import `runtime`, and that is the point |
-| **Operator surface** | `server` `oplog` `hist` | tag API, snapshot, SSE stream, write, program history, operator intent, sink. | HMI 2D, HMI 3D, external clients | Serves Runtime and Alarms; knows no protocol |
+| **Alarms** | `alarm` `alarm/escalate` `alarm/oncall` `alarm/channel` `alarm/channel/send` `alarm/pgjournal` `alarm/rationalize` `alarm/acklink` | ISA-18.2: definition, rule, active, unacked, shelved, journal, notifier; escalation policy, level, step, roster, on call, channel, contact; ack link, link id, spent, reply code, inbound, provider signature (#715); consequence, response, rationalization, master, flood, chattering, bad actor, stale (#715). | Operator surface | Imports only `lang/ir` and `retain`; the manifest hands it a tag store. It does not import `runtime`, and that is the point. `alarm/escalate` reads the engine's records and is gated by the write gate the manifest hands it. `alarm/oncall` keeps the contacts and channel secrets on the box; `alarm/channel/send` turns a principal into an address there and sends (email, SMS, voice, webhook) |
+| **Operator surface** | `server` `oplog` `hist` `notes` `checkout` `camera` `internal/webpush`, `audit` and `auth` ([identity-audit.md](identity-audit.md)) | tag API, snapshot, SSE stream, write, program history, operator intent, sink; principal, role, area, permission, elevation, session, audit entry, chain; push subscription, VAPID key, push service (#722); note, revision, target, addendum, retraction, shift log (#720); camera, snapshot, live viewer (#724). | HMI 2D, HMI 3D, external clients | Serves Runtime and Alarms; knows no protocol |
 | **Manifest** | `internal/project` `internal/dialect` `cmd/naut` | `nautilus.yaml` nouns: tags, tasks, drivers, alarms, scene, dialect. | nothing; it is the composition root | Every context's manifest form lives here (`project.TagConfig` ↔ `runtime.TagDef`). It is the only package allowed to import everything |
 | **Verification** | `acceptance` `lang/conformance` `internal/vcs` | suite, case, expect, virtual time, corpus. | CLI, Authoring | Composes whatever it tests; held to no import rule |
 | **Authoring** | `internal/lsp` `tools/vscode-iec` | diagnostics, hover, completion, diagram editor, live values, component preview, kind editor. | the person | Reads the Manifest and Languages; the only non-CLI importer of `internal/project` |
 | **Logix target** | `logix/writer` `logix/importer` `logix/deploy` `logix/logixd` `logix/facade` `lang/l5x` `eip/logixserver` | Rockwell's: L5X, controller, routine, rung, AOI, alias tag, download. | nothing | **Anti-corruption layer, both directions.** Writer and importer are the only places vendor spellings may appear (see *Language stays vendor-neutral*). `logix/facade` is an application layer for `naut logix serve`, so it may import Runtime and Operator surface |
+| **Siemens target** | `siemens/station` `siemens/tiad` `siemens/webapi` `siemens/writer` `siemens/facade`, and `siemens/importer` (planned) ([siemens-ide.md](siemens-ide.md)) | Siemens': OB, FB, DB, SCL, tag table, station, GSDML device, download, online compare. | nothing | **Anti-corruption layer, both directions**, like the Logix target. Writer, agent client and importer are the only places Siemens spellings may appear. `siemens/facade` is an application layer for `naut siemens serve` and may import Runtime and Operator surface |
 | **HMI 2D** | `hmi` (npm) | mimic, component, port, catalog, realtime, trend, quality, alarms view. | the operator | Consumes Operator surface over HTTP/SSE; no Go |
 | **HMI 3D** | `hmi-3d` (npm) `internal/scene` | scene, kind, node, pipe, port, look, assembly. `internal/scene` is the offline half (`naut check`, `naut scene init`). | the operator, Authoring | Consumes Operator surface. **Open edge:** argonaut's `parts` format is a second model of the same things; §2.4 |
+| **Plant model** | `internal/plant` ([plant-model.md](plant-model.md)) | plant, area, equipment, asset type, class, flow, nozzle. `plant.yaml` is the one list of what is in the plant and what feeds what; mimics and 3D scenes draw it and reference its ids. | Manifest (`internal/project` reads `plant:` and checks it against tags, devices and alarms), HMI 2D and 3D (a drawing names a plant id), CLI (`naut hmi build` generates asset pages from it) | **Published language** (`internal/plant`, a leaf like `devprofile`: the file format and its own rules). Equipment classes follow DEXPI's names where an obvious match exists and connections run equipment to equipment through a named nozzle, so a future DEXPI importer is a mapping (nothing is imported today). The manifest resolves a row's `tag`/`device` against the tags and device rows; the leaf knows neither |
 | **Tag file** | `internal/tagfile` | one row: name, role, type, init, unit, desc, alias. | every codegen, `lang/l5x` | **Shared kernel.** The one format every importer renders and the manifest reads |
+| **Device library** | `devprofile` `devbind` | device profile, point, doc (provenance), simulator source, built-in profile, vendored profile; device (a `devices:` row), device type, command tag, member. A profile's point rows reuse the driver manifests' column names. | Manifest, Languages (`internal/stproject` composes the device types), Virtual devices, CLI | **Published language** (`devprofile`, a leaf: one file per device type). `devbind` derives what a row means (the type, the tags, the drivers' manifests) and adapts a driver so a device arrives as one struct; the drivers themselves never learn of it |
+| **IO-Link** | `iolink/iodd` `iolink` (planned, [iolink.md](iolink.md)) | IODD, port, port device, process data in and out, record item, identity, ISDU, variable. | Device library (`devbind` reads a master's `ports:`), CLI | **Published language** (`iolink/iodd`, a leaf like `devprofile`: the IODD model and the process data codec). `iolink` derives a port device's type and tags from its IODD and the master profile's `iolink:` block, and adapts the master's driver so a port arrives decoded and identity-checked; the IODD's names stop there |
+| **Virtual devices** | `virtdev` | instance, simulator, process model, plant, wire face, in-process face. | CLI, Verification | Serves a device's store through the protocol packages' servers (`modbus/slave`, `opcua/server`); hosts its simulators and process model in a plant `runtime`. A test-time context: only the CLI and Verification import it, and it imports no manifest |
 
 Two packages are substrates rather than contexts and import nothing of
 ours: `lang/ir` (types and values) and `io` (the driver seam and `Quality`).
-`hist` and `oplog` are seams in the same sense. They are what DDD calls a
+`hist`, `oplog`, `audit` (the runtime audit journal, #709) and `auth` (who may do what, #708) are seams in the same sense.
+`quorum` (the vote protocol of a redundant pair and its witness,
+[redundancy.md](redundancy.md) §3) is one too: voter, candidate, lease, term,
+incarnation, adoption. Its core is sans-IO; `quorum/node` drives it over
+the peer listener, the state file and the clock, and `quorum/sim` over a
+simulated world. The subtree imports only itself; `leader` adapts it to
+`leader.Elector`, and the CLI runs `naut witness` on it. They are what DDD calls a
 *published language*: small, stable, and the price of changing one is paid
 by every context.
 
@@ -72,22 +83,138 @@ break one changes this section first and says why.
 
 ### 2.1 Direction
 
-- Substrates (`io`, `lang/ir`, `hist`, `oplog`) import no other nautilus
-  package. `retain` imports only `internal/k8sapi`.
+- Substrates (`io`, `lang/ir`, `hist`, `oplog`, `audit`, `auth`) import no other nautilus
+  package, except that `auth` may import `internal/securefile` (the private
+  files a controller keeps in its state directory: atomic 0600 writes, the
+  owner kept under sudo, mode, owner and symlink checks, the lock; stdlib
+  only, shared with `alarm/oncall` so the checks have one copy). `audit`
+  imports only the standard library, not even a third-party
+  module. `auth/users` (the users file on the box: argon2id password hashes
+  and personal access tokens, #708) imports only the standard library,
+  `internal/securefile` and
+  `golang.org/x/crypto` (with the `golang.org/x/sys/cpu` it needs), the one
+  module the maintainer approved for it. `auth/oidc` (sign-in at an OpenID
+  Connect provider, #708 PR 6) imports only the standard library,
+  `github.com/coreos/go-oidc/v3`, `golang.org/x/oauth2` and the
+  `github.com/go-jose/go-jose/v4` go-oidc needs, and only the CLI imports
+  it: `naut run` hands it to the server through a seam interface
+  (`internal/oidcseam`, stdlib only, imported only by `server` and the
+  CLI; internal so it is not stable Go API while #708 is open), so the
+  server, the runtime, `acceptance`, the languages and the wasm build
+  never link those modules. `internal/auditpg` (the audit journal's
+  Postgres copy, #709 PR 9) imports only `audit` and `github.com/lib/pq`,
+  and only the CLI imports it: the tailer that reads the journal's files,
+  checks their chain and decides what is copied stays in `audit`, so the
+  adapter only stores rows, and the server never links a database driver
+  for it. `retain` imports only `internal/k8sapi`. `quorum` and its subtree
+  import only each other, and only `leader`, the CLI and Verification import
+  them: nothing else learns the vote protocol.
+- `internal/fence` (how a write leaves in time on a redundant pair,
+  redundancy design §3.4) imports only `io`, so every field and IT driver
+  may use it without learning the vote protocol: the pair's gate reaches a
+  driver only as `io.SendGate`.
+- `internal/floatip` (the pair's floating address, #716) imports no other
+  nautilus package, and only the manifest (`internal/project`, to check
+  `redundancy.floating-ip`) and the CLI import it: it is given the write gate
+  as a func and knows no election.
 - Languages import only each other and the tag-file shared kernel.
-- Runtime imports only Languages, `io`, `retain`, `internal/stproject`.
+- Runtime imports only Languages, `io`, `retain`, `internal/stproject` and `internal/fence`
+  (its READ/WRITE channels' sends run on a fenced context, redundancy design §3.4; fence
+  imports only `io`).
   It never knows a driver, the server, alarms or the manifest.
-- Alarms import only `lang/ir` and `retain`.
+- Alarms import only `lang/ir`, `retain` and each other. `alarm/escalate`
+  (escalation policies, on-call rosters and the dispatcher, #715) imports
+  only `alarm`: it learns who leads only through the gate function the
+  manifest hands it (the same lease check as the write gate), never from
+  `leader` or `runtime`. `alarm/oncall` (the contacts and secrets files on
+  the box) imports only `internal/securefile`: addresses and credentials
+  never learn about alarms. `alarm/channel` (the channels' manifest form,
+  their secret names and the inbound signature check) and
+  `alarm/channel/send` (the senders: SMTP, the SMS and voice provider, the
+  webhook) import only `alarm`, `alarm/escalate`, `alarm/oncall` and each
+  other: the manifest composes them, and they know no server, runtime or
+  auth. `alarm/pgjournal` (the journal in Postgres) imports only `alarm`.
+  The manifest never imports the senders or the Postgres journal: `cmd/naut`
+  registers them with it, so the playground's wasm links neither `net/smtp`
+  nor `database/sql`. `alarm/rationalize` (the master alarm
+  database and the ISA-18.2 performance reports, #715) imports only `alarm`:
+  it reads definitions and journal events it is handed, offline.
+  `alarm/acklink` (the signed, single-use acknowledgement links a page
+  carries, #715) imports only the standard library: it mints and checks a
+  token under a key it is handed and knows no principal's permissions, no
+  engine and no server, which decide what a checked link may do.
+- `internal/pairkey` (keys a redundant pair's members share, derived from
+  the peer token, #715) imports only the standard library: one HKDF per
+  purpose, so no two uses ever share a key.
+- `internal/peertls` (a redundant pair's peer TLS, #710) imports only the
+  standard library and `internal/pairkey`: each box's own key, its
+  certificate signed with the key derived from the peer token, the pins of
+  the other members' keys, and both ends' TLS configurations and the
+  per-request check. `cmd/naut` hands them to `quorum/node` and `oplog` as
+  standard-library types (a handshake function, a `tls.Config`, a request
+  context value set through `node.WithPeer`), since both are substrates
+  that import neither.
+- `notes` (operator notes and the shift log, #720) imports only the standard
+  library and `oplog` (for the one entry the log carries): a note is a
+  revision chain kept in a file, or, on a pair, an index of the log's note
+  entries. It knows no principal's permissions, no alarm, no tag and no
+  server: the server decides who may write what before a revision exists.
+- `checkout` (the I/O checkout sheet and its runs, #719) imports only the
+  standard library and `internal/securefile` (the signing key's mode check):
+  a sheet of points, an append-only, hash-chained file of results, and the
+  record the controller signs when a run is sealed. It knows no permission, tag
+  store, alarm or server: `server` decides who may record, force or seal before
+  an entry exists, and `cmd/naut` tells it what the controller is connected to.
+- `camera` (the plant's cameras, #724) imports only the standard library: a
+  manifest row bound to an asset, a still fetched with the camera's
+  credentials, a motion-JPEG relay and the cap on live viewers. It knows no
+  plant, permission, alarm or server: `server` decides who may view and
+  journals a live view, the manifest checks the asset, and `cmd/naut` hands it
+  the secrets. Its fetch, relay and drawing files are `!js`: the playground's
+  wasm carries the row type only, and draws its own virtual camera in the kit.
+- `internal/webpush` (Web Push: RFC 8291 payload encryption, VAPID, the
+  sealed subscription registry and the sender that dials only what its
+  endpoint policy allows, #722) imports only the standard library. It
+  knows no principal, session, alarm or store: `server` hands it a
+  principal as a string and keeps its rows in `retain`, and the manifest
+  composes it with the alarm channels through a function.
 - Field and IT drivers and `sparkplug/host` never import `runtime`,
   `server`, `alarm`, `acceptance`, `internal/project`, `internal/lsp` or
   the CLI.
-- The operator surface never imports a protocol package, the Logix target,
-  or the manifest.
+- The Siemens target's `siemens/station`, `siemens/tiad`, `siemens/webapi`,
+  `siemens/writer` and `siemens/importer` keep the same distance. Only `siemens/facade`
+  composes the runtime side.
+- The operator surface never imports a protocol package, the Logix or
+  Siemens target, or the manifest.
+- `devprofile` imports no other nautilus package: the profile format is
+  read by the manifest, virtual devices and the CLI, and depends on none
+  of them.
+- `devbind` never imports `runtime`, `server`, `alarm`, `acceptance`,
+  `internal/project`, `virtdev` or the CLI: the manifest composes it.
+  Field drivers never import `devbind`, `devprofile` or `iolink`.
+- `iolink/iodd` (the IODD model and process data codec) imports no other
+  nautilus package. `iolink` keeps devbind's distance: no `runtime`,
+  `server`, `alarm`, `acceptance`, `internal/project`, `internal/lsp`,
+  `virtdev` or the CLI. `devbind` may import either.
+- `virtdev` is imported only by the CLI and Verification: virtual
+  devices are a test and commissioning context, never part of a running
+  controller.
 - `internal/project` is imported only by the CLI and the LSP. Nothing
   imports the CLI.
+- A driver's test fake (`optommp/optommptest`, `plcnext/plcnexttest`)
+  and `internal/testmqtt` are imported only by test files: nothing shipped
+  carries a fake device or broker. Each package checks this itself
+  (`TestOnlyTestsImport…`, by `go list` over the module), not
+  `internal/contextmap`.
 
 Verification packages, `examples/`, `testdata/` and `tools/` compose freely
 and are excluded from the check. Test files may import anything.
+
+One exception for what users copy: `examples/` and the `naut new` templates
+(`cmd/naut/templates`) import only the stable Go API, `io`, `runtime`,
+`server` and `acceptance` (CONTRIBUTING.md, "Go API"), so no scaffold
+teaches a dependency on an internal package
+(`TestSDKSourcesImportOnlyTheStableAPI`).
 
 ### 2.2 Anti-corruption layers
 
@@ -150,7 +277,8 @@ Legitimate per-context meanings, so nobody "deduplicates" them:
 |---|---|
 | **Tag** | Runtime: a cell in the store (`TagDef`, `Tags`, `TagMeta`). Manifest: its YAML form (`TagConfig`). Tag file: one generated row (`tagfile.Tag`). Field/IT drivers: a binding from a tag to an address (`TagBinding`, `snmp.Tag`, `redfish.Tag`, `prom.Tag`, `replay.Tag`). Logix: a controller symbol (`l5x.Tag`, `cip.TagSegment`). Logix emulator: the served surface (`TagSpec`, `TagSurfaceSpec`, `TagConfig`, `TagStore`) |
 | **Node** | ST and SFC: an AST node. FBD: a netlist node. Sparkplug edge: this edge node. Sparkplug host: its view of a remote edge node. Oplog: one replica. Scene: one placed thing |
-| **Device** | Sparkplug edge: a device under this node. Sparkplug host: a device under a remote node. Modbus codegen: a device *type* in the committed device map (`DeviceMap`, `DeviceType`), which is a kind of hardware, not an instance. Drivers call a polled instance a **source** |
+| **Device** | Sparkplug edge: a device under this node. Sparkplug host: a device under a remote node. Modbus codegen: a device *type* in the committed device map (`DeviceMap`, `DeviceType`), which is a kind of hardware, not an instance. Drivers call a polled instance a **source**. Device library: a device *type* is a **device profile** (`devprofile.Profile`); a project's instance of one is a **device**. IO-Link: a **port device** is the IO-Link device on a master's port, typed by its IODD (iolink.md). Virtual devices: an instance (`virtdev.Instance`), one per `devices:` row plus each device of its own in `virtual-devices.yaml`. Siemens target: a PROFINET IO device placed in a CPU's station spec (`tiad.Device`), always with an explicit name of station. Note `devices.yaml` is the Modbus device map, not a list of devices |
+| **Profile** | Device library: a device type (`devprofile.Profile`). SNMP: a walk-to-UDT expansion in Go (`snmp/profiles`, `naut snmp import --profile`). HMI 3D: a chassis profile. Say "device profile" when more than one is in play |
 | **Program** | IEC: a POU scheduled by a task, everywhere in nautilus. Logix: a container of routines. The writer translates; "program" never means the Logix thing outside `logix/` |
 | **Quality** | One meaning, `io.Quality`, in every context. Keep it that way |
 | **Component** | HMI 2D: a mimic symbol (`*.component.json` + `.svelte`). HMI 3D uses **kind** (`*.kind.json`) for the same role on purpose, so the two are never confused |

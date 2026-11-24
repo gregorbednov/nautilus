@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/joyautomation/nautilus/auth"
 	"github.com/joyautomation/nautilus/internal/project"
 	"github.com/joyautomation/nautilus/internal/stproject"
 	"github.com/joyautomation/nautilus/logix/deploy"
@@ -68,6 +69,12 @@ type logixProject struct {
 	host         string
 	slot, port   int
 	agent        string
+	// auth is the manifest's auth: block, compiled; nil without one.
+	auth *auth.Policy
+	// tls is the manifest's server.tls, nil without one; stateDir and name
+	// say where a self-signed one is kept (auth.state-dir, the project's).
+	tls            *project.TLSConfig
+	stateDir, name string
 }
 
 // hardwareError is a target.logix.hardware file that cannot be read.
@@ -150,10 +157,32 @@ func loadLogixProject(dir string) (*logixProject, error) {
 			PeriodMs: period,
 			CommPath: tgt.CommPath, Libs: libs, Inits: inits, Descs: descs, Aliases: aliases, Tags: tags, Side: side,
 			AllTags: tgt.AllTags, ControllerScoped: scoped, Hardware: hw,
+			Channels: writerChannels(m.Channels), Messages: writerMessages(tgt.Messages),
 			Language: writer.Language(progPath),
 		},
 		host: tgt.Host, slot: tgt.Slot, port: tgt.Port, agent: tgt.Agent,
+		auth: m.AuthPolicy(),
+		tls:  m.Server.TLS, stateDir: m.AuthStateDir(), name: m.Name,
 	}, nil
+}
+
+// writerChannels and writerMessages hand the manifest's channels: and
+// target.logix.messages to the writer, for the MSG a READ or WRITE is
+// written as.
+func writerChannels(cs []project.ChannelConfig) []writer.Channel {
+	var out []writer.Channel
+	for _, c := range cs {
+		out = append(out, writer.Channel{Name: c.Name, Type: c.Type, Host: c.Host, Slot: c.Slot, Port: c.Port})
+	}
+	return out
+}
+
+func writerMessages(ms []project.LogixMessage) []writer.Message {
+	var out []writer.Message
+	for _, m := range ms {
+		out = append(out, writer.Message{Name: m.Name, ConnectedFlag: m.ConnectedFlag, CacheConnections: m.CacheConnections, ConnectionPath: m.ConnectionPath})
+	}
+	return out
 }
 
 func runLogixDeploy(args []string) int {
@@ -231,6 +260,9 @@ func runLogixDeploy(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer cancel()
 	rep, err := deploy.Run(ctx, p.source, opts)
+	for _, w := range rep.Warnings {
+		fmt.Fprintln(os.Stderr, "naut logix deploy: warning:", w)
+	}
 	for _, d := range rep.Diffs {
 		fmt.Println("  " + d)
 	}

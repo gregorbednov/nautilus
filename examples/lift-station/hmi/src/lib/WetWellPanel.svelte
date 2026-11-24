@@ -4,7 +4,7 @@
 	// sequence, then its setpoints: where the sequence (sequence.sfc)
 	// starts and stops the lead and lag pumps, the level loop that sets
 	// their speed in Auto (level.fbd, LIC-101), and the high level alarm.
-	import { StatusPill, Trend } from '@joyautomation/nautilus-hmi';
+	import { StatusPill, Trend, deniedFor } from '@joyautomation/nautilus-hmi';
 	import SeqStepTag from '$lib/SeqStepTag.svelte';
 	import SetpointInput from '$lib/SetpointInput.svelte';
 	import { num, bool, str, writeTag, levelBuf } from '$lib/client.svelte';
@@ -19,22 +19,22 @@
 	// LeadSelect's values (sequence.sfc): alternate each cycle, or hold one.
 	const LEAD = [
 		{ v: 0, label: 'Alternate' },
-		{ v: 1, label: 'P-101' },
-		{ v: 2, label: 'P-102' }
+		{ v: 1, label: 'Pump 1' },
+		{ v: 2, label: 'Pump 2' }
 	];
 	const set = (tag: string) => (v: number) => writeTag(tag, v);
 </script>
 
 <div class="level">
 	<span class="big">{num('LIT101_Level').toFixed(1)}<small>%</small></span>
-	<span class="sub">LIT-101 level</span>
+	<span class="sub">Level, LIT-101</span>
 </div>
 
 <Trend series={[{ name: 'Level', color: 'var(--s1)', points: levelBuf.points }]} unit="%" yMin={0} yMax={100} height={96} />
 
 <div class="pills">
-	<StatusPill kind={bool('LSHH101') ? 'critical' : 'off'} label="LSHH high-high" />
-	<StatusPill kind={bool('LSLL101') ? 'warning' : 'off'} label="LSLL low-low" />
+	<StatusPill kind={bool('LSHH101') ? 'critical' : 'off'} label="High switch (LSHH-101)" />
+	<StatusPill kind={bool('LSLL101') ? 'warning' : 'off'} label="Low switch (LSLL-101)" />
 	<StatusPill kind={bool('HighLevelAlm') ? 'critical' : 'off'} label="high level alarm" />
 	<StatusPill kind={bool('DryRunHold') ? 'warning' : 'off'} label="dry-run hold" />
 </div>
@@ -43,22 +43,23 @@
 	<h3>Sequence</h3>
 	<p class="seq">
 		<SeqStepTag text={str('SeqStep')} width={96} />
-		<span>{bool('LeadIsP101') ? 'P-101' : 'P-102'} is lead</span>
+		<span>{bool('LeadIsP101') ? 'Pump 1' : 'Pump 2'} is lead</span>
 	</p>
+	<p class="seq">Pump-downs counted: <b>{num('CycleCount').toFixed(0)}</b></p>
 	<!-- LeadSelect: who takes the next call (sequence.sfc's PickLead). A
 	     pump that is not in Auto and available is passed over either way. -->
 	<div class="line lead">
 		<span>Lead</span>
 		<div class="seg" role="group" aria-label="Lead pump">
 			{#each LEAD as l (l.v)}
-				<button class:active={num('LeadSelect') === l.v} aria-pressed={num('LeadSelect') === l.v} onclick={() => writeTag('LeadSelect', l.v)}>
+				<button class:active={num('LeadSelect') === l.v} aria-pressed={num('LeadSelect') === l.v} disabled={!!deniedFor('write', 'LeadSelect')} title={deniedFor('write', 'LeadSelect') || undefined} onclick={() => writeTag('LeadSelect', l.v)}>
 					{l.label}
 				</button>
 			{/each}
 		</div>
 	</div>
 	{#if num('LeadSelect') !== 0 && bool('LeadIsP101') !== (num('LeadSelect') === 1)}
-		<p class="hint">{num('LeadSelect') === 1 ? 'P-101' : 'P-102'} is selected but not in Auto and available, so the other pump leads.</p>
+		<p class="hint">{num('LeadSelect') === 1 ? 'Pump 1' : 'Pump 2'} is selected but not in Auto and available, so the other pump leads.</p>
 	{/if}
 </section>
 
@@ -69,11 +70,11 @@
 	<div class="grid" role="group" aria-label="Pump start and stop levels">
 		<span></span><span class="col">Lead</span><span class="col">Lag</span>
 		<span class="row">On at</span>
-		<SetpointInput label="Lead on" unit="%" max={100} value={num('LeadOnLevel')} onsubmit={set('LeadOnLevel')} />
-		<SetpointInput label="Lag on" unit="%" max={100} value={num('LagOnLevel')} onsubmit={set('LagOnLevel')} />
+		<SetpointInput label="Lead on" unit="%" max={100} value={num('LeadOnLevel')} tag="LeadOnLevel" onsubmit={set('LeadOnLevel')} />
+		<SetpointInput label="Lag on" unit="%" max={100} value={num('LagOnLevel')} tag="LagOnLevel" onsubmit={set('LagOnLevel')} />
 		<span class="row">Off at</span>
-		<SetpointInput label="Lead off" unit="%" max={100} value={num('LeadOffLevel')} onsubmit={set('LeadOffLevel')} />
-		<SetpointInput label="Lag off" unit="%" max={100} value={num('LagOffLevel')} onsubmit={set('LagOffLevel')} />
+		<SetpointInput label="Lead off" unit="%" max={100} value={num('LeadOffLevel')} tag="LeadOffLevel" onsubmit={set('LeadOffLevel')} />
+		<SetpointInput label="Lag off" unit="%" max={100} value={num('LagOffLevel')} tag="LagOffLevel" onsubmit={set('LagOffLevel')} />
 	</div>
 </section>
 
@@ -82,7 +83,7 @@
 	{#each LOOP as s (s.tag)}
 		<div class="line">
 			<span>{s.label}</span>
-			<SetpointInput label={s.label} unit={s.unit} min={0} max={s.max} step={s.step ?? 1} value={num(s.tag)} onsubmit={set(s.tag)} />
+			<SetpointInput label={s.label} unit={s.unit} min={0} max={s.max} step={s.step ?? 1} value={num(s.tag)} tag={s.tag} onsubmit={set(s.tag)} />
 		</div>
 	{/each}
 </section>
@@ -92,7 +93,7 @@
 	{#each ALARM as s (s.tag)}
 		<div class="line">
 			<span>{s.label}</span>
-			<SetpointInput label={s.label} unit={s.unit} min={0} max={s.max} value={num(s.tag)} onsubmit={set(s.tag)} />
+			<SetpointInput label={s.label} unit={s.unit} min={0} max={s.max} value={num(s.tag)} tag={s.tag} onsubmit={set(s.tag)} />
 		</div>
 	{/each}
 </section>
@@ -119,7 +120,7 @@
 		color: var(--muted);
 	}
 	.sub {
-		font-size: 0.78rem;
+		font-size: 1rem;
 		color: var(--muted);
 	}
 	.pills {
@@ -134,7 +135,7 @@
 		margin-top: 8px;
 	}
 	h3 {
-		font-size: 0.72rem;
+		font-size: 1rem;
 		font-weight: 700;
 		letter-spacing: 0.07em;
 		text-transform: uppercase;
@@ -152,7 +153,7 @@
 		align-items: center;
 		gap: 8px;
 		margin: 0;
-		font-size: 0.8rem;
+		font-size: 1rem;
 		color: var(--ink-2);
 	}
 	.grid {
@@ -162,13 +163,13 @@
 		gap: 8px 10px;
 	}
 	.col {
-		font-size: 0.75rem;
+		font-size: 1rem;
 		font-weight: 650;
 		color: var(--ink-2);
 	}
 	.row,
 	.line > span {
-		font-size: 0.8rem;
+		font-size: 1rem;
 		color: var(--ink-2);
 	}
 	.line {
@@ -196,7 +197,7 @@
 		background: none;
 		color: var(--ink-2);
 		font: inherit;
-		font-size: 0.75rem;
+		font-size: 1rem;
 		font-weight: 600;
 		cursor: pointer;
 	}
@@ -206,7 +207,7 @@
 	}
 	.hint {
 		margin: 4px 0 0;
-		font-size: 0.72rem;
+		font-size: 1rem;
 		color: var(--muted);
 	}
 </style>

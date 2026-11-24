@@ -223,6 +223,7 @@ func (c *rungCtx) contact(ref string, neg bool) string {
 var memberRewrite = map[string]map[string]string{
 	"TIMER":   {"Q": "DN", "ET": "ACC", "IN": "EN", "PT": "PRE"},
 	"COUNTER": {"Q": "DN", "CV": "ACC", "CU": "CU", "PV": "PRE"},
+	"MESSAGE": {"NDR": "DN", "DONE": "DN", "ERROR": "ER", "STATUS": "ERR"},
 }
 
 // ref rewrites an operand reference for Logix: timer and counter members
@@ -329,6 +330,8 @@ func membersOf(st string) string {
 	switch st {
 	case "TIMER":
 		return "Q (DN), ET (ACC), IN (EN), PT (PRE)"
+	case "MESSAGE":
+		return "NDR or DONE (DN), ERROR (ER), STATUS (ERR); BUSY has no MESSAGE bit"
 	default:
 		return "Q (DN), CV (ACC), CU, PV (PRE)"
 	}
@@ -564,6 +567,11 @@ func (c *rungCtx) block(e ld.Element, top, isLast bool) (text, cont string, ok b
 		// writer only needs to know it cannot type the tag.
 		return "", "", false
 	}
+	if st == "MESSAGE" {
+		// READ / WRITE: an MSG, which passes its rung-in on (msg.go).
+		text, ok := c.message(e, typ)
+		return text, "", ok
+	}
 	if splitsRung(typ) && !top {
 		c.lw.diag(ruleTOFPosition, c.r.Line, c.r.Name, "%s:%s inside a branch: a Logix %s passes its rung-in through, and its done bit can be true while the rung-in is false; put it on its own rung and use %s.Q as a contact", e.Inst, typ, typ, e.Inst)
 		return "", "", false
@@ -749,7 +757,19 @@ func (c *rungCtx) preset(e ld.Element, st, val string) bool {
 			}
 		}
 	}
-	want := "a TIME literal (T#10S) or a TIME variable"
+	// TO_TIME(ms): a DINT of milliseconds feeds the timer, as .PRE is one
+	// in Logix (a preset the logic computes, #700).
+	if st == "TIMER" {
+		if v, ok := toTimeOfVar(val); ok {
+			if d, ok := c.lw.vars[strings.ToLower(v)]; ok {
+				if typ := strings.ToUpper(strings.TrimSpace(d.Type)); typ == "SINT" || typ == "INT" || typ == "DINT" {
+					c.pre = append(c.pre, rungOut{Text: "MOVE(" + v + "," + e.Inst + ".PRE)", Source: c.r.Name, Line: c.r.Line})
+					return true
+				}
+			}
+		}
+	}
+	want := "a TIME literal (T#10S), a TIME variable or TO_TIME(<integer variable of milliseconds>)"
 	if st == "COUNTER" {
 		want = "an integer literal or a SINT/INT/DINT variable"
 	}
@@ -864,4 +884,24 @@ func elemType(typ string) string {
 		return strings.TrimSpace(up[i+4:])
 	}
 	return up
+}
+
+// toTimeOfVar reads TO_TIME(v) or DINT_TO_TIME(v) (INT_TO_TIME, SINT_TO_TIME)
+// of a plain variable v.
+func toTimeOfVar(val string) (string, bool) {
+	val = strings.TrimSpace(val)
+	open := strings.IndexByte(val, '(')
+	if open < 0 || !strings.HasSuffix(val, ")") {
+		return "", false
+	}
+	switch strings.ToUpper(strings.TrimSpace(val[:open])) {
+	case "TO_TIME", "DINT_TO_TIME", "INT_TO_TIME", "SINT_TO_TIME":
+	default:
+		return "", false
+	}
+	v := strings.TrimSpace(val[open+1 : len(val)-1])
+	if !isRef(v) || strings.ContainsAny(v, ".[") {
+		return "", false
+	}
+	return v, true
 }

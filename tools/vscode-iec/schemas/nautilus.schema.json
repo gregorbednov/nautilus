@@ -13,6 +13,11 @@
       "minLength": 1,
       "description": "The controller's name. Defaults to \"nautilus\"; also the default Sparkplug edge-node id and the default output name for `naut build`."
     },
+    "plant": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The plant model file (plant.yaml): areas, equipment (a declared tag or a devices: row each, with an asset type) and the flows between them, with asset types in asset-types/*.asset.yaml beside it. Mimics and scenes name a piece of equipment with `plant:`; `naut hmi build` writes an asset page for each. Absent, nothing changes. See docs/design/plant-model.md."
+    },
     "dialect": {
       "type": "string",
       "enum": ["nautilus", "logix", "siemens", "codesys"],
@@ -64,6 +69,31 @@
       "minItems": 1,
       "description": "Several field drivers on one scan \u2014 e.g. an EtherNet/IP poll plus a Sparkplug feed. Each entry is the same shape as driver:, plus an optional name to tell status rows apart. A tag may be owned by exactly one driver; a duplicate is a load-time error naming both. One entry behaves exactly like driver:. Do not set driver: as well."
     },
+    "devices": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/device"
+      },
+      "description": "Field devices declared by profile (the device library). Each row derives, at load, one struct tag typed by its profile (its members read back the device), a command tag <name>_<point> per writable point, and its driver bindings. The profile must be vendored in profiles/ (naut devices add <profile>). Modbus devices join the project's Modbus driver; one is added if there is none."
+    },
+    "channels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "type"],
+        "properties": {
+          "name": {"type": "string", "description": "What a READ or WRITE block's ID names. Unique (case-insensitively)."},
+          "type": {"enum": ["cip"], "description": "cip: a Logix controller over EtherNet/IP (the services a Logix MSG of type CIP Data Table Read/Write sends)."},
+          "host": {"type": "string", "description": "The peer's address."},
+          "slot": {"type": "integer", "minimum": 0, "description": "Route to the processor in this backplane slot behind host: a ControlLogix CPU reached through an Ethernet module. Leave it out for a controller with its own Ethernet port (a CompactLogix); a written MSG then ends at host."},
+          "port": {"type": "integer", "minimum": 0, "description": "EtherNet/IP port (default 44818)."},
+          "timeout": {"type": "string", "description": "How long one request may take before it fails with STATUS -3 (default 5s)."},
+          "queue": {"type": "integer", "minimum": 0, "description": "How many requests may wait before one fails with STATUS -5 (default 64)."}
+        }
+      },
+      "description": "Communication channels for the programs' READ and WRITE blocks (IEC 61131-5): one peer each. A driver moves the same tags every scan; a channel moves one variable when a program asks. naut check errors on a READ or WRITE whose ID names no channel here."
+    },
     "opcua": {
       "$ref": "#/definitions/opcua",
       "description": "Serve the tag store as an OPC UA address space. Any OPC UA client browses, reads and subscribes to the tags; a trusted client also writes the tags writable opens. The section's presence turns the server on."
@@ -71,6 +101,18 @@
     "sparkplug": {
       "$ref": "#/definitions/sparkplug",
       "description": "Republish the tag store as a Sparkplug B edge node."
+    },
+    "parameters": {
+      "type": "object",
+      "description": "How operator-tuned setpoint values get back to Git (#718). Absent, drift is only reported (GET /api/parameters).",
+      "additionalProperties": false,
+      "properties": {
+        "writeBack": {
+          "enum": ["off", "patch", "commit"],
+          "default": "off",
+          "description": "off: report only. patch: GET /api/parameters/patch returns the plant-ahead values as a patch. commit: a controller running from a git checkout commits them itself (one commit per editor, after 30 s of quiet or 50 pending), editing only each tag's init:."
+        }
+      }
     },
     "retain": {
       "type": [
@@ -90,6 +132,475 @@
         }
       }
     },
+    "substitutes": {
+      "$ref": "#/definitions/substitutes"
+    },
+    "audit": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The runtime audit journal `naut run` always keeps: every action that changes something (tag writes, forces, alarm acks, online edits), accepted or refused, as one fsynced, hash-chained line. `naut audit verify` checks it. This section only moves it or changes how long it is kept.",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The journal's directory (default audit, in the working directory)."
+        },
+        "keep-days": {
+          "type": "integer",
+          "description": "Days of journal files kept (default 365). A negative number keeps every file."
+        },
+        "sink": {
+          "type": "string",
+          "enum": [
+            "postgres"
+          ],
+          "description": "Keep a copy of the journal in Postgres (the audit_entries table) for queries and export. It tails the files and catches up after any outage; the files stay the source of truth."
+        },
+        "dsn-env": {
+          "type": "string",
+          "description": "The environment variable holding the copy's connection string (default NAUTILUS_AUDIT_DB_URL, then DATABASE_URL). Never the connection string itself."
+        },
+        "anchor-every": {
+          "type": "string",
+          "description": "How often the copy anchors the journal's head in Postgres when it has moved (default 5m, at least 1s), a duration such as 5m. It also anchors at start, after every prune and at a clean stop; naut audit verify --anchor postgres checks the journal against the anchors."
+        }
+      }
+    },
+    "auth": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Who may do what (#708): roles, areas, users and service tokens, reviewed in git. Credentials never go here. Absent, writes keep today's rule (the auth token when one is set, else a same-origin request).",
+      "additionalProperties": false,
+      "properties": {
+        "anonymous": {
+          "type": "string",
+          "enum": [
+            "none",
+            "viewer"
+          ],
+          "description": "What a request with no credential may do: none (the default: sign-in required) or viewer (a wallboard)."
+        },
+        "token-role": {
+          "type": "string",
+          "description": "NAUTILUS_TOKEN's role (default administrator): a built-in role (viewer, operator, supervisor, engineer, administrator) or one under roles."
+        },
+        "areas": {
+          "type": "object",
+          "description": "Named sets of tags that scope a grant's write, ack, shelve, note, substitute and force.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tags"
+            ],
+            "properties": {
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "description": "Tag patterns (RCV_*), matched ignoring case against a tag's name."
+              }
+            }
+          }
+        },
+        "roles": {
+          "type": "object",
+          "description": "Custom roles: one to inherit, plus permissions to allow or deny.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "inherits"
+            ],
+            "properties": {
+              "inherits": {
+                "type": "string",
+                "description": "The role this one starts from: viewer, operator, supervisor, engineer, administrator, or another custom role."
+              },
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write",
+                    "ack",
+                    "shelve",
+                    "out-of-service",
+                    "note",
+                    "substitute",
+                    "force",
+                    "sfc",
+                    "edit",
+                    "activate",
+                    "deploy",
+                    "config",
+                    "audit",
+                    "users",
+                    "override",
+                    "redundancy",
+                    "checkout",
+                    "signoff",
+                    "camera",
+                    "ptz"
+                  ]
+                }
+              },
+              "deny": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write",
+                    "ack",
+                    "shelve",
+                    "out-of-service",
+                    "note",
+                    "substitute",
+                    "force",
+                    "sfc",
+                    "edit",
+                    "activate",
+                    "deploy",
+                    "config",
+                    "audit",
+                    "users",
+                    "override",
+                    "redundancy",
+                    "checkout",
+                    "signoff",
+                    "camera",
+                    "ptz"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "users": {
+          "type": "object",
+          "description": "Each user's grants: a role, or {role, areas}. No secrets here.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "role"
+                  ],
+                  "properties": {
+                    "role": {
+                      "type": "string"
+                    },
+                    "areas": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "oidc": {
+          "type": "object",
+          "description": "Browser sign-in at an OpenID Connect provider (Entra ID, Google, Keycloak, Okta). A person acts as oidc:<name> (the username claim), pinned to their account at the provider on first sign-in (naut users unpin undoes it). The client secret comes from NAUTILUS_OIDC_SECRET, never the manifest. Not on a redundant pair yet.",
+          "additionalProperties": false,
+          "required": [
+            "issuer",
+            "client-id"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "description": "The provider's issuer URL: https://login.microsoftonline.com/<tenant>/v2.0, https://accounts.google.com, https://<keycloak>/realms/<realm>."
+            },
+            "client-id": {
+              "type": "string",
+              "description": "The client (application) id the provider registered for this controller."
+            },
+            "name": {
+              "type": "string",
+              "description": "The sign-in button's label (Sign in with <name>). Default from the issuer: Microsoft, Google, else its host."
+            },
+            "username-claim": {
+              "type": "string",
+              "description": "The ID token claim that names a person (the display and journal name). Default preferred_username."
+            },
+            "groups-claim": {
+              "type": "string",
+              "description": "The ID token claim that lists a person's group ids. Default groups."
+            },
+            "groups": {
+              "type": "object",
+              "description": "Grants by group id, as the groups claim carries it (an Entra object id, a Keycloak group path), never a display name: a role, or grants as a user's ({role, areas}).",
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "role"
+                          ],
+                          "properties": {
+                            "role": {
+                              "type": "string"
+                            },
+                            "areas": {
+                              "type": "array",
+                              "minItems": 1,
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "users": {
+              "type": "object",
+              "description": "Grants by name (the username claim's value, matched ignoring case), for a provider that sends no groups: a role, or grants as a user's ({role, areas}).",
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "role"
+                          ],
+                          "properties": {
+                            "role": {
+                              "type": "string"
+                            },
+                            "areas": {
+                              "type": "array",
+                              "minItems": 1,
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "redirect-url": {
+              "type": "string",
+              "description": "The callback URL registered at the provider: https://<this controller's host>/auth/oidc/callback. Without it the controller builds it from a trusted Host (NAUTILUS_ALLOWED_HOSTS); naut run prints it at the start."
+            }
+          }
+        },
+        "state-dir": {
+          "type": "string",
+          "description": "Where the controller keeps its users file (users.json: password hashes and personal access tokens, managed with naut users). Default: systemd's $STATE_DIRECTORY. Never inside the project, so no hash reaches git."
+        },
+        "session": {
+          "type": "string",
+          "description": "How long a browser sign-in lasts, from the sign-in (not renewed by use): 1m to 168h. Default 12h. Sessions live in the leader's memory: a restart or a failover signs browser users out."
+        },
+        "elevation": {
+          "type": "string",
+          "description": "How long a browser sign-in's password counts for the elevated permissions (force, edit, activate, deploy, config, users, override), from the sign-in or the last re-authentication (POST /api/elevate), not renewed by use: 1m to 12h. Default 15m. A token always counts as elevated."
+        },
+        "service-tokens": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_]+$"
+          },
+          "description": "Named tokens for scripts and services: each a role, or grants as a user's ({role, areas}). A token's secret comes from NAUTILUS_TOKEN_<NAME>, never the manifest.",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "role"
+                      ],
+                      "properties": {
+                        "role": {
+                          "type": "string"
+                        },
+                        "areas": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "sparkplug": {
+          "description": "What a Sparkplug command (NCMD/DCMD) may do: a role, or grants as a service token's ({role, areas}). A command write needs sparkplug.writable AND write on the tag's area. Without this key, under auth: every command write is refused (Node Control/Rebirth still works). A command is journalled as sparkplug:<primary-host, else the broker's host>: a label, not a proof, since anyone who can publish to the broker can send one.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "role"
+                    ],
+                    "properties": {
+                      "role": {
+                        "type": "string"
+                      },
+                      "areas": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "opcua-certificates": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          },
+          "description": "OPC UA client certificates mapped to roles: each names exactly one of a thumbprint (the 40-digit SHA-1 `naut opcua certs` prints) or a subject (as it prints it), and grants as a service token's. Such a session writes as opcua-cert:<name>, within those grants. Under auth: a trusted certificate not named here writes nothing: its client signs in with a user name to write.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "grants"
+            ],
+            "oneOf": [
+              {
+                "required": [
+                  "thumbprint"
+                ]
+              },
+              {
+                "required": [
+                  "subject"
+                ]
+              }
+            ],
+            "properties": {
+              "thumbprint": {
+                "type": "string",
+                "pattern": "^[0-9A-Fa-f]{40}$"
+              },
+              "subject": {
+                "type": "string",
+                "minLength": 1
+              },
+              "grants": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "role"
+                            ],
+                            "properties": {
+                              "role": {
+                                "type": "string"
+                              },
+                              "areas": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+            }
+          }
+        }
+      }
+    },
     "redundancy": {
       "type": [
         "object",
@@ -102,6 +613,135 @@
           "type": "string",
           "description": "coordination.k8s.io Lease name (default: the project name)."
         }
+      }
+    },
+    "checkout": {
+      "type": "object",
+      "description": "The I/O checkout and commissioning sign-off (#719): the sheet of points, and who may seal a run.",
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "The sheet, relative to the project. Default checkout.yaml (naut checkout init writes one)."
+        },
+        "real-io": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Names of drivers and devices that reach real field I/O although the controller cannot tell from the endpoint (a local gateway on a loopback address, a driver whose hosts are in a manifest file). Without them the controller refuses to sign off a run against loopback, virtual or unreadable endpoints."
+        },
+        "signoff": {
+          "type": "string",
+          "enum": ["two-person", "single"],
+          "description": "Who may seal a run: two-person (the default) needs a signer who recorded none of its results; single lets the person who recorded them sign, naut check warns and the sealed record says single-person."
+        }
+      }
+    },
+    "cameras": {
+      "type": "array",
+      "description": "The plant's cameras (#724): each bound to an asset the plant.yaml names. The controller relays them; a browser never talks to a camera. Credentials are never here: set credentials: true and put user:password in the secrets file (naut alarms secrets set camera.<id>).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "asset",
+          "kind"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Letters, digits, - and _ (it is in a URL)."
+          },
+          "label": {
+            "type": "string"
+          },
+          "asset": {
+            "type": "string",
+            "description": "A plant.yaml equipment id: the asset page shows the camera."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "virtual",
+              "snapshot",
+              "mjpeg",
+              "hls",
+              "rtsp",
+              "onvif"
+            ],
+            "description": "virtual (drawn by the controller), snapshot (a JPEG URL), mjpeg (a motion-JPEG URL); hls, rtsp and onvif are later steps."
+          },
+          "url": {
+            "type": "string",
+            "description": "The stream or device URL, with no user name or password in it."
+          },
+          "credentials": {
+            "type": "boolean",
+            "description": "The camera needs a user name and password, kept as the secret camera.<id>."
+          },
+          "snapshot-url": {
+            "type": "string",
+            "description": "A JPEG URL the controller fetches for the asset page's picture. An onvif camera finds its own."
+          },
+          "ptz": {
+            "type": "boolean",
+            "description": "An onvif camera that pans, tilts and zooms: people who hold the ptz permission get a pad under its live video."
+          },
+          "profile": {
+            "type": "string",
+            "description": "An onvif camera's media profile to stream (its token or name); empty is the smallest H.264 picture."
+          },
+          "interval": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600,
+            "description": "Seconds between snapshot refreshes on the asset page (default 5)."
+          },
+          "max-viewers": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16,
+            "description": "How many people may watch this camera live at once (default 2)."
+          },
+          "snapshot-on-alarm": {
+            "type": "boolean",
+            "description": "Keep a still when an alarm of this asset's equipment activates (needs a snapshot source; kept under the state directory for the camera-snapshots policy)."
+          },
+          "snapshot-alarms": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Alarm ids (of any equipment) that also keep a still."
+          }
+        }
+      }
+    },
+    "camera-snapshots": {
+      "type": "object",
+      "description": "How long and how much of the pictures kept when an alarm activates (#724). They are pictures of people: nothing is kept past keep-days, and never more than max-count pictures, max-mb megabytes or 5% of the state filesystem's free space.",
+      "additionalProperties": false,
+      "properties": {
+        "keep-days": { "type": "integer", "minimum": 1, "maximum": 3650, "description": "Days a picture is kept (default 30)." },
+        "max-count": { "type": "integer", "minimum": 1, "maximum": 100000, "description": "Most pictures kept (default 500)." },
+        "max-mb": { "type": "integer", "minimum": 1, "maximum": 100000, "description": "Most megabytes kept (default 200)." }
+      }
+    },
+    "camera-streams": {
+      "type": "object",
+      "description": "The memory all live video streams of the controller may hold together (#724). A stream that would pass it ends with 'camera stream too large for this controller'.",
+      "additionalProperties": false,
+      "properties": {
+        "memory-mb": { "type": "integer", "minimum": 16, "maximum": 4096, "description": "Megabytes (default 64). A stream reserves 5 MB before it has a picture and a 2 Mbit/s one holds about 5 MB more." }
+      }
+    },
+    "pwa": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Names and themes the installed HMI (progressive web app). Every field is optional: an HMI naut builds is installable without this section. Installing and the offline shell need HTTPS (or localhost): a controller on plain LAN HTTP cannot be installed from a phone.",
+      "properties": {
+        "name": { "type": "string", "description": "The installed app's name. Default: the project's name." },
+        "short-name": { "type": "string", "description": "The label under the icon (about 12 characters). Default: name." },
+        "theme-color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "description": "Browser chrome and splash color, \"#rrggbb\". Default: the kit's dark background." },
+        "icon": { "type": "string", "description": "A square PNG of 512 pixels or more, in the project. Default: a drawn icon in the theme color." }
       }
     },
     "alarms": {
@@ -156,7 +796,7 @@
         "object",
         "null"
       ],
-      "description": "A controller this project is DEPLOYED to instead of being run by the nautilus runtime. With a target set, `naut check` also runs that target's rules. Experimental: docs/design/logix-authoring.md.",
+      "description": "A controller this project is DEPLOYED to instead of being run by the nautilus runtime. With a target set, `naut check` also runs that target's rules. One kind at a time. Experimental: docs/design/logix-authoring.md, docs/design/siemens-ide.md.",
       "additionalProperties": false,
       "properties": {
         "logix": {
@@ -240,6 +880,21 @@
                 }
               }
             },
+            "messages": {
+              "type": "array",
+              "description": "What a Logix MSG holds that a READ or WRITE block and its channel do not, per instance, so the write-back gives each MESSAGE tag back as `naut logix import` found it. Only values that differ from the writer's defaults are listed.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name"],
+                "properties": {
+                  "name": {"type": "string", "description": "A READ or WRITE instance of the task program."},
+                  "connected-flag": {"type": "string", "description": "MessageParameters ConnectedFlag, verbatim (default \"2\")."},
+                  "cache-connections": {"type": "string", "description": "MessageParameters CacheConnections, verbatim (default: absent)."},
+                  "connection-path": {"type": "string", "description": "MessageParameters ConnectionPath, verbatim, when the export spells it other than the channel's \"2, host[, 1, slot]\"."}
+                }
+              }
+            },
             "hardware": {
               "type": "string",
               "description": "An L5X, relative to the project, whose <Modules> section is the controller's I/O configuration: the chassis, its modules, and the adapters and modules beyond it that alias: tags name. The writer carries it into every project it writes, unchanged, in place of the controller's generated Local module, and refuses an alias of a rack point whose module it lacks (logix/io-module). `naut logix import --project` writes one, hardware.L5X, from an export with I/O modules; a Logix Designer export of the whole project works as it is. Its Local module must be the target's processor at the target's revision."
@@ -259,11 +914,163 @@
               }
             }
           }
+        },
+        "siemens": {
+          "$ref": "#/definitions/siemens-target"
         }
       }
     }
   },
   "definitions": {
+    "substitutes": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Inputs a person may run the program on a chosen value for while the real sensor is bad or wrong (a stuck level switch reads Good and wrong), for a bounded time, flagged everywhere (quality `substituted`, the <tag>__Substituted tag) and audited. Not alarm shelving, and not a force.",
+      "additionalProperties": false,
+      "properties": {
+        "defaults": {
+          "$ref": "#/definitions/substitute-defaults"
+        },
+        "rules": {
+          "type": "array",
+          "description": "Tried in order; the first rule that matches an input decides it.",
+          "items": {
+            "$ref": "#/definitions/substitute-rule"
+          }
+        }
+      }
+    },
+    "substitute-defaults": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "description": "What a rule gets for a key it leaves out.",
+      "properties": {
+        "max": {
+          "type": "string",
+          "description": "Longest grant, 1m to 168h (7 days). Default 8h."
+        },
+        "role": {
+          "type": "string",
+          "description": "The role allowed to start one (default supervisor). Shown by the API; enforced when roles land (#708)."
+        },
+        "ack-on-start": {
+          "type": "boolean",
+          "description": "The program's start interlock waits (__SubstitutesUnacked) until the substitute is acknowledged. Default false."
+        },
+        "operator-value": {
+          "type": "boolean",
+          "description": "A person may choose the value at start (checked against the tag's type). Default false: the engineer chose the safe value."
+        }
+      }
+    },
+    "substitute-rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "match",
+        "substitute"
+      ],
+      "properties": {
+        "match": {
+          "type": "string",
+          "description": "An input tag name or glob (case-insensitive). A name with a dot (IOL_P3.Level) substitutes one member of each matching struct tag."
+        },
+        "substitute": {
+          "description": "The value the program runs on. Checked against the tag's type as a write is."
+        },
+        "max": {
+          "type": "string",
+          "description": "Longest grant, 1m to 168h (7 days)."
+        },
+        "role": {
+          "type": "string",
+          "description": "The role allowed to start one."
+        },
+        "ack-on-start": {
+          "type": "boolean",
+          "description": "Wait for an acknowledgement of this substitute before the program's start interlock opens."
+        },
+        "operator-value": {
+          "type": "boolean",
+          "description": "A person may choose the value at start."
+        }
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "profile",
+        "endpoint"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "The device's tag name: a struct tag of the profile's type. Command tags are <name>_<point>; the driver's companions are <name>__Online and <name>__Outages."
+        },
+        "profile": {
+          "type": "string",
+          "description": "A profile id vendored in profiles/<id>.yaml (naut devices add <id>; naut devices profiles lists the built-in ones)."
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "Where the device answers: a Modbus host[:port] (the port defaults to the profile's, then 502), or an OPC UA host[:port] or opc.tcp://host[:port] (the port defaults to the profile's, then 4840)."
+        },
+        "unit-id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "The Modbus unit id; defaults to the profile's. An OPC UA device has none."
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Globs over point names: the points this device polls and has as members of its struct (default: all). Devices of one type select the same points."
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Values for the profile's params:."
+        },
+        "desc": {
+          "type": "string",
+          "description": "One line for the device's tags."
+        },
+        "driver": {
+          "type": "string",
+          "description": "An OPC UA device's connection: the name of an opcua-client section of drivers: with no endpoint or manifest (a template), whose security, security-mode, pki-dir, username, read-mode and scan-rate the device's own driver takes. Several devices may share one. Without it the device connects with security None, anonymous, and naut check says so. Not on a Modbus device."
+        },
+        "validate": {
+          "enum": ["live", "static"],
+          "description": "How a live I/O configuration change checks this device: live probes it on a connection of its own, static checks the configuration only. Overrides the driver's validate:. Default: static when the profile documents modbus max-connections of 2 or fewer, else live. live on a profile documenting max-connections 1 is an error."
+        },
+        "ports": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[0-9]+$" },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "description": "The port's device tag, unique among the project's devices and ports." },
+              "iodd": { "type": "string", "description": "The sensor's IODD: a file name in the project's iodd/ folder." }
+            }
+          },
+          "description": "An IO-Link master's ports by number: the sensor on each. Only a profile that declares IO-Link ports takes them."
+        }
+      }
+    },
     "duration": {
       "type": "string",
       "pattern": "^([-+]?0|[-+]?(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+)$",
@@ -294,6 +1101,40 @@
           "type": "string",
           "minLength": 1,
           "description": "A built HMI's directory, relative to the project (e.g. the SvelteKit `adapter-static` output, \"./hmi/build\") \u2014 must resolve inside the project, like every other manifest-referenced path. When set, the controller serves it at \"/\" (falling back to its index.html for a client-side route), and the built-in dashboard moves to \"/_nautilus/\". The HMI must call the tag API same-origin (a relative \"/api/...\" base URL)."
+        },
+        "tls": {
+          "description": "The certificate the tag API serves (HTTPS): self-signed (the controller makes one in its state directory; browsers warn until accepted; not on a redundant pair), or PEM files on the box at absolute paths outside the project (a private key never belongs in git), re-read when they change. NAUTILUS_TLS_CERT and NAUTILUS_TLS_KEY override either.",
+          "oneOf": [
+            {
+              "const": "self-signed",
+              "description": "A certificate the controller makes on its first start, in its state directory, and naut run renews from 30 days before its expiry (at its start, and daily while it runs). naut run prints its SHA-256 fingerprint."
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "cert",
+                "key"
+              ],
+              "properties": {
+                "cert": {
+                  "type": "string",
+                  "description": "The certificate (chain) file, PEM, absolute path."
+                },
+                "key": {
+                  "type": "string",
+                  "description": "The private key file, PEM, absolute path; not readable by every user on the box."
+                }
+              }
+            }
+          ]
+        },
+        "trusted-proxies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Addresses or prefixes (\"127.0.0.1\", \"10.0.0.0/24\") of a TLS-terminating proxy in front of the controller (tailscale serve, nginx): only from these is X-Forwarded-Proto: https believed (Secure cookies, password sign-in) and X-Forwarded-For used as the client's address in the audit journal. Empty: none."
         }
       }
     },
@@ -338,6 +1179,31 @@
           "minimum": 1,
           "maximum": 99,
           "description": "Run this task's thread under SCHED_FIFO at this priority (Linux). Needs CAP_SYS_NICE (setcap cap_sys_nice+ep on the binary) or an rtprio rlimit; a refused request is logged and shown in the task's stats, and the task runs at normal priority."
+        },
+        "share-cpu": {
+          "type": "boolean",
+          "description": "Pin to cpu: even where another program already runs a real-time thread above this task's priority (a vendor runtime or I/O shim, most likely), which is otherwise refused at start, with the task running unpinned at normal priority. Default false."
+        },
+        "priority-guard": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Bounds the task while it runs at priority: past either bound its thread goes back to normal scheduling until a restart, logged and shown in its scan.sched, so a runaway task cannot starve its core. Leave it out for the defaults.",
+          "properties": {
+            "overruns": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Scans in a row that each take longer than the period. Default 50."
+            },
+            "scan-multiple": {
+              "type": "number",
+              "minimum": 2,
+              "description": "One scan in progress for longer than this many periods. Default 20."
+            },
+            "rt-limit": {
+              "$ref": "#/definitions/duration",
+              "description": "How long a real-time thread may run without blocking before the kernel's RLIMIT_RTTIME demotes every task with priority:, from 10ms to 200ms: it only tightens the 200ms default, never loosens it. One limit per process: the strictest of every task's rt-limit and NAUTILUS_RT_LIMIT_MS is the one in force. Only on a task with priority:."
+            }
+          }
         }
       }
     },
@@ -362,7 +1228,7 @@
             "setpoint",
             "state"
           ],
-          "description": "input: driver \u2192 tag each scan, deliberately unseeded so a missing value faults loudly. output: tag \u2192 driver each scan; add init when the logic reads it back. setpoint: seeded operator/config value. state: seeded logic-owned value (latches, integrators)."
+          "description": "input: driver \u2192 tag each scan, deliberately unseeded so a missing value faults loudly. output: tag \u2192 driver each scan; with a type it starts at that type's zero, else add init when the logic reads it back. setpoint: seeded operator/config value. state: seeded logic-owned value (latches, integrators)."
         },
         "type": {
           "type": "string",
@@ -395,6 +1261,14 @@
         "retain": {
           "type": "boolean",
           "description": "Keep this tag's value across a restart in the retain store, as CODESYS VAR RETAIN does: for state the logic owns, such as run hours or a start count. Setpoints are always kept. Needs a retain: section. Not for an input or an output."
+        },
+        "min": {
+          "type": "number",
+          "description": "Lowest value an external write (HMI, API, Sparkplug, OPC UA) may set on this setpoint; a lower one is refused. The program's own writes are never refused. Setpoints only; init must not be below it."
+        },
+        "max": {
+          "type": "number",
+          "description": "Highest value an external write (HMI, API, Sparkplug, OPC UA) may set on this setpoint; a higher one is refused. The program's own writes are never refused. Setpoints only; init must not be above it."
         }
       },
       "allOf": [
@@ -465,9 +1339,11 @@
             "prometheus",
             "plcnext",
             "optommp",
-            "replay"
+            "profinet-device",
+            "replay",
+            "runtime"
           ],
-          "description": "memory: loopback for bring-up, so logic and HMI run before hardware exists. eip: polls an Allen-Bradley Logix controller. sparkplug-host: consumes a Sparkplug B group as a host application, presenting every edge node's metrics as tags. modbus: polls a set of Modbus TCP sources with coalesced block reads. opcua-client: the OPC UA client \u2014 polls one OPC UA server (an Ignition gateway's, a PLC's embedded one, a Kepware) per scan class from a manifest `naut opcua import` writes; not the top-level opcua: section, which serves this project's tags. snmp / redfish / prometheus: IT hardware as tags — switches, PDUs and UPSes over SNMP, server BMCs over Redfish, hosts over node_exporter — generated manifests, credentials from the environment. plcnext: the runtime running ON a Phoenix Contact PLCnext controller, driving its local Axioline I/O through the firmware's data-access socket (BusConductor process image). optommp: an Opto 22 groov EPIC or groov RIO chassis over OptoMMP (TCP 2001) — every channel's state or value with per-channel quality, outputs, optional counters, latches, quality codes and scratchpad — from the LAN or from nautilus running on the EPIC itself (127.0.0.1); manifest from `naut optommp import`. replay: a recorded history played back as the same IT-hardware tags at a clock the project steers (Replay_Speed, Replay_Pause, Replay_SeekS) — the baseline of a plant simulation. Custom buses are the Go tier."
+          "description": "memory: loopback for bring-up, so logic and HMI run before hardware exists. eip: polls an Allen-Bradley Logix controller. sparkplug-host: consumes a Sparkplug B group as a host application, presenting every edge node's metrics as tags. modbus: polls a set of Modbus TCP sources with coalesced block reads. opcua-client: the OPC UA client \u2014 polls one OPC UA server (an Ignition gateway's, a PLC's embedded one, a Kepware) per scan class from a manifest `naut opcua import` writes; not the top-level opcua: section, which serves this project's tags. snmp / redfish / prometheus: IT hardware as tags — switches, PDUs and UPSes over SNMP, server BMCs over Redfish, hosts over node_exporter — generated manifests, credentials from the environment. plcnext: the runtime running ON a Phoenix Contact PLCnext controller, driving its local Axioline I/O through the firmware's data-access socket (BusConductor process image). optommp: an Opto 22 groov EPIC or groov RIO chassis over OptoMMP (TCP 2001) — every channel's state or value with per-channel quality, outputs, optional counters, latches, quality codes and scratchpad — from the LAN or from nautilus running on the EPIC itself (127.0.0.1); manifest from `naut optommp import`. profinet-device: nautilus as a PROFINET IO device to a PLC (RT, one AR) on a raw-Ethernet interface; the PLC's outputs are input tags and its inputs output tags, laid out by the profinet_device.yaml, whose GSDML `naut profinet gsdml` writes; needs CAP_NET_RAW. replay: a recorded history played back as the same IT-hardware tags at a clock the project steers (Replay_Speed, Replay_Pause, Replay_SeekS) — the baseline of a plant simulation. Custom buses are the Go tier."
         },
         "host": {
           "type": "string",
@@ -482,7 +1358,7 @@
         "manifest": {
           "type": "string",
           "minLength": 1,
-          "description": "eip: the imported tag manifest, generated by `naut eip import --format yaml`. sparkplug-host: the imported Sparkplug manifest, generated by `naut sparkplug import`. modbus: the imported modbus manifest (sources and register bindings), generated by `naut modbus import` (or by `naut optommp import --modbus` from a groov EPIC chassis). optommp: the optommp_manifest.yaml generated by `naut optommp import`. opcua-client: the opcua_manifest.yaml (node bindings) generated by `naut opcua import`. plcnext: the plcnext_manifest.yaml binding tags to byte and bit offsets of the controller's process image. Any path the project can read; no extension is enforced."
+          "description": "eip: the imported tag manifest, generated by `naut eip import --format yaml`. sparkplug-host: the imported Sparkplug manifest, generated by `naut sparkplug import`. modbus: the imported modbus manifest (sources and register bindings), generated by `naut modbus import` (or by `naut optommp import --modbus` from a groov EPIC chassis). optommp: the optommp_manifest.yaml generated by `naut optommp import`. opcua-client: the opcua_manifest.yaml (node bindings) generated by `naut opcua import`. plcnext: the plcnext_manifest.yaml binding tags to byte and bit offsets of the controller's process image. profinet-device: the profinet_device.yaml (interface, station, identity, slots and tag offsets). Any path the project can read; no extension is enforced."
         },
         "scan-rate": {
           "$ref": "#/definitions/duration",
@@ -504,6 +1380,10 @@
             }
           },
           "description": "eip / modbus / opcua-client: glob patterns assigning tags to a scan class. Overrides the generated manifest, so imports stay regenerable and policy stays here."
+        },
+        "validate": {
+          "enum": ["live", "static"],
+          "description": "modbus / opcua-client: how a live I/O configuration change checks this driver's devices: live probes each changed device on a connection of its own before the apply, static checks the configuration only. A devices: row's own validate: overrides it. Default: the device profile's (static when it documents modbus max-connections of 2 or fewer), else live."
         },
         "broker": {
           "type": "string",
@@ -599,6 +1479,35 @@
           "type": "string",
           "minLength": 1,
           "description": "opcua-client: directory holding the client certificate (cert.pem, key.pem), generated self-signed on first use. Needed for any policy but None; the server must trust it."
+        },
+        "read-mode": {
+          "enum": [
+            "poll",
+            "subscribe"
+          ],
+          "description": "opcua-client: how values arrive. poll (default): one batched Read per scan class per tick. subscribe: one OPC UA subscription per scan class (publishing interval = the class rate), the server sending values when they change. Quality, __Online and reconnect behave the same in both."
+        },
+        "reassert-on-reconnect": {
+          "type": "boolean",
+          "description": "opcua-client: when a lost session is re-established, command every output once more with the program's value, changed or not (default true). A server that restarted with its state reset holds its start-up values; without this an unchanged commanded value is never written again. Goes through the write gate: on a redundant pair only the leader sends it."
+        },
+        "tags": {
+          "type": "array",
+          "minItems": 1,
+          "description": "runtime: binds input tags to the runtime's own health, so alarms and the historian can see it. Polled every scan-rate (default 1s); every status reads false / 0 until the first poll. A standby never scans, so these tags move only on the replica that leads. Beside field drivers under drivers:, or alone as driver:, where it keeps the memory loopback a project with no driver has. Any other driver type refuses tags:.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "task", "status"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1, "description": "The input tag (declare it role: input)."},
+              "task": {"type": "string", "minLength": 1, "description": "main, or another task's name (an unnamed task's is its program's file name without the extension)."},
+              "status": {
+                "enum": ["demoted", "faulting", "logic-errors", "late", "overruns"],
+                "description": "demoted (BOOL): the task's real-time priority was withdrawn, until restart. faulting (BOOL): its last scan raised a logic error. logic-errors, late, overruns (UDINT): counts since start."
+              }
+            }
+          }
         }
       },
       "allOf": [
@@ -680,9 +1589,22 @@
             ]
           },
           "then": {
-            "required": [
-              "endpoint",
-              "manifest"
+            "anyOf": [
+              {
+                "required": [
+                  "endpoint",
+                  "manifest"
+                ]
+              },
+              {
+                "description": "A connection template: an opcua-client section a devices: row names in driver:, with neither an endpoint (the row's) nor a manifest (derived from the profile).",
+                "not": {
+                  "anyOf": [
+                    { "required": ["endpoint"] },
+                    { "required": ["manifest"] }
+                  ]
+                }
+              }
             ]
           }
         },
@@ -742,6 +1664,23 @@
             "properties": {
               "type": {
                 "const": "replay"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "manifest"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "profinet-device"
               }
             },
             "required": [
@@ -861,6 +1800,10 @@
           "type": "string",
           "description": "Journal the store-forward buffer to this file so a restart, upgrade or crash during an outage does not lose it: the next start loads it and replays it, marked historical, after its first birth. Relative to the working directory. Omit to buffer in memory only (the default). Needs store-forward."
         },
+        "device-death-delay": {
+          "$ref": "#/definitions/duration",
+          "description": "Hold a device's DDEATH until its connection has been unhealthy this long (0 to 1m); one that recovers inside it sends no DDEATH and no DBIRTH. Default 0: DDEATH on the first unhealthy tick. Nothing is sent for the device while its death is held, so SCADA shows its last values with no quality and no updates. 1-5s suits a link known to blip."
+        },
         "flatten-udts": {
           "type": "boolean",
           "default": false,
@@ -941,6 +1884,29 @@
           },
           "description": "Where events go besides the journal. Notifiers run off the scan goroutine on a bounded queue: a slow endpoint drops events with a counter rather than stalling the scan."
         },
+        "oncall": {
+          "$ref": "#/definitions/alarm-oncall"
+        },
+        "escalation": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/alarm-escalation"
+          },
+          "description": "Escalation policies: page people about alarms nobody has acknowledged, level by level. The first policy (in order) whose match covers an alarm, and whose `when:` window covers the moment it began waiting, runs it. Only `naut run` pages; tests never do."
+        },
+        "channels": {
+          "$ref": "#/definitions/alarm-channels"
+        },
+        "chatter": {
+          "$ref": "#/definitions/alarm-chatter"
+        },
+        "flood": {
+          "$ref": "#/definitions/alarm-flood"
+        },
+        "tuning": {
+          "type": "string",
+          "description": "Path of the tuning overlay: a file of `tuning:` rows (`id`, `on-delay`, `off-delay`, `why`, `from-journal`) that sets the delays of chattering alarms, applied when the controller starts. `naut alarms report chatter -suggest` says what to put in it; `naut check` refuses an id no alarm has."
+        },
         "rules": {
           "type": "array",
           "items": {
@@ -1017,6 +1983,65 @@
         }
       }
     },
+    "alarm-chatter": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Live chattering detection: an alarm chatters when it activates `count` times within `window` (ISA-18.2: 3 in 60 s, the defaults). Detection marks and journals only; it shelves, suppresses and pages nothing.",
+      "properties": {
+        "window": {
+          "$ref": "#/definitions/duration",
+          "description": "The window. Default 60s; at least 1s."
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 100,
+          "description": "Activations within the window that make an alarm chatter. Default 3."
+        },
+        "page": {
+          "type": "boolean",
+          "description": "Page a chattering alarm once per escalation level per episode, instead of once per bounce, in the modes that page per bounce (stop: ack-or-rtn, ack-required: false, an acknowledgement between bounces). Default true."
+        }
+      }
+    },
+    "alarm-flood": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Live flood detection: the plant is in a flood at MORE than `threshold` activations of all alarms within `window` (ISA-18.2: 10 in 10 min, the defaults), until the rate has stayed at or under it for a full window. Detection marks and journals only.",
+      "properties": {
+        "window": {
+          "$ref": "#/definitions/duration",
+          "description": "The window. Default 10m; at least 1s."
+        },
+        "threshold": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1023,
+          "description": "A flood is more than this many activations within the window. Default 10."
+        },
+        "group-pages": {
+          "type": "boolean",
+          "description": "During a flood, send one grouped page per escalation step per person per channel (then at most every 5 minutes for alarms newly due) instead of one per alarm. Critical alarms and class safety always page on their own. Default true."
+        },
+        "individual": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "More alarms that page on their own during a flood. Critical priority and class safety always do: this adds to them, never replaces them.",
+          "properties": {
+            "priorities": {
+              "type": "array",
+              "items": { "type": "string", "enum": ["diagnostic", "low", "medium", "high", "critical"] },
+              "description": "Priorities that page on their own (critical always does)."
+            },
+            "classes": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "description": "Alarm classes that page on their own (safety always does). Each must be the class of some alarm."
+            }
+          }
+        }
+      }
+    },
     "alarm-journal": {
       "type": "object",
       "additionalProperties": false,
@@ -1051,6 +2076,429 @@
               "const": "file"
             }
           }
+        }
+      }
+    },
+    "alarm-oncall": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Who is on call. Rosters name people (a user name, or oidc:<name>), never addresses.",
+      "properties": {
+        "timezone": {
+          "type": "string",
+          "description": "IANA time zone rosters and `when:` windows are read in, e.g. America/Chicago. Default UTC."
+        },
+        "ack-url": {
+          "type": "string",
+          "pattern": "^https?://",
+          "description": "The HMI as a person paged reaches it, e.g. https://hmi.plant.example:8443. Email and SMS pages then carry a link that acknowledges that alarm's occurrence: single use, at most 24 h. Empty: no link. Must be https unless ack-url-insecure: true."
+        },
+        "ack-url-insecure": {
+          "type": "boolean",
+          "description": "Allow an http:// ack-url. The link acknowledges as the person paged, so plaintext is an explicit choice: naut check warns, and naut run journals it at start."
+        },
+        "ack-from-notification": {
+          "type": "string",
+          "enum": ["link", "sign-in"],
+          "description": "What an ack link needs. link (default): the link alone acknowledges, as the person it was sent to, if they still hold ack. sign-in: only a browser signed in as that person may use it."
+        },
+        "inbound": {
+          "type": "object",
+          "description": "Take acknowledgements back through the SMS and voice provider: an SMS reply \"ACK <code>\", a keypress on the call. Off when absent. Not with ack-from-notification: sign-in.",
+          "additionalProperties": false,
+          "required": ["url", "channels"],
+          "properties": {
+            "url": {
+              "type": "string",
+              "pattern": "^https://",
+              "description": "This controller as the provider reaches it, exactly (https). The provider's signature is checked against it; SMS replies go to <url>/alarm-inbound/sms."
+            },
+            "channels": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"type": "string", "enum": ["sms", "voice"]},
+              "description": "The kinds that take replies: sms, voice, or both. Each must be a configured channel."
+            }
+          }
+        },
+        "rosters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/alarm-roster"
+          },
+          "description": "On-call rosters; a level names one as roster:<id>."
+        }
+      }
+    },
+    "alarm-roster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "description": "One roster. Either `members` (everyone always, or one at a time with `rotate`), or `shifts`.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Named by a level as roster:<id>."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "People: a user name (alice) or oidc:<name>. Without rotate, all are on call all the time."
+        },
+        "rotate": {
+          "enum": [
+            "daily",
+            "weekly"
+          ],
+          "description": "One member at a time, in order, changing at each handover."
+        },
+        "start": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "YYYY-MM-DD: the first member's first turn. A weekly rotation hands over on this date's weekday."
+        },
+        "handover": {
+          "$ref": "#/definitions/alarm-clock",
+          "description": "HH:MM a turn changes. Default 00:00."
+        },
+        "shifts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/alarm-shift"
+          },
+          "description": "Shifts by time of day: whoever's shift covers the moment is on call."
+        }
+      }
+    },
+    "alarm-shift": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to",
+        "members"
+      ],
+      "description": "One shift: a window and who works it. A shift past midnight belongs to the day it starts on.",
+      "properties": {
+        "days": {
+          "$ref": "#/definitions/alarm-days"
+        },
+        "from": {
+          "$ref": "#/definitions/alarm-clock"
+        },
+        "to": {
+          "$ref": "#/definitions/alarm-clock"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "alarm-window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to"
+      ],
+      "description": "A time-of-day window. to not after from runs past midnight; from == to is 24 hours from from.",
+      "properties": {
+        "days": {
+          "$ref": "#/definitions/alarm-days"
+        },
+        "from": {
+          "$ref": "#/definitions/alarm-clock"
+        },
+        "to": {
+          "$ref": "#/definitions/alarm-clock"
+        }
+      }
+    },
+    "alarm-days": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^([Mm][Oo][Nn]|[Tt][Uu][Ee]|[Ww][Ee][Dd]|[Tt][Hh][Uu]|[Ff][Rr][Ii]|[Ss][Aa][Tt]|[Ss][Uu][Nn])(-([Mm][Oo][Nn]|[Tt][Uu][Ee]|[Ww][Ee][Dd]|[Tt][Hh][Uu]|[Ff][Rr][Ii]|[Ss][Aa][Tt]|[Ss][Uu][Nn]))?$"
+      },
+      "description": "Days of the week: mon … sun, or a range like mon-fri. Empty is every day."
+    },
+    "alarm-clock": {
+      "type": "string",
+      "pattern": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$",
+      "description": "A time of day, HH:MM, 24-hour."
+    },
+    "alarm-escalation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "levels"
+      ],
+      "description": "One escalation policy.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "match": {
+          "$ref": "#/definitions/alarm-escalation-match"
+        },
+        "when": {
+          "$ref": "#/definitions/alarm-window",
+          "description": "Only for alarms that began waiting inside this window (in alarms.oncall.timezone). The policy then runs to the end."
+        },
+        "levels": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/alarm-level"
+          },
+          "description": "In order of `after`. No fixed cap."
+        },
+        "repeat": {
+          "$ref": "#/definitions/alarm-repeat"
+        },
+        "stop": {
+          "enum": [
+            "ack",
+            "ack-or-rtn"
+          ],
+          "description": "ack (default): only an acknowledgement, a shelf or a suppression stops it. ack-or-rtn: a return to normal does too."
+        }
+      }
+    },
+    "alarm-escalation-match": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Which alarms a policy covers. Every field is optional; they AND together. Globs are case-insensitive.",
+      "properties": {
+        "priority": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "diagnostic",
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "description": "Any of these priorities."
+        },
+        "id": {
+          "type": "string",
+          "description": "Glob on the alarm id."
+        },
+        "site": {
+          "type": "string",
+          "description": "Glob on the alarm's site."
+        },
+        "area": {
+          "type": "string",
+          "description": "Glob on the alarm's area."
+        },
+        "class": {
+          "type": "string",
+          "description": "Glob on the alarm's class."
+        }
+      }
+    },
+    "alarm-channels": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The ways a level's via: pages a person beyond the log (#715). Nothing secret here: credentials are in alarm-secrets.json and addresses in alarm-contacts.json, in the controller's state directory (naut alarms secrets|contacts).",
+      "properties": {
+        "email": {
+          "$ref": "#/definitions/alarm-channel-email"
+        },
+        "sms": {
+          "$ref": "#/definitions/alarm-channel-provider"
+        },
+        "voice": {
+          "$ref": "#/definitions/alarm-channel-provider"
+        },
+        "webhook": {
+          "$ref": "#/definitions/alarm-channel-webhook"
+        },
+        "push": {
+          "$ref": "#/definitions/alarm-channel-push"
+        }
+      }
+    },
+    "alarm-channel-push": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject"
+      ],
+      "description": "Web Push to the phones people subscribed through the HMI (#722). The VAPID key is the secret push.vapid-key in alarm-secrets.json (made at first start on a controller that is not half of a pair; naut alarms secrets generate push.vapid-key otherwise). A pair needs the same file on both boxes.",
+      "properties": {
+        "subject": {
+          "type": "string",
+          "description": "A mailto: address or an https: URL the site owns. Push services (Google, Apple, Mozilla) may use it to reach you, and it is sent with every page, so it is never defaulted."
+        },
+        "allow-hosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The push services the controller may send to: host names (fcm.googleapis.com) or wildcards under one (*.push.apple.com). Empty: any public host. A private address is refused unless named here (a site's own push relay)."
+        }
+      }
+    },
+    "alarm-channel-email": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "smtp",
+        "from"
+      ],
+      "description": "Email over SMTP, always over TLS (STARTTLS or implicit) with the certificate verified.",
+      "properties": {
+        "smtp": {
+          "type": "string",
+          "description": "The server, host:port (587 for STARTTLS, 465 implicit)."
+        },
+        "tls": {
+          "enum": [
+            "starttls",
+            "implicit"
+          ],
+          "description": "How TLS starts. Default starttls: a server that does not offer it is refused."
+        },
+        "from": {
+          "type": "string",
+          "description": "The sender address."
+        },
+        "username": {
+          "type": "string",
+          "description": "Signs in with AUTH PLAIN, only once TLS is up. The password is the secret email.password."
+        },
+          "ca-file": {
+            "type": "string",
+            "description": "A PEM bundle on the box to verify the server's certificate against, instead of the system roots: how a site with its own CA keeps verification on."
+          },
+          "insecure": {
+            "type": "boolean",
+            "description": "Do not verify the server's certificate and, for a channel that sends no credential, allow plaintext. A password or token never crosses plaintext either way. naut check warns; naut run journals it at start."
+          }
+      }
+    },
+    "alarm-channel-provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "account",
+        "from"
+      ],
+      "description": "SMS or voice through a Twilio-compatible REST API, over https. The token is the secret sms.token or voice.token.",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "The API's base URL, https (e.g. https://api.twilio.com)."
+        },
+        "account": {
+          "type": "string",
+          "description": "The account id the API path and basic auth name."
+        },
+        "from": {
+          "type": "string",
+          "description": "The number messages and calls come from, E.164 (+15550100)."
+        },
+          "ca-file": {
+            "type": "string",
+            "description": "A PEM bundle on the box to verify the server's certificate against, instead of the system roots: how a site with its own CA keeps verification on."
+          },
+          "insecure": {
+            "type": "boolean",
+            "description": "Do not verify the server's certificate and, for a channel that sends no credential, allow plaintext. A password or token never crosses plaintext either way. naut check warns; naut run journals it at start."
+          }
+      }
+    },
+    "alarm-channel-webhook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "description": "Each page POSTed as JSON (the person as a principal, never an address), for a paging service or a chat bridge.",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "An https URL (http only with insecure: true and no header)."
+        },
+        "header": {
+          "type": "string",
+          "description": "The header carrying the secret webhook.header, e.g. Authorization."
+        },
+          "ca-file": {
+            "type": "string",
+            "description": "A PEM bundle on the box to verify the server's certificate against, instead of the system roots: how a site with its own CA keeps verification on."
+          },
+          "insecure": {
+            "type": "boolean",
+            "description": "Do not verify the server's certificate and, for a channel that sends no credential, allow plaintext. A password or token never crosses plaintext either way. naut check warns; naut run journals it at start."
+          }
+      }
+    },
+    "alarm-level": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "notify",
+        "via"
+      ],
+      "description": "One level: who, by which channels, how long after the alarm began waiting.",
+      "properties": {
+        "after": {
+          "$ref": "#/definitions/duration",
+          "description": "How long after the alarm began waiting this level is sent. Default 0s."
+        },
+        "notify": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          },
+          "description": "roster:<id> (whoever is on call when it is sent) or a person (alice, oidc:carol)."
+        },
+        "via": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "log",
+              "email",
+              "sms",
+              "voice",
+              "webhook",
+              "push"
+            ]
+          },
+          "description": "Channel kinds; each person gets one send per kind. log is always there; email, sms, voice, webhook and push when alarms.channels configures them. email, sms and voice need the person's address in the contacts file on the box (naut alarms contacts set); push needs the person to have subscribed a phone in the HMI."
+        }
+      }
+    },
+    "alarm-repeat": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Repeat the last level.",
+      "properties": {
+        "every": {
+          "$ref": "#/definitions/duration"
+        },
+        "times": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
@@ -1176,6 +2624,54 @@
         "enable": {
           "type": "string",
           "description": "A BOOL that must be true, else Suppressed. Template over {tag} {member} {site} {area} {desc} {type} {path}; an unknown placeholder is an error, so a typo fails the load instead of reaching an operator screen as literal braces. e.g. \"{site}__Online\"."
+        },
+        "suppress-when": {
+          "type": "string",
+          "description": "A BOOL whose TRUE suppresses the alarm by design (a low-flow alarm while its pump is stopped). Only a readable TRUE suppresses: a path that cannot be read shows the alarm, with a warning, and naut check refuses it. Template, e.g. \"{tag}.Stopped\"."
+        },
+        "suppress-reason": {
+          "type": "string",
+          "description": "The reason a suppress-when suppression shows on the alarm's row; default \"<path> is true\". Template."
+        },
+        "equipment": {
+          "type": "string",
+          "description": "The piece of plant the alarm belongs to: the unit an operator takes out of service (naut alarms out-of-service). Template; default \"{tag}\", the struct the rule matched."
+        },
+        "consequence": {
+          "type": "string",
+          "description": "What happens if nobody responds: the master alarm database's consequence column, read by naut alarms master. Copied to every alarm the rule generates; plain text, not a template."
+        },
+        "response": {
+          "type": "string",
+          "description": "What the operator does when it sounds (the corrective action). Copied to every alarm the rule generates; plain text, not a template."
+        },
+        "rationalization": {
+          "$ref": "#/definitions/alarm-rationalization"
+        }
+      }
+    },
+    "alarm-rationalization": {
+      "type": "object",
+      "description": "Where the alarm stands in ISA-18.2 rationalization. A reviewed or approved alarm names who reviewed it and the day.",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "reviewed",
+            "approved"
+          ],
+          "description": "pending (the default), reviewed by the team, or approved under management of change."
+        },
+        "by": {
+          "type": "string",
+          "description": "Who reviewed or approved it. Required unless pending."
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "The day, YYYY-MM-DD. Required unless pending."
         }
       }
     },
@@ -1245,6 +2741,289 @@
         "enable": {
           "type": "string",
           "description": "A BOOL that must be true, else Suppressed."
+        },
+        "suppress-when": {
+          "type": "string",
+          "description": "A BOOL whose TRUE suppresses the alarm by design. Only a readable TRUE suppresses: a path that cannot be read shows the alarm, with a warning, and naut check refuses it."
+        },
+        "suppress-reason": {
+          "type": "string",
+          "description": "The reason a suppress-when suppression shows; default \"<path> is true\"."
+        },
+        "equipment": {
+          "type": "string",
+          "description": "The piece of plant the alarm belongs to, the unit an operator takes out of service. Default: the tag its condition is in."
+        },
+        "consequence": {
+          "type": "string",
+          "description": "What happens if nobody responds: the master alarm database's consequence column, read by naut alarms master."
+        },
+        "response": {
+          "type": "string",
+          "description": "What the operator does when it sounds (the corrective action)."
+        },
+        "rationalization": {
+          "$ref": "#/definitions/alarm-rationalization"
+        }
+      }
+    },
+    "siemens-target": {
+      "type": "object",
+      "description": "A Siemens S7-1500 CPU as the deploy target: the writer emits SCL, tiad (the TIA Portal Openness agent) compiles and downloads, and the PLC Web API carries live values. The tiad token is never here: NAUTILUS_TIAD_TOKEN or NAUTILUS_TIAD_TOKEN_FILE.",
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "tiad URL. NAUTILUS_TIAD_URL overrides it."
+        },
+        "group": {
+          "type": "string",
+          "description": "Block group nautilus owns in the TIA project (default nautilus)."
+        },
+        "block-prefix": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "Prefix for every generated block, DB and tag table name (default naut_), so a generated block never collides with TIA's own (Main [OB1]) or a customer's. Empty is refused."
+        },
+        "station": {
+          "$ref": "#/definitions/siemens-station"
+        },
+        "online": {
+          "$ref": "#/definitions/siemens-online"
+        }
+      }
+    },
+    "siemens-station": {
+      "type": "object",
+      "description": "The CPU's whole hardware config. One CPU has exactly one station spec: a download replaces the whole config.",
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "$ref": "#/definitions/siemens-cpu"
+        },
+        "web-server": {
+          "$ref": "#/definitions/siemens-web-server"
+        },
+        "modules": {
+          "type": "array",
+          "description": "Local modules next to the CPU. Slot 1 is the CPU's own.",
+          "items": {
+            "$ref": "#/definitions/siemens-module"
+          }
+        },
+        "profinet": {
+          "$ref": "#/definitions/siemens-profinet"
+        }
+      }
+    },
+    "siemens-cpu": {
+      "type": "object",
+      "description": "The controller. In a repo, use a documentation address (192.0.2.x).",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Device name in the TIA project, e.g. PLC_1."
+        },
+        "order": {
+          "type": "string",
+          "description": "Order number, e.g. 6ES7 510-1DK03-0AB0."
+        },
+        "firmware": {
+          "type": "string",
+          "description": "Firmware, e.g. V3.1."
+        },
+        "address": {
+          "type": "string",
+          "description": "IPv4 address of the PROFINET interface."
+        },
+        "subnet-mask": {
+          "type": "string",
+          "description": "IPv4 subnet mask."
+        },
+        "router": {
+          "type": "string",
+          "description": "IPv4 router, if any."
+        },
+        "profinet-name": {
+          "type": "string",
+          "description": "The CPU's PROFINET name of station: lowercase, explicit."
+        },
+        "configuration-protection": {
+          "type": "string",
+          "enum": ["password", "none", "keep"],
+          "default": "password",
+          "description": "FW 3.1 protection of the CPU's confidential configuration data. password (the default): protected, with the password from the secret store, never this file. none: off, an explicit choice. keep: leave the project's setting as found (an adopted station)."
+        },
+        "access-control": {
+          "type": "string",
+          "enum": ["full-access-user", "keep"],
+          "default": "full-access-user",
+          "description": "The CPU's PLC access control (users and roles). full-access-user (the default): access control on, with one user, nautilus, holding the runtime right Full access; its password comes from the secret store, never this file. keep: leave the project's access control and users as found (an adopted station)."
+        }
+      }
+    },
+    "siemens-web-server": {
+      "type": "object",
+      "description": "Turns on the CPU's web server, which carries the Web API. Passwords are never here.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Activate the web server."
+        },
+        "users": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/siemens-web-user"
+          }
+        }
+      }
+    },
+    "siemens-web-user": {
+      "type": "object",
+      "description": "A web server user.",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "User name."
+        },
+        "rights": {
+          "type": "array",
+          "description": "Rights.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "read",
+              "write",
+              "mode",
+              "diagnostics"
+            ]
+          }
+        }
+      }
+    },
+    "siemens-module": {
+      "type": "object",
+      "description": "A local module.",
+      "additionalProperties": false,
+      "properties": {
+        "slot": {
+          "type": "integer",
+          "description": "Slot, 2 and up."
+        },
+        "order": {
+          "type": "string",
+          "description": "Order number."
+        },
+        "firmware": {
+          "type": "string",
+          "description": "Firmware version."
+        },
+        "input-start": {
+          "type": "integer",
+          "description": "First %I byte; TIA assigns it when absent."
+        },
+        "output-start": {
+          "type": "integer",
+          "description": "First %Q byte; TIA assigns it when absent."
+        }
+      }
+    },
+    "siemens-profinet": {
+      "type": "object",
+      "description": "The CPU's PROFINET IO system.",
+      "additionalProperties": false,
+      "properties": {
+        "update-time": {
+          "type": "string",
+          "description": "Default update time for devices, at least 16ms. A nautilus device (profinet-manifest) takes only 16ms, 32ms, 64ms, 128ms, 256ms or 512ms (powers of two at a 1ms send clock), not below its min-cycle; with none set, the deploy rounds up to the first of those at or above min-cycle."
+        },
+        "devices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/siemens-device"
+          }
+        }
+      }
+    },
+    "siemens-device": {
+      "type": "object",
+      "description": "An IO device: explicit (gsdml, dap, name, address, modules) or a reference to a nautilus PROFINET device's manifest (profinet-manifest + address).",
+      "additionalProperties": false,
+      "properties": {
+        "profinet-manifest": {
+          "type": "string",
+          "description": "Path to a nautilus PROFINET device manifest; the deploy expands it."
+        },
+        "gsdml": {
+          "type": "string",
+          "description": "GSDML file name, installed through tiad."
+        },
+        "dap": {
+          "type": "string",
+          "description": "Device access point ID in the GSDML."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of station: lowercase, explicit."
+        },
+        "address": {
+          "type": "string",
+          "description": "IPv4 address."
+        },
+        "update-time": {
+          "type": "string",
+          "description": "Update time, at least 16ms. For a profinet-manifest device: 16ms, 32ms, 64ms, 128ms, 256ms or 512ms, not below its min-cycle; when absent (here and on the IO system), the deploy rounds up to the first of those at or above min-cycle."
+        },
+        "modules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/siemens-device-module"
+          }
+        }
+      }
+    },
+    "siemens-device-module": {
+      "type": "object",
+      "description": "A GSDML module placed by its module ID.",
+      "additionalProperties": false,
+      "properties": {
+        "slot": {
+          "type": "integer",
+          "description": "Slot."
+        },
+        "subslot": {
+          "type": "integer",
+          "description": "Subslot, 1 and up."
+        },
+        "module": {
+          "type": "string",
+          "description": "GSDML module ID."
+        },
+        "input-start": {
+          "type": "integer",
+          "description": "First %I byte."
+        },
+        "output-start": {
+          "type": "integer",
+          "description": "First %Q byte."
+        }
+      }
+    },
+    "siemens-online": {
+      "type": "object",
+      "description": "The Web API connection for live values. The password is never here: NAUTILUS_SIEMENS_PASSWORD.",
+      "additionalProperties": false,
+      "properties": {
+        "user": {
+          "type": "string",
+          "description": "Web server user to log in as."
+        },
+        "cert-sha256": {
+          "type": "string",
+          "description": "SHA-256 of the CPU's certificate, to pin it (CPUs ship self-signed certificates)."
         }
       }
     }

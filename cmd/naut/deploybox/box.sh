@@ -1,0 +1,718 @@
+# box.sh: the half of `naut deploy` that runs on the box, fed to
+# `sh -s -- <command> [args]` over SSH. POSIX sh: the box needs systemd,
+# coreutils and tar, nothing else, and it runs as root. With
+# NAUT_SUPERVISOR=cron (#768) it needs crontab instead of systemd and runs
+# as the SSH user, who must be able to write NAUT_ROOT. See
+# cmd/naut/deploy.go.
+#
+# Messages go to stderr; stdout is reserved for data (a backup's tar).
+set -eu
+# Where releases and retained values live. The defaults are the systemd
+# layout (deploy.go's deployRoot is ROOT's default). Setting them is for a
+# mode without systemd (#768): nautilus.service and uninstall -purge keep
+# the systemd paths.
+SUPERVISOR=${NAUT_SUPERVISOR:-systemd}
+ROOT=${NAUT_ROOT:-/opt/nautilus}
+STATE=${NAUT_STATE:-/var/lib/nautilus}
+UNIT=nautilus.service
+UNITDIR=${NAUT_UNITDIR:-/etc/systemd/system} # set only by deploy_box_test.go
+KEEP=3 # releases kept besides current and previous
+# Helper mode (#771): this script installed as a root-owned file that the
+# SSH user may run as root through sudo and nothing else. `naut deploy
+# helper` writes it with a prologue that pins every setting above, so none
+# comes from the caller. The caller may still upload a controller of their
+# own, so in this mode nothing it sends, and nothing a controller leaves in
+# STATE, may steer root: see okid, receive, the unit from UNITSRC, status,
+# and stateread/statewrite (used in every mode).
+HELPER=${NAUT_HELPER:-}
+UNITSRC=${NAUT_UNITSRC:-}
+say() { echo "$*" >&2; }
+fail() { echo "naut deploy (on box): $*" >&2; exit 1; }
+# unxz_cmd prints the command that unpacks xz on stdin to stdout, and fails
+# when the box has none: busybox boxes have xzcat and no xz, others have xz.
+unxz_cmd() {
+	if command -v xzcat >/dev/null 2>&1; then echo xzcat
+	elif command -v xz >/dev/null 2>&1; then echo "xz -dc"
+	elif command -v unxz >/dev/null 2>&1; then echo "unxz -c"
+	else return 1
+	fi
+}
+case $SUPERVISOR in
+systemd) ;;
+cron)
+	# The supervisor is a keepalive script run from the SSH user's crontab;
+	# its state sits under ROOT, which that user can write.
+	[ -n "${NAUT_ROOT:-}" ] || fail "cron mode needs NAUT_ROOT"
+	STATE=${NAUT_STATE:-$ROOT/state}
+	;;
+*) fail "unknown supervisor $SUPERVISOR" ;;
+esac
+# Under systemd STATE is itself a link (DynamicUser: /var/lib/nautilus ->
+# private/nautilus, made by systemd and root's). Resolved once, so every
+# path below is inside the real directory; links inside it are refused.
+# STATE_PATH keeps the path as given, so uninstall -purge removes the link
+# as well as the directory.
+STATE_PATH=$STATE
+if [ -d "$STATE" ]; then STATE=$(cd "$STATE" && pwd -P); fi
+if [ -n "$HELPER" ]; then
+	[ "$SUPERVISOR" = systemd ] || fail "the helper runs the systemd mode only"
+	[ -f "$UNITSRC" ] || fail "no unit template at $UNITSRC (install it with the helper)"
+fi
+
+# okid <name>: a release id the box may make a path of: letters, digits and
+# . _ + - only, not starting with . or -, and none of the names deploy
+# keeps for itself in incoming/.
+okid() {
+	case $1 in
+	'' | .* | -* | *.part | *.build | nautilus.service | restore.tgz) return 1 ;;
+	*[!A-Za-z0-9._+-]*) return 1 ;;
+	esac
+}
+
+# isnum <s>: only digits. ishex64 <s>: a SHA-256 in lower-case hex.
+isnum() { case $1 in '' | *[!0-9]*) return 1 ;; esac; }
+ishex64() {
+	[ "${#1}" -eq 64 ] || return 1
+	case $1 in *[!0-9a-f]*) return 1 ;; esac
+}
+
+# stateread <name> <copy>: STATE/<name> copied to <copy>, outside STATE,
+# without following a link. Under systemd, STATE belongs to the user the
+# controller runs as (the unit's DynamicUser StateDirectory), so a
+# controller can leave a link, or a hard link to a file it cannot read,
+# there; root must never read through one. The copy keeps its owner, and
+# must be a regular file owned by STATE's owner (a hard link to a root
+# file is owned by root). In cron mode the controller already is the user
+# running this, so there is nothing to guard and a plain copy does.
+# Returns 1 when there is no such file.
+stateread() {
+	[ -e "$STATE/$1" ] || [ -L "$STATE/$1" ] || return 1
+	rm -f "$2"
+	if [ "$SUPERVISOR" = cron ]; then
+		cp "$STATE/$1" "$2"
+		return
+	fi
+	cp -P --preserve=ownership "$STATE/$1" "$2"
+	if [ -L "$2" ] || [ ! -f "$2" ] || [ "$(stat -c %u "$2")" != "$(stat -c %u "$STATE/.")" ]; then
+		rm -f "$2"
+		fail "$STATE/$1 is not a regular file of the controller's own; refusing to read it as root"
+	fi
+	# Checked: now root's own copy, which the controller can neither read
+	# nor change (it kept the controller's owner only for the check).
+	chown -h "$(id -u):$(id -g)" "$2"
+	chmod 600 "$2"
+}
+
+# statewrite <file> <name>: <file> becomes STATE/<name>, owned by STATE's
+# owner. Only with the controller stopped (nothing then runs as that
+# user). Written whole under a fresh name beside it, synced, then renamed
+# over the old one and synced again (#842): a power cut leaves the old
+# file or the new one, never none or half of one. The rename replaces a
+# link in its place without following it (-T: not into a directory a
+# link points at).
+statewrite() {
+	swd=$(dirname "$STATE/$2")
+	sw=$swd/.naut-new.$$
+	# A run cut off by a power loss leaves its temp file; clear those (not
+	# a concurrent run's, which is fresh).
+	find "$swd" -maxdepth 1 -name '.naut-new.*' -mmin +10 -exec rm -f {} + 2>/dev/null || true
+	rm -f "$sw"
+	cp "$1" "$sw"
+	chown -h "$(stat -c %u:%g "$STATE/.")" "$sw"
+	sync
+	if ! mv -fT "$sw" "$STATE/$2" 2>/dev/null; then
+		# An mv without -T (or one refusing a link to a directory there):
+		# remove, then rename. Not atomic: a power cut between the two
+		# leaves no file, so say it happened.
+		say "note: mv -T failed for $STATE/$2; replaced it by removing and renaming (not atomic)"
+		rm -f "$STATE/$2"
+		mv -f "$sw" "$STATE/$2"
+	fi
+	sync
+}
+
+# statebackups: STATE/backups, a real directory (a controller could have
+# left a link to somewhere else in its place; harmless but refused in cron
+# mode too).
+statebackups() {
+	if [ -L "$STATE/backups" ] || { [ -e "$STATE/backups" ] && [ ! -d "$STATE/backups" ]; }; then
+		fail "$STATE/backups is not a directory; refusing"
+	fi
+	mkdir -p "$STATE/backups"
+}
+
+# setlink <link> <release id>: point a link at a release, atomically where
+# mv -T exists.
+setlink() {
+	ln -s "releases/$2" "$ROOT/$1.new"
+	mv -T "$ROOT/$1.new" "$ROOT/$1" 2>/dev/null || { rm -f "$ROOT/$1"; mv "$ROOT/$1.new" "$ROOT/$1"; }
+}
+target() { if [ -L "$ROOT/$1" ]; then basename "$(readlink "$ROOT/$1")"; fi; }
+
+# writeunit: the unit for the current release. A controller that predates
+# systemd notification never sends READY=1, so it gets Type=simple and no
+# watchdog rather than a start that times out. The pattern is split in
+# two: this script is embedded in every naut, and so in every controller,
+# and must not match itself.
+writeunit() {
+	if [ "$SUPERVISOR" = cron ]; then
+		writekeepalive
+		return
+	fi
+	tmp=$UNITDIR/$UNIT.new
+	# The helper's unit is its root-owned template, never an upload.
+	src=$ROOT/nautilus.service.in
+	[ -n "$HELPER" ] && src=$UNITSRC
+	if grep -q 'WATCHDOG''=1' "$ROOT/current/controller"; then
+		cp "$src" "$tmp"
+	else
+		sed -e 's/^Type=notify/Type=simple/' -e '/^NotifyAccess=/d' -e '/^WatchdogSec=/d' \
+			"$src" >"$tmp"
+		say "note: this release does not notify systemd; running it as Type=simple without a watchdog"
+	fi
+	if cmp -s "$tmp" "$UNITDIR/$UNIT"; then
+		rm -f "$tmp"
+	else
+		mv "$tmp" "$UNITDIR/$UNIT"
+		systemctl daemon-reload
+	fi
+}
+
+# hold (cron mode): while this run stops a controller, moves links and
+# starts the next one, the keepalive must not start a release of its own.
+# Each run has its own file, removed when it exits, so a status read in the
+# middle of an update cannot lift the update's hold; the keepalive waits
+# while any is fresh, and ignores one older than 10 minutes (a deploy cut
+# off, by a power loss say). Taken only by the commands that stop or start.
+hold() {
+	[ "$SUPERVISOR" = cron ] || return 0
+	mkdir -p "$ROOT"
+	HOLD=$ROOT/hold.$$
+	touch "$HOLD"
+	trap 'rm -f "$HOLD"' EXIT
+}
+
+# writekeepalive (cron mode): the script the crontab runs, @reboot and
+# every minute. It starts the current release unless it is running: through
+# naut-launch when that sits in ROOT (rt/plcnext-io: it carries the
+# capability for priority:), pinned with taskset when ROOT/cpu holds a CPU,
+# in STATE (where retain.json goes, exported as STATE_DIRECTORY as systemd
+# does) with ROOT/env's variables. Output goes to STATE/nautilus.log, one
+# generation of a megabyte kept.
+writekeepalive() {
+	cat >"$ROOT/keepalive.sh.new" <<EOF
+#!/bin/sh
+# Written by naut deploy. Run by cron: starts $ROOT/current unless it is
+# running or a deploy holds it; "start" ignores the hold (naut deploy's own).
+ROOT='$ROOT'
+STATE='$STATE'
+EOF
+	cat >>"$ROOT/keepalive.sh.new" <<'EOF'
+if [ "${1:-}" != start ]; then
+	for h in "$ROOT"/hold.*; do
+		if [ -e "$h" ] && [ -z "$(find "$h" -mmin +10 2>/dev/null)" ]; then exit 0; fi
+	done
+fi
+[ -x "$ROOT/current/controller" ] || exit 0
+# Running is the pid file's process with one of ROOT's releases as its
+# argv[0] (naut-launch passes the resolved path). Not /proc/<pid>/exe: a
+# controller that gained a capability is not dumpable, and its exe link is
+# unreadable even to its owner.
+real=$(cd "$ROOT" && pwd -P)
+if [ -f "$STATE/nautilus.pid" ]; then
+	case $(tr '\0' '\n' 2>/dev/null <"/proc/$(cat "$STATE/nautilus.pid")/cmdline" | head -n 1) in
+	"$real"/releases/*/controller | "$ROOT"/current/controller) exit 0 ;;
+	esac
+fi
+mkdir -p "$STATE"
+cd "$STATE" || exit 1
+log=$STATE/nautilus.log
+if [ -f "$log" ] && [ "$(wc -c <"$log")" -gt 1048576 ]; then mv "$log" "$log.1"; fi
+run=$ROOT/current/controller
+[ -x "$ROOT/naut-launch" ] && run=$ROOT/naut-launch
+pin=
+if [ -f "$ROOT/cpu" ] && command -v taskset >/dev/null; then pin="taskset -c $(cat "$ROOT/cpu")"; fi
+# STATE is the controller's state directory, as systemd's StateDirectory=
+# is in service mode: retain.json, the voter state and the users file live
+# there, and every deploy keeps it. ROOT/env may still name another.
+STATE_DIRECTORY=$STATE
+export STATE_DIRECTORY
+if [ -f "$ROOT/env" ]; then set -a; . "$ROOT/env"; set +a; fi
+how=cron
+[ "${1:-}" = start ] && how="naut deploy"
+echo "naut keepalive: starting $(basename "$(readlink "$ROOT/current")") for $how at $(date)" >>"$log"
+setsid nohup $pin "$run" </dev/null >>"$log" 2>&1 &
+echo $! >"$STATE/nautilus.pid"
+EOF
+	chmod 0755 "$ROOT/keepalive.sh.new"
+	mv "$ROOT/keepalive.sh.new" "$ROOT/keepalive.sh"
+}
+
+# cronpid (cron mode): the controller's pid when one of ROOT's releases is
+# running under the keepalive's pid file, else nothing. Known by argv[0],
+# as in the keepalive: /proc/<pid>/exe is unreadable once naut-launch has
+# given the controller a capability.
+cronpid() {
+	[ -f "$STATE/nautilus.pid" ] || return 0
+	p=$(cat "$STATE/nautilus.pid")
+	case $(tr '\0' '\n' 2>/dev/null <"/proc/$p/cmdline" | head -n 1) in
+	"$(cd "$ROOT" && pwd -P)"/releases/*/controller | "$ROOT"/current/controller) echo "$p" ;;
+	esac
+}
+
+# sv_running: the controller is up.
+sv_running() {
+	if [ "$SUPERVISOR" = cron ]; then
+		[ -n "$(cronpid)" ]
+	else
+		systemctl is-active -q "$UNIT"
+	fi
+}
+
+# sv_stop: the controller is down. Cron mode allows it the unit's 15 s
+# (TimeoutStopSec) to save and exit before it is killed.
+sv_stop() {
+	if [ "$SUPERVISOR" != cron ]; then
+		systemctl stop "$UNIT"
+		return
+	fi
+	p=$(cronpid)
+	[ -n "$p" ] || return 0
+	kill "$p" 2>/dev/null || true
+	n=0
+	while [ $n -lt 15 ] && kill -0 "$p" 2>/dev/null; do
+		sleep 1
+		n=$((n + 1))
+	done
+	# Only if it is still there: a pid freed a moment ago may be reused.
+	if kill -0 "$p" 2>/dev/null; then kill -9 "$p" 2>/dev/null || true; fi
+	rm -f "$STATE/nautilus.pid"
+}
+
+# started: the controller is up and still the same process a few seconds
+# later. With Type=notify, `systemctl restart` already waited for the first
+# scan; the wait catches a controller that exits just after. Cron mode, like
+# Type=simple, cannot see the first scan.
+started() {
+	if [ "$SUPERVISOR" = cron ]; then
+		sleep 1
+		p0=$(cronpid)
+		[ -n "$p0" ] || return 1
+		sleep 3
+		[ "$(cronpid)" = "$p0" ]
+		return
+	fi
+	systemctl is-active -q "$UNIT" || return 1
+	pid=$(systemctl show -p MainPID --value "$UNIT")
+	sleep 3
+	systemctl is-active -q "$UNIT" && [ "$(systemctl show -p MainPID --value "$UNIT")" = "$pid" ]
+}
+
+restart() {
+	if [ "$SUPERVISOR" = cron ]; then
+		sv_stop
+		"$ROOT/keepalive.sh" start && started
+		return
+	fi
+	systemctl reset-failed "$UNIT" 2>/dev/null || true
+	systemctl restart "$UNIT" && started
+}
+
+# sv_enable / sv_disable: the controller starts at boot, or no longer.
+sv_enable() {
+	if [ "$SUPERVISOR" = cron ]; then
+		{
+			crontab -l 2>/dev/null | grep -v '# naut deploy$' || true
+			echo "@reboot $ROOT/keepalive.sh # naut deploy"
+			echo "* * * * * $ROOT/keepalive.sh # naut deploy"
+		} | crontab -
+		return
+	fi
+	systemctl enable -q "$UNIT"
+}
+sv_disable() {
+	if [ "$SUPERVISOR" = cron ]; then
+		crontab -l 2>/dev/null | grep -v '# naut deploy$' | crontab - || true
+		return
+	fi
+	systemctl disable -q "$UNIT" 2>/dev/null || true
+}
+
+why() {
+	if [ "$SUPERVISOR" = cron ]; then
+		say "--- last log lines ($STATE/nautilus.log) ---"
+		tail -n 15 "$STATE/nautilus.log" >&2 2>/dev/null || true
+		return
+	fi
+	say "--- last journal lines ---"
+	journalctl -u "$UNIT" -n 15 --no-pager -o cat >&2 || true
+}
+
+# place <id>: move an uploaded controller into its release directory. A
+# release already on the box (an update back to an older one) is reused.
+place() {
+	if [ -f "$ROOT/incoming/$1" ]; then
+		mkdir -p "$ROOT/releases/$1"
+		chmod 0755 "$ROOT/incoming/$1"
+		mv "$ROOT/incoming/$1" "$ROOT/releases/$1/controller"
+	fi
+	[ -x "$ROOT/releases/$1/controller" ] || fail "release $1 is not on the box"
+	if [ -n "$HELPER" ]; then
+		rm -f "$ROOT/incoming/nautilus.service"
+	elif [ -f "$ROOT/incoming/nautilus.service" ]; then
+		mv "$ROOT/incoming/nautilus.service" "$ROOT/nautilus.service.in"
+	fi
+	# On disk before any link points at it: power lost just after an
+	# update must not boot a link to a half-written binary.
+	sync
+}
+
+prune() { # sh has no locals: names of its own, so the caller's cur and prev stand
+	keep1=$(target current)
+	keep2=$(target previous)
+	n=0
+	for d in $(ls -1t "$ROOT/releases"); do
+		[ "$d" = "$keep1" ] || [ "$d" = "$keep2" ] && continue
+		n=$((n + 1))
+		[ $n -le $KEEP ] && continue
+		rm -rf "${ROOT:?}/releases/$d"
+		say "pruned release $d"
+	done
+}
+
+# snapshot <release>: a copy of the retained values before an update,
+# newest 10 kept in STATE/backups. snap is set when there were values; the
+# copy unsnapshot puts back is root's own, ROOT/snapshot.json, since the
+# release being tried runs as STATE's owner and could change the one in
+# STATE/backups. Taken with the controller stopped, after its last save on
+# the way out.
+snapshot() {
+	snap=
+	rm -f "$ROOT/snapshot.json"
+	stateread retain.json "$ROOT/snapshot.json" || return 0
+	snap=retain-$(date +%Y%m%dT%H%M%S)-$1.json
+	statebackups
+	statewrite "$ROOT/snapshot.json" "backups/$snap"
+	ls -1t "$STATE/backups"/retain-*.json | tail -n +11 | while read -r f; do rm -f "$f"; done
+}
+
+# unsnapshot: put the retained values back as snapshot found them. A
+# release that failed may have saved over them before it died; it is
+# stopped first, since systemd keeps restarting it.
+unsnapshot() {
+	sv_stop 2>/dev/null || true
+	rm -f "$STATE/retain.json.tmp"
+	if [ -n "$snap" ]; then
+		statewrite "$ROOT/snapshot.json" retain.json
+	else
+		rm -f "$STATE/retain.json"
+	fi
+}
+
+cmd=$1
+shift
+# The helper checks its arguments itself: only known commands, each with
+# its own count, and ids okid allows.
+if [ -n "$HELPER" ]; then
+	case $cmd in
+	install | update) [ $# -eq 1 ] && okid "$1" ;;
+	receive) [ $# -eq 1 ] && { okid "$1" || [ "$1" = restore.tgz ]; } ;;
+	base) [ $# -eq 0 ] ;;
+	partsize | partreset) [ $# -eq 1 ] && okid "$1" ;;
+	append) [ $# -eq 2 ] && okid "$1" && isnum "$2" ;;
+	assemble) { [ $# -eq 5 ] || { [ $# -eq 6 ] && [ "$6" = xz ]; }; } && okid "$1" && okid "$3" && ishex64 "$2" && isnum "$4" && ishex64 "$5" ;;
+	rollback | status | backup | restore | helper-version) [ $# -eq 0 ] ;;
+	uninstall) [ $# -eq 0 ] || { [ $# -eq 1 ] && [ "$1" = -purge ]; } ;;
+	*) false ;;
+	esac || fail "refused: $cmd $*"
+fi
+case $cmd in
+install | update | rollback | restore | uninstall) hold ;;
+esac
+case $cmd in
+install)
+	id=$1
+	[ -z "$(target current)" ] || fail "already installed (current is $(target current)); use update"
+	if [ "$SUPERVISOR" = cron ]; then
+		command -v crontab >/dev/null || fail "no crontab: cron mode needs the SSH user's crontab"
+		mkdir -p "$STATE"
+	else
+		command -v systemctl >/dev/null || fail "no systemctl: this box does not run systemd (naut deploy -supervisor cron)"
+	fi
+	place "$id"
+	snapshot install # retained values kept from an earlier install, if any
+	setlink current "$id"
+	writeunit
+	sync
+	sv_enable
+	if restart; then
+		if [ "$SUPERVISOR" = cron ]; then
+			# Later commands find the mode and root here (deploy.go).
+			mkdir -p "$HOME/.config"
+			printf 'supervisor=cron\nroot=%s\n' "$ROOT" >"$HOME/.config/naut-deploy"
+			say "installed $id; started by $ROOT/keepalive.sh from the crontab"
+		else
+			say "installed $id; nautilus.service is running"
+		fi
+	else
+		why
+		# Leave nothing installed, so install can simply run again, and
+		# the retained values as they were.
+		unsnapshot
+		sv_disable
+		rm -f "$ROOT/current"
+		fail "$id did not start; nothing is installed (the release stays under releases/)"
+	fi
+	;;
+update)
+	id=$1
+	cur=$(target current)
+	prev=$(target previous)
+	[ -n "$cur" ] || fail "nothing installed; use install"
+	if [ "$id" = "$cur" ]; then
+		rm -f "$ROOT/incoming/$id"
+		if sv_running; then
+			say "$id is already current and running"
+			exit 0
+		fi
+		# A retried deploy must not pass while the controller is down.
+		say "$id is already current but not running; starting it"
+		if restart; then
+			say "started $id"
+			exit 0
+		fi
+		why
+		[ -n "$prev" ] || fail "$id did not start, and there is no previous release to go back to"
+		say "$id did not start; going back to $prev"
+		setlink current "$prev"
+		setlink previous "$id"
+		writeunit
+		sync
+		restart || { why; fail "$prev did not start either"; }
+		say "rolled back to $prev"
+		exit 3
+	fi
+	place "$id"
+	# Refused while the old release still runs, not after it is stopped.
+	if [ -d "$STATE" ]; then statebackups; fi
+	sv_stop
+	snapshot "$cur"
+	setlink previous "$cur"
+	setlink current "$id"
+	writeunit
+	sync
+	if restart; then
+		prune
+		say "updated $cur -> $id (rollback returns to $cur)"
+		exit 0
+	fi
+	why
+	say "$id did not start; going back to $cur, with the retained values as they were"
+	unsnapshot
+	setlink current "$cur"
+	if [ -n "$prev" ]; then setlink previous "$prev"; else rm -f "$ROOT/previous"; fi
+	writeunit
+	restart || { why; fail "$cur did not start again either"; }
+	say "rolled back to $cur; $id stays on the box under releases/"
+	exit 3
+	;;
+rollback)
+	cur=$(target current)
+	prev=$(target previous)
+	[ -n "$prev" ] || fail "no previous release to roll back to"
+	setlink current "$prev"
+	setlink previous "$cur"
+	writeunit
+	sync
+	if restart; then
+		say "rolled back $cur -> $prev (rollback again returns to $cur)"
+	else
+		why
+		fail "$prev did not start"
+	fi
+	;;
+status)
+	cur=$(target current)
+	[ -n "$cur" ] || fail "nothing installed"
+	if [ -n "$HELPER" ]; then
+		echo "current:  $cur" # root does not run an uploaded controller
+	else
+		echo "current:  $cur ($(NAUTILUS_CLI=1 "$ROOT/current/controller" version 2>/dev/null || echo '?'))"
+	fi
+	echo "previous: $(target previous)"
+	echo "releases: $(ls -1t "$ROOT/releases" | tr '\n' ' ')"
+	if [ "$SUPERVISOR" = cron ]; then
+		p=$(cronpid)
+		if [ -n "$p" ]; then echo "running:  pid $p (cron keepalive, $ROOT)"; else echo "running:  no (the keepalive starts it within a minute)"; fi
+		echo "last log: $(tail -n 1 "$STATE/nautilus.log" 2>/dev/null)"
+	else
+		systemctl show -p ActiveState -p SubState -p Type -p NRestarts -p StatusText -p ExecMainStartTimestamp "$UNIT"
+	fi
+	;;
+backup)
+	tmp=$(mktemp -d)
+	stateread retain.json "$tmp/retain.json" || { rm -rf "$tmp"; fail "no $STATE/retain.json yet (does the project have a retain: block?)"; }
+	target current >"$tmp/release"
+	tar -C "$tmp" -czf - retain.json release
+	rm -rf "$tmp"
+	;;
+restore)
+	f=$ROOT/incoming/restore.tgz
+	[ -f "$f" ] || fail "no backup uploaded"
+	tmp=$(mktemp -d)
+	# The two members' contents only, to stdout: nothing in the archive
+	# becomes a file, a link or a path on the box.
+	tar -xzOf "$f" retain.json >"$tmp/retain.json" 2>/dev/null || true
+	[ -s "$tmp/retain.json" ] || { rm -rf "$tmp" "$f"; fail "the backup holds no retain.json"; }
+	from=$(tar -xzOf "$f" release 2>/dev/null | head -c 200 | tr -d '\n' || true)
+	okid "$from" || from='?'
+	[ "$from" = "$(target current)" ] || say "note: the backup was taken on release $from; current is $(target current)"
+	# Stopped first: the controller saves every 2 s and once more on
+	# its way out, and either would overwrite the restored file.
+	sv_stop
+	statewrite "$tmp/retain.json" retain.json
+	rm -f "$STATE/retain.json.tmp"
+	rm -rf "$tmp" "$f"
+	if restart; then
+		say "restored retained values (taken on $from)"
+	else
+		why
+		fail "the controller did not start after the restore"
+	fi
+	;;
+uninstall)
+	if [ "$SUPERVISOR" = cron ]; then
+		# Only what deploy made: ROOT itself stays, and so does a
+		# naut-launch in it (its capability takes root to set again).
+		sv_disable
+		sv_stop
+		rm -rf "${ROOT:?}/releases" "$ROOT/incoming" "$ROOT/current" "$ROOT/previous" "$ROOT/keepalive.sh" "$ROOT/nautilus.service.in"
+		rm -f "$HOME/.config/naut-deploy"
+		if [ "${1:-}" = -purge ]; then
+			rm -rf "$STATE"
+			if [ -L "$STATE_PATH" ]; then rm -f "$STATE_PATH"; fi
+			say "uninstalled; retained values deleted"
+		else
+			say "uninstalled; retained values kept in $STATE"
+		fi
+		exit 0
+	fi
+	systemctl disable -q --now "$UNIT" 2>/dev/null || true
+	rm -f "$UNITDIR/$UNIT"
+	systemctl daemon-reload
+	rm -rf "$ROOT"
+	if [ "${1:-}" = -purge ]; then
+		rm -rf "$STATE"
+		# DynamicUser's own directory even when its link was already gone,
+		# for the real layout only (a test's STATE must not reach it).
+		if [ "$STATE_PATH" = /var/lib/nautilus ]; then rm -rf /var/lib/private/nautilus; fi
+		# The path as given, when it was a link to STATE (DynamicUser's
+		# /var/lib/nautilus): not left pointing at nothing.
+		if [ -L "$STATE_PATH" ]; then rm -f "$STATE_PATH"; fi
+		say "uninstalled; retained values deleted"
+	else
+		say "uninstalled; retained values kept in $STATE"
+	fi
+	;;
+receive)
+	# The helper's upload: stdin into ROOT/incoming/<name>, whole or not at
+	# all. The name was checked above.
+	mkdir -p "$ROOT/incoming"
+	cat >"$ROOT/incoming/$1.part"
+	mv -f "$ROOT/incoming/$1.part" "$ROOT/incoming/$1"
+	;;
+base)
+	# What the box could rebuild a controller from (the slow-link upload):
+	# the current release's runtime part (a controller is its runtime, a project
+	# zip and a footer holding the zip's offset), its size and its SHA-256.
+	# Nothing is printed when there is no current release or it has no footer,
+	# and the caller sends the whole controller then.
+	# xz=1 first, whether or not there is a current release: a first install
+	# is the biggest upload and wants the smaller wire file most.
+	if unxz_cmd >/dev/null; then echo "xz=1"; fi
+	cur=$(target current)
+	[ -n "$cur" ] || exit 0
+	f=$ROOT/releases/$cur/controller
+	[ -f "$f" ] || exit 0
+	size=$(wc -c <"$f")
+	set -- $(tail -c 16 "$f" | od -An -v -tu1)
+	[ $# -eq 16 ] || exit 0
+	[ "$8" -eq 0 ] || exit 0
+	off=$(($1 + $2 * 256 + $3 * 65536 + $4 * 16777216 + $5 * 4294967296 + $6 * 1099511627776 + $7 * 281474976710656))
+	[ "$off" -gt 0 ] && [ "$off" -lt "$size" ] || exit 0
+	rsha=$(head -c "$off" "$f" | sha256sum | cut -d' ' -f1)
+	csha=$(sha256sum <"$f" | cut -d' ' -f1)
+	echo "release=$cur"
+	echo "runtime-size=$off"
+	echo "runtime-sha256=$rsha"
+	echo "controller-sha256=$csha"
+	;;
+partsize)
+	# How much of an upload the box already holds, so a dropped link resumes.
+	if [ -f "$ROOT/incoming/$1.part" ]; then wc -c <"$ROOT/incoming/$1.part"; else echo 0; fi
+	;;
+partreset)
+	rm -f "$ROOT/incoming/$1.part"
+	;;
+append)
+	# append <name> <offset>: stdin onto the end of the upload, only if the box
+	# holds exactly <offset> bytes of it (exit 6 otherwise: a cut-off earlier
+	# send may still be writing, and the caller asks again how much is there).
+	# The helper's way in; others do the same with sh -c, as upload does.
+	mkdir -p "$ROOT/incoming"
+	[ "$(if [ -f "$ROOT/incoming/$1.part" ]; then wc -c <"$ROOT/incoming/$1.part"; else echo 0; fi)" -eq "$2" ] || exit 6
+	cat >>"$ROOT/incoming/$1.part"
+	;;
+assemble)
+	# assemble <name> <wire-sha256> <id> <runtime-size> <controller-sha256> [xz]
+	# (needs room in incoming/ for the controller beside the upload):
+	# the upload <name> (gzip, or xz when the sixth word says so) becomes the controller <id>: the first
+	# <runtime-size> bytes of the current release's controller (0: none) then
+	# the upload, unzipped. The upload's hash and the whole controller's are
+	# both checked before the file is named <id>, so a damaged or cut transfer
+	# never becomes a release (exit 4: the upload is damaged and has been
+	# thrown away; exit 5: it did not rebuild the controller the caller built).
+	name=$1 wire=$2 id=$3 rsize=$4 whole=$5
+	in=$ROOT/incoming
+	# how the upload is unpacked; a box that cannot read xz refuses it (the
+	# caller asked what the box can do, so this is a changed box, not a plan)
+	unz="gunzip -c"
+	if [ "${6:-}" = xz ]; then
+		unz=$(unxz_cmd) || fail "this box cannot unpack xz (no xzcat, xz or unxz)"
+	fi
+	# what an abandoned deploy left (a day old): never left to fill the disk
+	find "$in" -maxdepth 1 \( -name '*.wire.part' -o -name '*.build' \) -mmin +1440 -exec rm -f {} + 2>/dev/null || true
+	[ -f "$in/$name.part" ] || fail "nothing uploaded as $name"
+	got=$(sha256sum <"$in/$name.part" | cut -d' ' -f1)
+	if [ "$got" != "$wire" ]; then
+		rm -f "$in/$name.part"
+		say "the upload $name does not match its hash (a damaged transfer); it was discarded"
+		exit 4
+	fi
+	# a build name of its own, so two deploys of one id cannot write one file;
+	# gone however this ends
+	build=$in/$id.$$.build
+	trap 'rm -f "$build"' EXIT
+	if [ "$rsize" -gt 0 ]; then
+		cur=$(target current)
+		[ -n "$cur" ] || fail "no current release to take the runtime from"
+		head -c "$rsize" "$ROOT/releases/$cur/controller" >"$build" || fail "could not read the current controller's runtime (disk full?)"
+		$unz <"$in/$name.part" >>"$build" || fail "could not unpack the upload $name (damaged, the disk is full, or this box's decompressor cannot run: naut deploy -compress gzip sends gzip)"
+	else
+		$unz <"$in/$name.part" >"$build" || fail "could not unpack the upload $name (damaged, the disk is full, or this box's decompressor cannot run: naut deploy -compress gzip sends gzip)"
+	fi
+	got=$(sha256sum <"$build" | cut -d' ' -f1)
+	if [ "$got" != "$whole" ]; then
+		rm -f "$in/$name.part"
+		say "the controller rebuilt on the box does not match the one sent (its runtime is not the one assumed)"
+		exit 5
+	fi
+	sync
+	mv -f "$build" "$in/$id"
+	rm -f "$in/$name.part"
+	;;
+helper-version)
+	echo "${NAUT_HELPER_VERSION:-}"
+	;;
+*) fail "unknown command $cmd" ;;
+esac

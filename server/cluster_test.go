@@ -32,7 +32,7 @@ func TestClusterEndpointReportsStatus(t *testing.T) {
 	}}})
 
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/cluster", nil))
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/cluster", nil))
 	if rec.Code != 200 {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -54,7 +54,7 @@ func TestClusterEndpointReportsStatus(t *testing.T) {
 func TestClusterEndpointNilCluster(t *testing.T) {
 	srv := New(newTestRuntime(t))
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/cluster", nil))
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/cluster", nil))
 	if rec.Code != 200 {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -96,7 +96,7 @@ func TestStandbyProxiesToLeader(t *testing.T) {
 	}}})
 
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/state", nil))
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/state", nil))
 
 	if !hit {
 		t.Fatal("standby answered /api/state locally instead of proxying to the leader")
@@ -127,7 +127,7 @@ func TestStandbyAnswersClusterAndIndexLocally(t *testing.T) {
 	h := srv.Handler()
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/cluster", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/cluster", nil))
 	if rec.Code != 200 {
 		t.Fatalf("/api/cluster status = %d", rec.Code)
 	}
@@ -140,7 +140,7 @@ func TestStandbyAnswersClusterAndIndexLocally(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/", nil))
 	if rec.Code != 200 {
 		t.Fatalf("GET / status = %d", rec.Code)
 	}
@@ -164,7 +164,7 @@ func TestStandbyWithNoLeaderServesLocally(t *testing.T) {
 	}}})
 
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/state", nil))
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/state", nil))
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
 	}
@@ -190,7 +190,7 @@ func TestLeaderNeverProxies(t *testing.T) {
 	}}})
 
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/state", nil))
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/state", nil))
 	if rec.Code != 200 {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -221,13 +221,13 @@ func TestGateClosedLeaseHolderDoesNotProxyToItself(t *testing.T) {
 	h := srv.Handler()
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/state", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/state", nil))
 	if rec.Code != 200 {
 		t.Fatalf("GET /api/state = %d, want 200 from the local store: %s", rec.Code, rec.Body)
 	}
 
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/forces", strings.NewReader(`{"name":"Level","value":1}`)))
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "http://localhost/api/forces", strings.NewReader(`{"name":"Level","value":1}`)))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("POST /api/forces = %d, want 503: %s", rec.Code, rec.Body)
 	}
@@ -236,5 +236,93 @@ func TestGateClosedLeaseHolderDoesNotProxyToItself(t *testing.T) {
 	}
 	if n := hits.Load(); n != 0 {
 		t.Fatalf("the request was forwarded to the replica's own address %d times", n)
+	}
+}
+
+// A standing warning of the redundancy (a pair's retained values not
+// replicated yet, #710) reaches /api/cluster, on the leader and on a
+// standby alike (/api/cluster is never proxied), and the dashboard shows
+// what it carries.
+func TestClusterEndpointCarriesWarnings(t *testing.T) {
+	const warn = "retained state not replicated: test"
+	for _, lead := range []bool{true, false} {
+		srv := New(newTestRuntime(t), Options{Cluster: fakeCluster{status: leader.Status{
+			Mode: "quorum", Pod: "a", Leader: "b", LeaderAddr: "127.0.0.1:1", IsLeader: lead, Warnings: []string{warn},
+		}}})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/cluster", nil))
+		var st leader.Status
+		if err := json.Unmarshal(rec.Body.Bytes(), &st); err != nil {
+			t.Fatal(err)
+		}
+		if len(st.Warnings) != 1 || st.Warnings[0] != warn {
+			t.Errorf("leader %v: warnings %q, want %q", lead, st.Warnings, warn)
+		}
+	}
+	page := string(indexHTML)
+	for _, want := range []string{`id="cluster-warn"`, `fetch("/api/cluster")`, `st.warnings`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the dashboard does not show the cluster's warnings: no %s", want)
+		}
+	}
+}
+
+// A redundant pair's standby that knows no leader refuses a write (503 no
+// leader) rather than taking it into a store that does not scan (#1028
+// review), and still answers reads; the Kubernetes mode is unchanged.
+func TestPairStandbyWithNoLeaderRefusesWrites(t *testing.T) {
+	for _, c := range []struct {
+		mode string
+		want int
+	}{{"quorum", http.StatusServiceUnavailable}, {"cluster", http.StatusNoContent}} {
+		srv := New(newTestRuntime(t), Options{Cluster: fakeCluster{status: leader.Status{Mode: c.mode, Pod: "a"}}})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "http://localhost/api/tags", strings.NewReader(`{"name":"x","value":1}`)))
+		if c.mode == "quorum" && (rec.Code != c.want || !strings.Contains(rec.Body.String(), "no leader")) {
+			t.Errorf("%s: a write with no leader known = %d %s, want %d no leader", c.mode, rec.Code, rec.Body, c.want)
+		}
+		if c.mode == "cluster" && rec.Code == http.StatusServiceUnavailable {
+			t.Errorf("cluster mode refused a write with no leader known: %s", rec.Body)
+		}
+		rec = httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/meta", nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: a read with no leader known = %d", c.mode, rec.Code)
+		}
+	}
+}
+
+// TestClusterEndpointNamesThePeersFromPublicURLs: a browser whose own
+// controller died needs the other one's address (#716). Only the URLs the
+// operator named (redundancy.public-urls) go out, sorted, with this
+// replica's view of who leads; LeaderAddr still never does.
+func TestClusterEndpointNamesThePeersFromPublicURLs(t *testing.T) {
+	srv := New(newTestRuntime(t), Options{
+		Cluster:    fakeCluster{status: leader.Status{Mode: "cluster", Pod: "a", Leader: "b", LeaderAddr: "10.0.0.7:8080"}},
+		LeaderURLs: map[string]string{"b": "https://plc-b.plant.example", "a": "https://plc-a.plant.example"},
+	})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/cluster", nil))
+	if strings.Contains(rec.Body.String(), "10.0.0.7") {
+		t.Fatalf("a peer-link address leaked: %s", rec.Body.String())
+	}
+	var body struct {
+		Leader string        `json:"leader"`
+		Peers  []clusterPeer `json:"peers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	want := []clusterPeer{{"a", "https://plc-a.plant.example", false}, {"b", "https://plc-b.plant.example", true}}
+	if body.Leader != "b" || len(body.Peers) != 2 || body.Peers[0] != want[0] || body.Peers[1] != want[1] {
+		t.Errorf("body = %+v", body)
+	}
+
+	// No public-urls: no peers key at all.
+	srv = New(newTestRuntime(t), Options{Cluster: fakeCluster{status: leader.Status{Mode: "cluster", Pod: "a"}}})
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/cluster", nil))
+	if strings.Contains(rec.Body.String(), "peers") {
+		t.Errorf("peers without public-urls: %s", rec.Body.String())
 	}
 }

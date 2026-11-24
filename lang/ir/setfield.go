@@ -71,10 +71,11 @@ func SetFieldTyped(val Value, t *Type, path []string, v any, sofar string) (Valu
 // must be within its declared width (a 64-bit unsigned or bit-string type
 // takes any 64-bit pattern, as the VM holds one), a REAL takes no NaN or
 // infinity, and an enumeration takes only a member's name or value. The
-// lenient form stays for what restores or replays state the program
-// produced (a retained value, a test's given:, a force), because the VM
-// does not wrap a declared INT that a program counts past 32767, and such
-// a value must survive a restart as it was.
+// lenient form stays for what restores or replays state (a retained value,
+// a test's given:, a force): a program's own stores keep their declared
+// width (#782), so what it retained fits, but a value saved before that
+// rule, or one a test or a force sets on purpose, lands as written, and
+// the program's next assignment of it is cut to the width.
 func SetFieldTypedStrict(val Value, t *Type, path []string, v any, sofar string) (Value, error) {
 	return setFieldTyped(val, t, path, v, sofar, true)
 }
@@ -313,16 +314,24 @@ func assignInto(cur Value, t *Type, v any, sofar string, strict bool) (Value, er
 		if t != nil && t.Kind == TypeArray {
 			lo = t.ArrLoBound
 		}
+		// One copy of the elements, each then assigned in place: a copy per
+		// element made a restore of a long retained array quadratic, and a
+		// pair's takeover loads it within its first scan (#710 S1b).
 		out := cur
+		out.Arr = append([]Value(nil), cur.Arr...)
 		for i, e := range list {
 			if e == nil {
 				continue
 			}
-			nv, err := setFieldTyped(out, t, []string{"[" + strconv.Itoa(lo+i) + "]"}, e, sofar, strict)
+			k, et, err := elementAt(out, t, lo+i, sofar)
 			if err != nil {
 				return Value{}, err
 			}
-			out = nv
+			nv, err := setFieldTyped(out.Arr[k], et, nil, e, sofar+"["+strconv.Itoa(lo+i)+"]", strict)
+			if err != nil {
+				return Value{}, err
+			}
+			out.Arr[k] = nv
 		}
 		return out, nil
 	}

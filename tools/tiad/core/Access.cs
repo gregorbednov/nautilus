@@ -1,0 +1,710 @@
+// Access.cs: the CPU's PLC access control, users and roles
+// (cpu.accessControl, siemens-ide.md section 3.3, #789 decision of
+// 2026-11-20). A station nautilus creates has access control on and one
+// user, "nautilus", with the runtime right Full access; its password comes
+// from the secret store (secrets.fullAccessPassword). An adopted station
+// keeps what it has.
+
+using System;
+using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace Tiad
+{
+    // PasswordPolicy is a project's rules for local users' passwords
+    // (TIA's PasswordPolicyConfigurator). TIA's default is
+    // StationRules.CheckTiaPassword's: 10 characters, one digit, upper and
+    // lower case, no special character.
+    public sealed class PasswordPolicy
+    {
+        public int MinLength = StationRules.MinTiaPassword;
+        public int MinDigits = 1;
+        public int MinSpecial;
+        public bool UpperAndLower = true;
+
+        // Check returns why password breaks the policy, naming every rule
+        // broken, or null. It never echoes the password. Lengths are in
+        // UTF-16 code units (a .NET string's), the classes ASCII; a special
+        // character is ASCII punctuation only, so a character TIA might not
+        // count never counts here (stricter than TIA, never looser).
+        public string Check(string password)
+        {
+            var broken = new List<string>();
+            if (password.Length < MinLength) broken.Add("shorter than " + MinLength + " characters");
+            if (password.Length > StationRules.MaxTiaPassword) broken.Add("longer than " + StationRules.MaxTiaPassword + " characters");
+            int digits = 0, special = 0;
+            bool upper = false, lower = false;
+            foreach (char r in password)
+            {
+                if (r >= '0' && r <= '9') digits++;
+                else if (r >= 'A' && r <= 'Z') upper = true;
+                else if (r >= 'a' && r <= 'z') lower = true;
+                else if (r > ' ' && r < 127) special++;
+            }
+            if (digits < MinDigits) broken.Add("fewer than " + MinDigits + " digit(s)");
+            if (special < MinSpecial) broken.Add("fewer than " + MinSpecial + " special character(s)");
+            if (UpperAndLower && !(upper && lower)) broken.Add("not both an upper-case and a lower-case letter");
+            if (broken.Count == 0) return null;
+            return "breaks the project's password policy for local users (" + Describe() + "): " + string.Join(", ", broken.ToArray());
+        }
+
+        public string Describe()
+        {
+            string s = "at least " + MinLength + " characters, " + MinDigits + " digit(s), " + MinSpecial + " special character(s)";
+            return UpperAndLower ? s + ", upper and lower case" : s;
+        }
+    }
+
+    // AccessMade is what applies on one session made in the project's
+    // users and roles: the user and the role, by AccessSteps' names. An
+    // upload on the same session removes exactly these before it brings
+    // the CPU's station in, so an adopted project holds no user tiad made
+    // for the throwaway station a create started from; a user or role the
+    // project held already is never removed.
+    public sealed class AccessMade
+    {
+        public bool User, Role;
+        // WebUsers and WebRoles are the web users and their roles
+        // (WebUsers.Run) made on this session.
+        public List<string> WebUsers = new List<string>(), WebRoles = new List<string>();
+        // Writes counts the steps' writes that changed the project's
+        // users, roles, access control or web server (AccessSteps.Run,
+        // WebSteps.Run): an apply that leaves it as it was changed none
+        // of them (CpuReuse.Found).
+        public int Writes;
+
+        public bool Any { get { return User || Role || WebUsers.Count > 0 || WebRoles.Count > 0; } }
+    }
+
+    // PasswordReusedException is TIA refusing a password the user has had
+    // (its current one, or one its project's policy still blocks).
+    public sealed class PasswordReusedException : Exception
+    {
+        public PasswordReusedException(Exception inner) : base("TIA refuses a password the user has had", inner)
+        {
+        }
+    }
+
+    // AccessWrites says whether the password step left a project-level
+    // write it could not undo: then the session is unclean, and an upload,
+    // which replaces devices but not users, cannot clean it.
+    public sealed class AccessWrites
+    {
+        public bool Dirty;
+        // Wrote is set when the step changed the project's users (a record
+        // or a password): the project then needs compiling again.
+        public bool Wrote;
+    }
+
+    // AccessRecords is tiad's record of the Full access password it set or
+    // recorded, kept in the user's comment in the project (so it travels
+    // with the project), never the password: "tiad password record
+    // v2:<key id>:<salt>:<HMAC-SHA256(key, salt, user, password)>". The key
+    // is the agent's own random key (TIAD_ACCESS_KEY_FILE, made by the
+    // installer and kept across reinstalls), not its token; the key id
+    // tells this agent's records from another key's; the salt is random per
+    // record, so one password gives a different record in every project.
+    public sealed class AccessRecords
+    {
+        const string Prefix = "tiad password record v2:";
+        readonly byte[] key;
+        readonly string keyId;
+
+        public AccessRecords(byte[] key)
+        {
+            if (key == null || key.Length != 32) throw new ArgumentException("an access record key is 32 bytes");
+            this.key = (byte[])key.Clone();
+            using (var h = SHA256.Create()) keyId = Hex(h.ComputeHash(this.key), 4);
+        }
+
+        // FromHex reads a key file's text: 64 hex characters.
+        public static AccessRecords FromHex(string text)
+        {
+            string t = text.Trim();
+            if (t.Length != 64) throw new ArgumentException("the access key is not 64 hex characters");
+            var k = new byte[32];
+            for (int i = 0; i < 32; i++) k[i] = Convert.ToByte(t.Substring(2 * i, 2), 16);
+            return new AccessRecords(k);
+        }
+
+        // Random is a key for this run only (no key file): its records do
+        // not verify after a restart.
+        public static AccessRecords Random()
+        {
+            var k = new byte[32];
+            using (var r = new RNGCryptoServiceProvider()) r.GetBytes(k);
+            return new AccessRecords(k);
+        }
+
+        public string Make(string user, string password)
+        {
+            var salt = new byte[16];
+            using (var r = new RNGCryptoServiceProvider()) r.GetBytes(salt);
+            return Make(user, password, salt);
+        }
+
+        // Make with a given salt: for the known-answer test.
+        public string Make(string user, string password, byte[] salt)
+        {
+            return Prefix + keyId + ":" + Hex(salt, salt.Length) + ":" + Mac(salt, user, password);
+        }
+
+        string Mac(byte[] salt, string user, string password)
+        {
+            byte[] msg = Encoding.UTF8.GetBytes(user + "\n" + password);
+            var all = new byte[salt.Length + msg.Length];
+            Buffer.BlockCopy(salt, 0, all, 0, salt.Length);
+            Buffer.BlockCopy(msg, 0, all, salt.Length, msg.Length);
+            using (var h = new HMACSHA256(key))
+            {
+                byte[] d = h.ComputeHash(all);
+                return Hex(d, d.Length);
+            }
+        }
+
+        // Parts splits a record: key id, salt, MAC; or null for a comment
+        // that is no record of tiad's.
+        static string[] Parts(string comment)
+        {
+            if (comment == null || !comment.StartsWith(Prefix, StringComparison.Ordinal)) return null;
+            string[] p = comment.Substring(Prefix.Length).Split(':');
+            if (p.Length != 3 || p[0].Length != 8 || p[1].Length != 32 || p[2].Length != 64) return null;
+            foreach (string f in p)
+            {
+                foreach (char ch in f)
+                {
+                    if (!(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'f')) return null;
+                }
+            }
+            return p;
+        }
+
+        public static bool IsRecord(string comment)
+        {
+            return Parts(comment) != null;
+        }
+
+        // Ours reports whether a record was made with this agent's key.
+        public bool Ours(string comment)
+        {
+            string[] p = Parts(comment);
+            return p != null && p[0] == keyId;
+        }
+
+        // Matches reports whether a record of this agent's key is of user
+        // and password.
+        public bool Matches(string comment, string user, string password)
+        {
+            string[] p = Parts(comment);
+            if (p == null || p[0] != keyId) return false;
+            var salt = new byte[16];
+            for (int i = 0; i < 16; i++) salt[i] = Convert.ToByte(p[1].Substring(2 * i, 2), 16);
+            string want = Mac(salt, user, password);
+            int diff = 0;
+            for (int i = 0; i < want.Length; i++) diff |= want[i] ^ p[2][i];
+            return diff == 0;
+        }
+
+        static string Hex(byte[] d, int n)
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < n; i++) sb.Append(d[i].ToString("x2", System.Globalization.CultureInfo.InvariantCulture));
+            return sb.ToString();
+        }
+    }
+
+    // IProjectUsers is the project's users and roles as TIA's Openness
+    // offers them (UmacConfigurator): the project's, not a CPU's, so they
+    // outlive any device delete. Passwords cross as strings: the glue makes
+    // TIA's SecureString.
+    public interface IProjectUsers
+    {
+        bool HasUser(string user);
+        // MakeUser makes the local user with password.
+        void MakeUser(string user, string password);
+        // SetPassword sets a found user's password. TIA refuses any
+        // password the user has had (its current one included, as many as
+        // the project's policy blocks for reuse): then it throws
+        // PasswordReusedException.
+        void SetPassword(string user, string password);
+        // Comment and SetComment are the user's comment, where tiad keeps
+        // its record (AccessRecords).
+        string Comment(string user);
+        void SetComment(string user, string comment);
+        bool HasRole(string role);
+        // RoleComment is a custom role's comment: tiad's own roles carry
+        // AccessSteps.RoleComment.
+        string RoleComment(string role);
+        void MakeRole(string role, string comment);
+        // AddRole assigns role to user, unless it has it.
+        void AddRole(string user, string role);
+        // UserNames and RoleNames are the project's local users and its
+        // custom roles.
+        List<string> UserNames();
+        List<string> RoleNames();
+        // UserRoles is every role user holds, system roles included.
+        List<string> UserRoles(string user);
+        // RemoveRole takes role off user.
+        void RemoveRole(string user, string role);
+        // DeleteUser deletes a user; DeleteRole takes a custom role off
+        // every user, then deletes it.
+        void DeleteUser(string user);
+        void DeleteRole(string role);
+        // UserActive and ActivateUser are the user's IsActive.
+        bool UserActive(string user);
+        void ActivateUser(string user);
+        // AnonymousActive reports whether the project's anonymous user
+        // (UmacConfigurator.AnonymousUser) is active: then anyone who
+        // reaches the web server gets its roles' rights.
+        bool AnonymousActive();
+    }
+
+    // IAccessControl is a CPU's access control besides the project's users
+    // and roles (PlcAccessControlConfiguration provider, UmacDevice).
+    // tiad.Openness wraps TIA's; the fakes model it.
+    public interface IAccessControl : IProjectUsers
+    {
+        // State is PlcAccessControlConfiguration's name, or
+        // AccessRule.Absent for a CPU without the setting.
+        string State();
+        // Enable sets PlcAccessControlConfiguration to
+        // EnabledWithAccessControl.
+        void Enable();
+        // GrantFullAccess gives role the CPU's runtime right Full access,
+        // unless it has it.
+        void GrantFullAccess(string role);
+        // Check returns why user does not hold the runtime right Full access
+        // on this CPU through role, or null.
+        string Check(string user, string role);
+        // OfferedRights is the identifier of every runtime right the CPU
+        // offers.
+        List<string> OfferedRights();
+        // RoleRights is the identifier of every runtime right role holds
+        // on this CPU.
+        List<string> RoleRights(string role);
+        // Grant and Revoke give role a runtime right on this CPU, or take
+        // it away.
+        void Grant(string role, string right);
+        void Revoke(string role, string right);
+    }
+
+    // AccessRule decides what an apply does about cpu.accessControl.
+    public static class AccessRule
+    {
+        // States are PlcAccessControlConfiguration's names. Absent is a CPU
+        // without the setting.
+        public const string Enabled = "EnabledWithAccessControl", Absent = "";
+
+        // Plan refuses, before any write, what an apply cannot do: a Full
+        // access user needs its password, and on a CPU the apply keeps
+        // (reuse), access control must already be on, unless it reads
+        // exactly Disabled and the apply asked accessControlTurnOn
+        // (TurnOnRule): tiad never turns it on for a CPU it did not make
+        // unasked. keep never refuses: it changes nothing, and a new CPU
+        // without a Full access user fails its compile, which says why.
+        // current is the kept CPU's state, or null for a CPU the apply
+        // makes.
+        public static void Plan(string current, string want, bool havePassword, bool turnOn)
+        {
+            if (want == StationRules.AccessKeep) return;
+            if (want != StationRules.AccessFullAccessUser)
+            {
+                throw TiadException.BadRequest("cpu.accessControl: {0}", StationRules.CheckAccessControl(want) ?? Json.Quote(want));
+            }
+            if (!havePassword)
+            {
+                throw TiadException.BadRequest("{0}", "cpu.accessControl is fullAccessUser, and secrets.fullAccessPassword is empty (it comes from the secret store, never the spec)");
+            }
+            if (current == null || current == Enabled) return;
+            if (current == TurnOnRule.Disabled)
+            {
+                if (turnOn) return;
+                throw TiadException.BadRequest("{0}", TurnOnRule.NotAsked);
+            }
+            throw TiadException.BadRequest(
+                "the project's CPU has its access control {0}, and tiad turns access control on only for a CPU it makes, or one it keeps whose access control reads \"Disabled\" (accessControlTurnOn): to keep the CPU as found, set cpu.accessControl to keep",
+                current == Absent ? "not available (no such setting)" : "set to " + Json.Quote(current));
+        }
+
+        // After is the kept CPU's access control once an apply with want
+        // and turnOn has run, for the checks that rest on it (WebRule.Plan):
+        // current, or Enabled when the apply turns it on.
+        public static string After(string current, string want, bool turnOn)
+        {
+            if (current == TurnOnRule.Disabled && turnOn && want == StationRules.AccessFullAccessUser) return Enabled;
+            return current;
+        }
+    }
+
+    // TurnOnFacts is what TurnOnRule.Check reads of the project before an
+    // apply turns a kept CPU's access control on (ITia.ReadTurnOn): the
+    // project's local users, and its anonymous user, whose rights anyone
+    // gets without a password once access control is on.
+    public sealed class TurnOnFacts
+    {
+        public List<string> Users = new List<string>();
+        public bool AnonymousActive;
+        public List<AnonymousRole> AnonymousRoles = new List<AnonymousRole>();
+    }
+
+    // AnonymousRole is a role the anonymous user holds and the runtime
+    // rights it holds on the CPU; Rights is null when tiad cannot read them
+    // (TIA reads only a custom role's).
+    public sealed class AnonymousRole
+    {
+        public string Name = "";
+        public List<string> Rights;
+    }
+
+    // TurnOnRule is accessControlTurnOn (K, naut-lead 2026-11-23): an
+    // apply may turn access control on for a CPU it keeps only when the
+    // CPU's access control reads exactly Disabled and the request asks it,
+    // never from the spec's default; the project as turned on loads only
+    // by a hardware download that resets the CPU's user management to the
+    // project's, with attestation.cpuAccessControl "disabled" (the
+    // attestation route), and is not saved before that loads it. A
+    // loosening on an operator's word (#616 tighten-later): tiad cannot
+    // read a CPU's access control online.
+    public static class TurnOnRule
+    {
+        // Disabled is PlcAccessControlConfiguration's name for access
+        // control off, exactly.
+        public const string Disabled = "Disabled";
+
+        public const string NotAsked = "the project's CPU has its access control set to \"Disabled\", and tiad turns access control on for a CPU it keeps only when the apply asks it (accessControlTurnOn; naut: --turn-on-access-control), never from the spec's default; the project as turned on then loads only by a hardware download that resets the CPU's user management with attestation.cpuAccessControl \"disabled\": to keep the CPU as found, set cpu.accessControl to keep";
+        public const string NeedsFullAccessUser = "accessControlTurnOn goes with cpu.accessControl fullAccessUser";
+        public const string NothingNote = "accessControlTurnOn: the CPU's access control was not \"Disabled\" in the project before this apply, so it turned nothing on";
+        public const string TurnedOnNote = "TURNED ON the kept CPU's access control (\"Disabled\" -> \"EnabledWithAccessControl\", accessControlTurnOn): this project loads only by a hardware download that resets the CPU's user management to the project's, with attestation.cpuAccessControl \"disabled\", and is not saved before that load";
+        public const string SaveRefused = "an apply on this session turned the kept CPU's access control on (accessControlTurnOn), or the session opened a project marked turn-on pending, and the project is not saved before a download on this session loads it: a saved project would carry access control on to a later session without the opt-in; download it (hardware, userManagementResetToProject, attestation.cpuAccessControl \"disabled\"), or close the session without saving";
+        public const string PendingNote = "this project is marked turn-on pending: an earlier download that turned its CPU's access control on was not verified loaded (the deploy record's archive saved the project before TIA's download), so it loads only by a hardware download that resets the CPU's user management, with attestation.cpuAccessControl \"disabled\", or \"enabled\" with tiad logged on as \"nautilus\" if that download did load";
+
+        // MarkerSuffix names the file beside a project (<project>.ap21 +
+        // it) that marks it turn-on pending: written before a gated
+        // download's deploy record saves the project (tiad.Openness's
+        // archive saves it in place), removed on a verified load; an open
+        // of a marked project, or an adopt of an unverified turn-on
+        // deploy's archive, re-arms the gate.
+        public const string MarkerSuffix = ".turn-on-pending";
+        public const string MarkerFileRefused = "files ending in .turn-on-pending are tiad's marks of a project whose CPU access control was turned on and not verified loaded: the file API neither writes nor deletes them (a verified load, an apply that finds the project's access control off, or a create or adopt of the project removes one)";
+        public const string ClearedNote = "the turn-on pending mark is removed: the project's access control reads \"Disabled\", so no load of it turns the CPU's on";
+        public const string LateRefusal = "; the apply had written, so the session is unclean: close it without saving";
+
+        // IsMarker reports whether a work-dir path names a turn-on pending
+        // mark, as Windows resolves it (case, trailing dots and spaces).
+        public static bool IsMarker(string path)
+        {
+            return path.TrimEnd('.', ' ').EndsWith(MarkerSuffix, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // ReadOnly are the runtime rights that let nobody change the CPU
+        // or its values: an active anonymous user holding only these gets
+        // a warning, not a refusal. The protection levels are not among
+        // them: HMI access, and Read access with it, let an HMI write tags.
+        static readonly string[] ReadOnly = { "WebReadTags", "WebAllowDiagnostics", "WebReadSyslog", "WebReadWatchTables" };
+
+        // Check refuses, before any write, a turn-on that would look
+        // protected and not be: an active anonymous user holding any right
+        // but a read-only one, one tiad does not know, or a role whose
+        // rights it cannot read. Otherwise it adds what the turn-on makes
+        // count: the project's other local users, and the anonymous user.
+        public static void Check(TurnOnFacts f, List<string> notes)
+        {
+            if (f.AnonymousActive)
+            {
+                var bad = new List<string>();
+                var read = new List<string>();
+                foreach (AnonymousRole r in f.AnonymousRoles)
+                {
+                    if (r.Rights == null)
+                    {
+                        bad.Add("role " + Json.Quote(r.Name) + ": rights tiad cannot read (TIA reads only a custom role's: give the anonymous user a custom role instead)");
+                        continue;
+                    }
+                    var w = new List<string>();
+                    foreach (string x in r.Rights)
+                    {
+                        if (Array.IndexOf(ReadOnly, x) >= 0) read.Add(x);
+                        else w.Add(x);
+                    }
+                    if (w.Count > 0) bad.Add("role " + Json.Quote(r.Name) + ": " + string.Join(", ", w.ToArray()));
+                }
+                if (bad.Count > 0)
+                {
+                    throw TiadException.BadRequest(
+                        "accessControlTurnOn is refused: the project's anonymous user is active and holds rights beyond reading ({0}): once access control is on anyone who reaches the CPU gets them without a password, so the CPU would look protected and not be; remove the anonymous user's write rights in the project, or do not turn access control on (set cpu.accessControl to keep)",
+                        string.Join("; ", bad.ToArray()));
+                }
+                read.Sort(StringComparer.Ordinal);
+                notes.Add(read.Count == 0
+                    ? "WARNING: the project's anonymous user is active and holds no runtime right: once access control is on it gets nothing, but anyone who reaches the CPU is let in as it"
+                    : "WARNING: the project's anonymous user is active: once access control is on anyone who reaches the CPU gets, without a password, " + string.Join(", ", Distinct(read).ToArray()));
+            }
+            else
+            {
+                notes.Add("the project's anonymous user is not active");
+            }
+            var others = new List<string>();
+            foreach (string u in f.Users)
+            {
+                if (u != AccessSteps.UserName) others.Add(Json.Quote(u));
+            }
+            others.Sort(StringComparer.Ordinal);
+            notes.Add(others.Count == 0
+                ? "the project holds no local user besides \"nautilus\""
+                : "once access control is on, the project's local users besides \"nautilus\" may log on to the CPU with their own rights: " + string.Join(", ", others.ToArray()));
+        }
+
+        static List<string> Distinct(List<string> sorted)
+        {
+            var l = new List<string>();
+            foreach (string x in sorted)
+            {
+                if (l.Count == 0 || l[l.Count - 1] != x) l.Add(x);
+            }
+            return l;
+        }
+
+        // DownloadRefusal is why a download on a session whose apply
+        // turned access control on (and that no download on it loaded
+        // yet) is refused before anything reaches the CPU, or null: only a
+        // hardware download that resets the CPU's user management, with
+        // attestation.cpuAccessControl "disabled", loads it. A dry run
+        // too: it reaches the CPU.
+        // tried (Session.AccessTurnOnTried): a gated download may already
+        // have loaded it, so "enabled" (the logon route) is let too.
+        public static string DownloadRefusal(DownloadRequest req, bool tried)
+        {
+            var why = new List<string>();
+            if (req.DryRun) why.Add("it is a dry run, which reaches the CPU");
+            if (!req.Hardware) why.Add("it loads no hardware");
+            if (req.Decisions.UserManagementResetToProject != true) why.Add("it does not answer decisions.userManagementResetToProject yes");
+            bool attested = req.Attestation != null && req.Attestation.Given &&
+                (req.Attestation.CpuAccessControl == Attestation.CpuAccessDisabled || tried && req.Attestation.CpuAccessControl == Attestation.CpuAccessEnabled);
+            if (!attested)
+            {
+                why.Add(tried
+                    ? "it does not attest attestation.cpuAccessControl \"disabled\" or \"enabled\" (with attestation.by and attestation.text)"
+                    : "it does not attest attestation.cpuAccessControl \"disabled\" (with attestation.by and attestation.text)");
+            }
+            if (why.Count == 0) return null;
+            string head = tried
+                ? "the project's CPU access control was turned on (accessControlTurnOn) and a download that may have loaded it was not verified, so tiad loads it only by a hardware download that resets the CPU's user management to the project's, with attestation.cpuAccessControl \"disabled\" (the CPU still off), or \"enabled\" (that download did load: the logon route, tiad logged on as \"nautilus\"); this download is refused: "
+                : "an apply on this session turned the kept CPU's access control on (accessControlTurnOn), and tiad loads that only by a hardware download that resets the CPU's user management to the project's, with attestation.cpuAccessControl \"disabled\", the operator's own observation of the CPU; this download is refused: ";
+            return head + string.Join("; ", why.ToArray());
+        }
+    }
+
+    // AccessSteps applies cpu.accessControl fullAccessUser in two steps.
+    // Prepare, before any write of the apply, settles a found user's
+    // password and refuses what it cannot take over; Run, in the station
+    // step, sets access control on (only for a CPU the apply made), makes
+    // the role and the user when missing, grants Full access, and reads
+    // back: anything but the promised state refuses.
+    public static class AccessSteps
+    {
+        public const string UserName = "nautilus", RoleName = "nautilus full access";
+
+        // RoleComment marks a role tiad made.
+        public const string RoleComment = "made by nautilus: the runtime right Full access";
+
+        public const string MadeNote = "made the user \"nautilus\" with the runtime right Full access (role \"nautilus full access\"), its password from secrets.fullAccessPassword";
+
+        // UnchangedNote, SetNote, RecordedNote and TakenOverNote are what an
+        // apply says about a user the project held.
+        public const string UnchangedNote = "the project's user \"nautilus\" has the runtime right Full access (role \"nautilus full access\"); its password is unchanged: secrets.fullAccessPassword is the one tiad last set or recorded in this project (a change made in TIA since would not show)";
+        public const string SetNote = "the project's user \"nautilus\" has the runtime right Full access (role \"nautilus full access\"); its password is now secrets.fullAccessPassword";
+        public const string RecordedNote = "the project's user \"nautilus\" has the runtime right Full access (role \"nautilus full access\"); its password was not set: on fullAccessRecordOnly, tiad now records secrets.fullAccessPassword as the user's password, which it cannot check offline";
+        public const string TakenOverNote = "the project's user \"nautilus\", which carried no tiad record, is taken over on fullAccessRecordOnly: its comment is now tiad's record of secrets.fullAccessPassword as its password, which tiad did not set and cannot check offline, and it gets the runtime right Full access (role \"nautilus full access\")";
+
+        // Reused, ReusedOtherKey, ForeignUser and ForeignRole are the
+        // refusals; each leaves the project as it was.
+        public const string Reused = "TIA refuses secrets.fullAccessPassword for the user \"nautilus\": the user had that password recently, and TIA blocks a user's recent passwords for reuse: choose another password, or make the project again (POST /v1/projects)";
+        public const string ReusedOtherKey = "TIA refuses secrets.fullAccessPassword for the user \"nautilus\" as a password the user has now or had recently, and the project's record of it was made under another agent key, so tiad cannot tell which: if the password did not change, apply again with fullAccessRecordOnly to record it under this agent's key without setting it (journalled); otherwise choose another password, or make the project again (POST /v1/projects)";
+        public const string ForeignUser = "the project holds a user \"nautilus\" that carries no tiad record, so tiad did not make it and does not take it over unasked: set cpu.accessControl to keep, or apply with fullAccessRecordOnly to take it over with secrets.fullAccessPassword recorded as its password (journalled; tiad does not set it and cannot check it)";
+        public const string ForeignRole = "the project holds a role \"nautilus full access\" that tiad did not make, and tiad does not grant Full access to a role it did not make: set cpu.accessControl to keep";
+
+        // Prepare runs before any write of the apply. A refusal leaves the
+        // project as it was: a new record is written before the password
+        // and put back when TIA refuses it; w.Dirty says when putting it
+        // back failed.
+        public static void Prepare(IProjectUsers u, string want, string password, AccessRecords records, bool recordOnly, AccessWrites w, List<string> notes)
+        {
+            if (want != StationRules.AccessFullAccessUser) return;
+            if (records == null) throw new TiaException("no access record key: the agent sets one for every apply");
+            if (u.HasRole(RoleName) && u.RoleComment(RoleName) != RoleComment) throw TiadException.BadRequest("{0}", ForeignRole);
+            if (!u.HasUser(UserName)) return;
+            string had = u.Comment(UserName);
+            if (!AccessRecords.IsRecord(had))
+            {
+                if (!recordOnly) throw TiadException.BadRequest("{0}", ForeignUser);
+                u.SetComment(UserName, records.Make(UserName, password));
+                w.Wrote = true;
+                notes.Add(TakenOverNote);
+                Log.Line("audit access-record user={0}: taken over, secrets.fullAccessPassword recorded as its password without setting it (fullAccessRecordOnly)", Json.Quote(UserName));
+                return;
+            }
+            if (records.Matches(had, UserName, password))
+            {
+                notes.Add(UnchangedNote);
+                return;
+            }
+            if (recordOnly)
+            {
+                u.SetComment(UserName, records.Make(UserName, password));
+                w.Wrote = true;
+                notes.Add(RecordedNote);
+                Log.Line("audit access-record user={0}: secrets.fullAccessPassword recorded as its password without setting it (fullAccessRecordOnly)", Json.Quote(UserName));
+                return;
+            }
+            bool ours = records.Ours(had);
+            // The record first: a password set under a stale record would
+            // later read as unchanged.
+            u.SetComment(UserName, records.Make(UserName, password));
+            try
+            {
+                u.SetPassword(UserName, password);
+            }
+            catch (PasswordReusedException e)
+            {
+                PutBack(u, UserName, had, w);
+                if (w.Dirty) throw new TiaException((ours ? Reused : ReusedOtherKey) + "; putting the user's record back failed too: close this session without saving", e);
+                throw TiadException.BadRequest("{0}", ours ? Reused : ReusedOtherKey);
+            }
+            catch (Exception)
+            {
+                PutBack(u, UserName, had, w);
+                throw;
+            }
+            w.Wrote = true;
+            notes.Add(SetNote);
+        }
+
+        // PutBack puts user's record back after TIA refused a password;
+        // w.Dirty says when that failed too.
+        internal static void PutBack(IProjectUsers u, string user, string had, AccessWrites w)
+        {
+            try
+            {
+                u.SetComment(user, had);
+            }
+            catch (Exception)
+            {
+                w.Dirty = true;
+            }
+        }
+
+        // PrepareAll is ITia.PrepareAccess: before any write of the
+        // apply, every refusal it can make without writing
+        // (WebUsers.Check), then the Full access user's password, then the
+        // web users'.
+        public static void PrepareAll(IProjectUsers u, Station next, Secrets sec, bool recordOnly, AccessWrites w, List<string> notes)
+        {
+            WebUsers.Check(u, next.WebServer);
+            Prepare(u, next.Cpu.AccessControl, sec.FullAccessPassword, sec.Records, recordOnly, w, notes);
+            WebUsers.Passwords(u, next.WebServer, sec, w, notes);
+        }
+
+        // Remove is ITia.RemoveAccess: it removes from the project's users
+        // and roles what made names, and nothing else; it returns what it
+        // removed, as an upload reports it.
+        public static List<string> Remove(IProjectUsers u, AccessMade made)
+        {
+            var removed = new List<string>();
+            if (made.User && u.HasUser(UserName))
+            {
+                u.DeleteUser(UserName);
+                removed.Add("user " + Json.Quote(UserName));
+            }
+            if (made.Role && u.HasRole(RoleName))
+            {
+                u.DeleteRole(RoleName);
+                removed.Add("role " + Json.Quote(RoleName));
+            }
+            foreach (string n in made.WebUsers)
+            {
+                if (!u.HasUser(n)) continue;
+                u.DeleteUser(n);
+                removed.Add("user " + Json.Quote(n));
+            }
+            foreach (string r in made.WebRoles)
+            {
+                if (!u.HasRole(r)) continue;
+                u.DeleteRole(r);
+                removed.Add("role " + Json.Quote(r));
+            }
+            return removed;
+        }
+
+        // Run does the rest of what want asks, in the station step. madeCpu
+        // is the CPU the apply made (true) or kept (false); into collects
+        // what this run made in the project's users and roles, as soon as
+        // it is made, so a failure part-way still leaves it on the session.
+        // A found user's password is Prepare's, never Run's.
+        public static void Run(IAccessControl c, string want, string password, AccessRecords records, bool madeCpu, bool turnOn, AccessMade into, List<string> notes)
+        {
+            if (want == StationRules.AccessKeep) return;
+            if (records == null) throw new TiaException("no access record key: the agent sets one for every apply");
+            string current = c.State();
+            AccessRule.Plan(madeCpu ? null : current, want, password != "", turnOn);
+            if (!madeCpu && current == TurnOnRule.Disabled)
+            {
+                // Plan let it: only on accessControlTurnOn.
+                c.Enable();
+                into.Writes++;
+                string now = c.State();
+                if (now != AccessRule.Enabled)
+                {
+                    throw new TiaException("after turning the kept CPU's access control on it reads " + (now == AccessRule.Absent ? "absent" : now) + ", not " + AccessRule.Enabled);
+                }
+                Log.Line("audit access-turn-on: the kept CPU's access control {0} -> {1} (accessControlTurnOn)", Json.Quote(current), Json.Quote(now));
+                notes.Add(TurnOnRule.TurnedOnNote);
+            }
+            if (madeCpu && current != AccessRule.Enabled)
+            {
+                if (current == AccessRule.Absent)
+                {
+                    throw new TiaException("the new CPU has no access control setting, so it cannot have a Full access user: set cpu.accessControl to keep");
+                }
+                c.Enable();
+                into.Writes++;
+                string now = c.State();
+                if (now != AccessRule.Enabled)
+                {
+                    throw new TiaException("after turning access control on the CPU reads " + (now == AccessRule.Absent ? "absent" : now) + ", not " + AccessRule.Enabled);
+                }
+            }
+            bool madeRole = !c.HasRole(RoleName);
+            if (madeRole)
+            {
+                c.MakeRole(RoleName, RoleComment);
+                into.Role = true;
+            }
+            else if (c.RoleComment(RoleName) != RoleComment)
+            {
+                throw new TiaException(ForeignRole);
+            }
+            // Already as the steps below leave it: they write nothing new
+            // (the grant and the role are idempotent; Writes counts change).
+            bool already = !madeRole && c.HasUser(UserName) && AccessRecords.IsRecord(c.Comment(UserName)) && c.Check(UserName, RoleName) == null;
+            if (!already) into.Writes++;
+            c.GrantFullAccess(RoleName);
+            bool madeUser = !c.HasUser(UserName);
+            if (madeUser)
+            {
+                c.MakeUser(UserName, password);
+                into.User = true;
+                c.SetComment(UserName, records.Make(UserName, password));
+                notes.Add(MadeNote);
+            }
+            else if (!AccessRecords.IsRecord(c.Comment(UserName)))
+            {
+                throw new TiaException(ForeignUser);
+            }
+            c.AddRole(UserName, RoleName);
+            string bad = c.Check(UserName, RoleName);
+            if (bad != null) throw new TiaException(bad);
+            Log.Line("access control: {0}, user {1}, role {2}", c.State(), madeUser ? "made" : "found", madeRole ? "made" : "found");
+        }
+    }
+}

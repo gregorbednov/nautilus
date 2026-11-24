@@ -159,8 +159,8 @@ func registerServices(srv *opcserver.Server, ns *namespace) {
 	srv.RegisterHandler(id.TranslateBrowsePathsToNodeIDsRequest_Encoding_DefaultBinary, func(_ *uasc.SecureChannel, r ua.Request, _ uint32) (ua.Response, error) {
 		return translateBrowsePaths(srv, r)
 	})
-	srv.RegisterHandler(id.CallRequest_Encoding_DefaultBinary, func(_ *uasc.SecureChannel, r ua.Request, _ uint32) (ua.Response, error) {
-		return callMethods(srv, ns, r)
+	srv.RegisterHandler(id.CallRequest_Encoding_DefaultBinary, func(sc *uasc.SecureChannel, r ua.Request, _ uint32) (ua.Response, error) {
+		return callMethods(srv, ns, sc, r)
 	})
 	srv.RegisterHandler(id.CreateSubscriptionRequest_Encoding_DefaultBinary, func(sc *uasc.SecureChannel, r ua.Request, reqID uint32) (ua.Response, error) {
 		return createSubscription(srv, ns, sc, r, reqID)
@@ -316,7 +316,7 @@ func readAttributes(srv *opcserver.Server, ns *namespace, sc *uasc.SecureChannel
 		return nil, ua.StatusBadTooManyOperations
 	}
 	results := make([]*ua.DataValue, len(req.NodesToRead))
-	var writer *bool // the session's write standing, when an item asks
+	var writer *client // the session's write standing, when an item asks
 	for i, n := range req.NodesToRead {
 		if n == nil || n.NodeID == nil {
 			results[i] = status(ua.StatusBadNodeIDInvalid)
@@ -331,14 +331,15 @@ func readAttributes(srv *opcserver.Server, ns *namespace, sc *uasc.SecureChannel
 		if dv == nil {
 			dv = status(ua.StatusBadNodeIDUnknown)
 		}
-		if dv.Status == ua.StatusBadAttributeIDInvalid && n.NodeID.Namespace() != ns.id {
+		if dv.Status == ua.StatusBadAttributeIDInvalid && !ns.owns(n.NodeID) {
 			dv = accessAttribute(srv, n.NodeID, n.AttributeID, dv)
 		}
-		if n.AttributeID == ua.AttributeIDUserAccessLevel && n.NodeID.Namespace() == ns.id && dv.Status == ua.StatusGood {
+		if n.AttributeID == ua.AttributeIDUserAccessLevel && ns.owns(n.NodeID) && dv.Status == ua.StatusGood {
 			if writer == nil {
 				// As the Write service judges it, once per request: a
-				// certificate since untrusted or expired reads CurrentRead.
-				w := ns.w.channelWriter(sc) && ns.w.who(srv, sc, req.RequestHeader).writer
+				// certificate since untrusted or expired, or a user who no
+				// longer holds their sign-in, reads CurrentRead.
+				w := ns.w.who(srv, sc, req.RequestHeader)
 				writer = &w
 			}
 			if lvl, ok := ns.userAccessLevel(n.NodeID, *writer); ok {

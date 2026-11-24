@@ -6,6 +6,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/joyautomation/nautilus/internal/project"
 	"github.com/joyautomation/nautilus/logix/facade"
 	"github.com/joyautomation/nautilus/runtime"
+	"github.com/joyautomation/nautilus/virtdev"
 )
 
 // liveTarget is the facade a `--target logix` run reads and writes
@@ -139,6 +141,19 @@ func runTest(args []string) int {
 		}
 	}
 
+	// The project's virtual devices, when it has any: a suite with
+	// `devices: true` runs against them, in process and in virtual time.
+	runOpts := []acceptance.Option{acceptance.WithAlarms(proj.AlarmEngine), acceptance.WithSubstitutes(proj.AcceptanceSubstitutes())}
+	if set, err := composeVirtualDevices(dir, proj.Devices()); err != nil && !errors.Is(err, os.ErrNotExist) && !*list {
+		fmt.Fprintln(os.Stderr, "naut test:", err)
+		return 1
+	} else if err == nil && !*list {
+		drivers := proj.Drivers()
+		runOpts = append(runOpts, acceptance.WithDevices(func(clk runtime.Clock) (acceptance.DeviceDriver, error) {
+			return virtdev.NewInProcess(set, clk, drivers)
+		}))
+	}
+
 	var results []acceptance.Result
 	for _, p := range paths {
 		suite, err := acceptance.LoadSuite(fsys, p)
@@ -174,7 +189,7 @@ func runTest(args []string) int {
 			// The manifest's own alarms, over each test's own runtime and
 			// virtual clock, with an in-memory journal and no notifiers — a
 			// test must never write to the site's alarm database.
-			rs, err = acceptance.RunSuite(suite, proj.Runtime, acceptance.WithAlarms(proj.AlarmEngine))
+			rs, err = acceptance.RunSuite(suite, proj.Runtime, runOpts...)
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "naut test:", err)

@@ -51,6 +51,211 @@ type Status struct {
 	LeaderAddr  string `json:"-"` // host:port for standby proxying; json-excluded so pod IPs never reach a browser
 	IsLeader    bool   `json:"isLeader"`
 	Transitions int    `json:"transitions"`
+	// Warnings are standing conditions an operator must know about, shown
+	// by /api/cluster and the dashboard: a redundant pair's retained
+	// values not being replicated yet (#710), for one.
+	Warnings []string `json:"warnings,omitempty"`
+	// Log is a redundant pair's operator-intent log (#710 3b-4b): its
+	// copies, reached or not, synced or not, and this one's. Nil
+	// elsewhere.
+	Log *LogStatus `json:"log,omitempty"`
+	// Stream is a redundant pair's state stream (#710 S1b) as this
+	// controller sees it: the leader's sending, or the standby's following.
+	// Nil elsewhere.
+	Stream *StreamStatus `json:"stream,omitempty"`
+	// A redundant pair member's duplicate state (#1029 3c): Marked, the
+	// names its voter marks as run by two processes at once; Held, a
+	// voter's last word marked this controller's own name, so it
+	// campaigns no more until the mark is cleared; Spare, this controller
+	// is a copy and silent.
+	Marked []string `json:"marked,omitempty"`
+	Held   bool     `json:"held,omitempty"`
+	Spare  bool     `json:"spare,omitempty"`
+	// WritesCut is a redundant pair member's count, by device, of writes
+	// cut at the send deadline in the last five minutes (#710, design
+	// §3.4): the write's outcome is unknown, so a device on this list is
+	// too slow for the pair's send budget.
+	WritesCut map[string]int `json:"writesCut,omitempty"`
+	// PeerKeys are a redundant pair member's peer TLS keys (#710 per-box
+	// keys): its own, and the ones it pinned for the other members. Nil
+	// elsewhere, and with peer TLS off.
+	PeerKeys *PeerKeys `json:"peerKeys,omitempty"`
+}
+
+// PeerKeys are a pair member's peer TLS key fingerprints (SHA256:..., as
+// ssh shows one): an operator compares them on the boxes themselves.
+type PeerKeys struct {
+	// Self is this box's own key ("" while it can't be made: Error says
+	// why, such as a link that doesn't resolve yet).
+	Self  string `json:"self"`
+	Error string `json:"error,omitempty"`
+	// Pinned is each other member's pinned key, by name (the peer's a or
+	// b, and the witness's incarnations, witness@<incarnation>); a member
+	// not pinned yet is absent.
+	Pinned map[string]string `json:"pinned"`
+	// Refused is each name's dropped key that stays refused (naut
+	// redundancy unpin) until another key is pinned or a second unpin
+	// lifts it.
+	Refused map[string]string `json:"refused,omitempty"`
+	// WitnessWaiting is the fingerprint of a new witness key refused
+	// until an operator allows it (naut redundancy unpin witness, on both
+	// controllers); WitnessAllowed is the one this controller takes.
+	WitnessWaiting string `json:"witnessWaiting,omitempty"`
+	WitnessAllowed string `json:"witnessAllowed,omitempty"`
+}
+
+// StreamStatus is a pair's state stream (#710 S1b, design §4.1) as one
+// controller sees it.
+type StreamStatus struct {
+	// Role is "leader" (it sends) or "standby" (it follows).
+	Role string `json:"role"`
+	// State, on a standby: in-sync (every task's frame applied, images
+	// arriving), connecting (no stream yet, or it broke), behind (the
+	// newest image is older than the leader's interval allows),
+	// layout-differs (a task this build runs another program for: a
+	// takeover would be cold for it), too-big (the leader's image is over
+	// the limit and none is sent; Bytes says how big), refused (images
+	// arrive but fail the term check, Detail says why), off (this
+	// controller leads, is a spare, or has no leader to follow). On a
+	// leader: sending, no-standby (none connected), too-big.
+	State  string `json:"state"`
+	Detail string `json:"detail,omitempty"`
+	// Term and Seq are the newest image's place in the stream: sent (a
+	// leader) or applied (a standby).
+	Term uint64 `json:"term,omitempty"`
+	Seq  uint64 `json:"seq,omitempty"`
+	// AgeMs is, on a standby, how long ago (its own clock) the newest
+	// image arrived; -1 before the first. What a takeover now would load
+	// is that old.
+	AgeMs int64 `json:"ageMs"`
+	// LagMs is, on a standby, from the copy at the leader (its clock) to
+	// the image's arrival here (this one's): the two clocks' offset is in
+	// it.
+	LagMs int64 `json:"lagMs,omitempty"`
+	// IntervalMs is the effective interval between images: 100 ms, or
+	// longer where the budget stretches it.
+	IntervalMs int64 `json:"intervalMs,omitempty"`
+	// Bytes is the newest image's size (or, too-big, the size refused);
+	// TotalBytes all sent or received in this boot; BudgetBytes the
+	// budget a second.
+	Bytes       int    `json:"bytes,omitempty"`
+	TotalBytes  uint64 `json:"totalBytes,omitempty"`
+	BudgetBytes int64  `json:"budgetBytes,omitempty"`
+	// Persisted is the image the standby's retain file holds (term, seq).
+	PersistedTerm uint64 `json:"persistedTerm,omitempty"`
+	PersistedSeq  uint64 `json:"persistedSeq,omitempty"`
+	// LayoutDiffers names the tasks whose frames were not applied.
+	LayoutDiffers []string `json:"layoutDiffers,omitempty"`
+	// FlushMs is the last takeover's flush of the newest image into the
+	// retain file (its fsync included): part of that takeover's time.
+	FlushMs float64 `json:"flushMs,omitempty"`
+	// TakeoverImageAgeMs is how old the newest image was at this
+	// controller's last takeover (its own clock): the retained values it
+	// took over with are as of then. -1 when it had none (it never
+	// followed, or took over before its first image).
+	TakeoverImageAgeMs int64 `json:"takeoverImageAgeMs"`
+	// Takeover is this controller's last takeover, hot or cold (#710 S2):
+	// empty before its first. TakeoverCold says why it was cold.
+	Takeover     string `json:"takeover,omitempty"`
+	TakeoverCold string `json:"takeoverCold,omitempty"`
+	// TakeoverOldestFrameMs is, after a hot takeover, how old the oldest
+	// task's frame was at the install (a fast task's state can be older
+	// than the image by up to the slowest task's period).
+	TakeoverOldestFrameMs int64 `json:"takeoverOldestFrameMs,omitempty"`
+	// RetainInMemory: this leader took over hot over a retain store it
+	// could not read, and holds its retained values only in memory until
+	// a save succeeds (a power cycle now loses them).
+	RetainInMemory bool `json:"retainInMemory,omitempty"`
+	// TakeoverHold is the leader's takeover hold (#710 (b2)), nil when the
+	// manifest sets none, and on a standby.
+	TakeoverHold *HoldStatus `json:"takeoverHold,omitempty"`
+	// Failback is the leader's failback (#710 d2), nil when the manifest
+	// sets none, and on a standby.
+	Failback *FailbackStatus `json:"failback,omitempty"`
+}
+
+// FailbackStatus is a leader's failback (redundancy.failback).
+type FailbackStatus struct {
+	Prefer  string `json:"prefer"`
+	AfterMs int64  `json:"afterMs"`
+	Max     int    `json:"max"`
+	// Suspended: no failback until resumed; Stopped by the ping-pong stop.
+	// By, Why and AtMs (Unix ms) say who, why and when.
+	Suspended bool   `json:"suspended,omitempty"`
+	Stopped   bool   `json:"stopped,omitempty"`
+	By        string `json:"by,omitempty"`
+	Why       string `json:"why,omitempty"`
+	AtMs      int64  `json:"atMs,omitempty"`
+	// Count is the ping-pong count (failbacks each followed by a failover).
+	Count int `json:"count,omitempty"`
+	// ReadyMs is how long the preferred standby has been ready (a
+	// failback runs at AfterMs); NotReady why it is not.
+	ReadyMs  int64  `json:"readyMs,omitempty"`
+	NotReady string `json:"notReady,omitempty"`
+}
+
+// HoldStatus is a leader's takeover hold (redundancy.takeover-hold).
+type HoldStatus struct {
+	// Release is the tag the program sets TRUE to release; MaxMs the
+	// time to the hold's alarm.
+	Release string `json:"release"`
+	MaxMs   int64  `json:"maxMs"`
+	// Holding: the outputs are held now (nothing goes to the field), for
+	// AgeMs; Inherited from the previous leader; AtMax past MaxMs.
+	Holding   bool  `json:"holding"`
+	Inherited bool  `json:"inherited,omitempty"`
+	AtMax     bool  `json:"atMax,omitempty"`
+	AgeMs     int64 `json:"ageMs,omitempty"`
+	// Undelivered names the safe values not yet at their devices.
+	Undelivered []string `json:"undelivered,omitempty"`
+}
+
+// LogStatus is a pair's operator-intent log as one controller sees it.
+type LogStatus struct {
+	// Synced: this controller's copy is known to hold every committed
+	// entry. Lost names where a lost copy was kept.
+	Synced bool   `json:"synced"`
+	Lost   string `json:"lost,omitempty"`
+	// Writable: a substitute, an acknowledgement or a shelve can be
+	// committed now; Reason says why not.
+	Writable bool         `json:"writable"`
+	Reason   string       `json:"reason,omitempty"`
+	LastSeq  uint64       `json:"lastSeq"`
+	Commit   uint64       `json:"commit"`
+	Replicas []LogReplica `json:"replicas"`
+	// Vouch is the last time a person vouched for this copy.
+	Vouch *LogVouch `json:"vouch,omitempty"`
+	// History is the log's history (#1029 3c-3c-2a): above 0 once a
+	// person accepted a loss, HistoryBy who. SupersedeTo is a higher one
+	// this copy takes at its next start, Superseded where its last
+	// superseded log was kept, and Forked the copies whose log
+	// forked from this one.
+	History     uint64   `json:"history,omitempty"`
+	HistoryBy   string   `json:"historyBy,omitempty"`
+	SupersedeTo uint64   `json:"supersedeTo,omitempty"`
+	Superseded  string   `json:"superseded,omitempty"`
+	Forked      []string `json:"forked,omitempty"` // by name
+}
+
+// LogReplica is one copy of the log: a, b or the witness.
+type LogReplica struct {
+	Name    string `json:"name"`
+	Self    bool   `json:"self,omitempty"`
+	Reached bool   `json:"reached"`
+	Synced  bool   `json:"synced"`
+}
+
+// LogVouch is a person's word for a copy: who, when, and its last entry.
+type LogVouch struct {
+	By       string    `json:"by"`
+	At       time.Time `json:"at"`
+	LastTerm uint64    `json:"lastTerm"`
+	LastSeq  uint64    `json:"lastSeq"`
+}
+
+// apiClient is the one call the elector makes of the Kubernetes API.
+type apiClient interface {
+	Do(method, path string, body []byte) (*http.Response, error)
 }
 
 type Elector struct {
@@ -59,8 +264,13 @@ type Elector struct {
 	holderID string // what we write into the lease: "name|host:port"
 	name     string
 	duration time.Duration
-	client   *k8sapi.Client
-	mode     string
+	// client reaches the Kubernetes API in cluster mode; an interface, so a
+	// standalone elector (NewLocal, the browser playground's) never makes
+	// the concrete client reachable: it would keep net/http's client, TLS and
+	// HTTP/2 in the wasm. Only newWithClient stores one.
+	client    apiClient
+	namespace string
+	mode      string
 
 	isLeader    bool
 	holder      string // current lease holderIdentity, verbatim
@@ -100,9 +310,10 @@ func (e *Elector) Term() uint64 {
 }
 
 // Health reports whether this replica's scans are live at now: nil when
-// they are, else an error naming what is stuck. max is the longest one
-// scan may be in progress before it counts as stuck: the elector passes
-// half its lease. runtime.(*Runtime).Liveness is one.
+// they are, else an error naming what is stuck. max caps how long one scan
+// may be in progress, and how far past its slot a task between scans may
+// be (starved), before it counts as stuck: the elector passes half its
+// lease. runtime.(*Runtime).Liveness is one.
 type Health func(now time.Time, max time.Duration) error
 
 // SetHealth makes the lease depend on live scans (#621): the elector asks
@@ -249,10 +460,11 @@ func newWithClient(c *k8sapi.Client, leaseName, identity, selfAddr string) *Elec
 		// this bounds worst-case failover. 4s renews every 1s — snappy
 		// without risking false failover on a brief GC/network hiccup. A
 		// gracefully deleted leader (Release on SIGTERM) fails over faster.
-		duration: 4 * time.Second,
-		client:   c,
-		mode:     "cluster",
-		decided:  make(chan struct{}),
+		duration:  4 * time.Second,
+		client:    c,
+		namespace: c.Namespace,
+		mode:      "cluster",
+		decided:   make(chan struct{}),
 	}
 }
 
@@ -549,13 +761,13 @@ func (e *Elector) Status() Status {
 // ---- Lease API plumbing ----
 
 func (e *Elector) leasePath() string {
-	return "/apis/coordination.k8s.io/v1/namespaces/" + e.client.Namespace + "/leases/" + e.name
+	return "/apis/coordination.k8s.io/v1/namespaces/" + e.namespace + "/leases/" + e.name
 }
 
 func (e *Elector) newLease(now time.Time, transitions int) *lease {
 	l := &lease{APIVersion: "coordination.k8s.io/v1", Kind: "Lease"}
 	l.Metadata.Name = e.name
-	l.Metadata.Namespace = e.client.Namespace
+	l.Metadata.Namespace = e.namespace
 	l.Spec = leaseSpec{
 		HolderIdentity:       e.holderID,
 		LeaseDurationSeconds: e.leaseSeconds(),
@@ -586,7 +798,7 @@ func (e *Elector) get() (*lease, int, error) {
 }
 
 func (e *Elector) post(l *lease) error {
-	collection := "/apis/coordination.k8s.io/v1/namespaces/" + e.client.Namespace + "/leases"
+	collection := "/apis/coordination.k8s.io/v1/namespaces/" + e.namespace + "/leases"
 	return e.send(http.MethodPost, collection, l, http.StatusCreated)
 }
 
@@ -620,3 +832,6 @@ func (e *Elector) send(method, path string, l *lease, want int) error {
 func mtime(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000000Z")
 }
+
+// ErrNoFailback: the manifest sets no redundancy.failback (#710 d2).
+var ErrNoFailback = errors.New("this pair has no failback: redundancy.failback is not set")

@@ -104,9 +104,12 @@ type Manifest struct {
 	Outputs string `yaml:"outputs"`
 	// RunPort is the controller's own "the local bus is exchanging
 	// process data" diagnostic (default DefaultRunPort); it is read with
-	// every scan and a stopped bus makes every input Bad. Empty disables
-	// the check.
+	// every scan and a stopped bus makes every input Bad. "none" in the
+	// manifest disables the check (RunPort is then empty).
 	RunPort string `yaml:"run-port"`
+	// noRunPort remembers "none", so filling the defaults again (New does,
+	// after ParseManifest) keeps the check off (#874).
+	noRunPort bool
 	// ByteOrder is how multi-byte values sit in the arrays: "big"
 	// (default; Axioline process data is Motorola order) or "little".
 	ByteOrder string `yaml:"byte-order"`
@@ -272,9 +275,11 @@ func (m *Manifest) fillDefaults() {
 	}
 	switch m.RunPort {
 	case "":
-		m.RunPort = DefaultRunPort
+		if !m.noRunPort {
+			m.RunPort = DefaultRunPort
+		}
 	case "none":
-		m.RunPort = ""
+		m.RunPort, m.noRunPort = "", true
 	}
 }
 
@@ -282,6 +287,34 @@ func (m *Manifest) fillDefaults() {
 const DefaultOutputWatchdog = time.Second
 
 // watchdog is the validated OutputWatchdog.
+// safeOnStop reports whether something takes the outputs to a safe state
+// when this driver stops writing: the shim's output watchdog, on transport
+// shm with a non-zero output-watchdog. Otherwise they hold.
+func (m Manifest) safeOnStop() bool {
+	return m.Transport == TransportShm && m.watchdog() > 0
+}
+
+// Warnings are the conditions `naut check` reports without failing. One
+// today: output bindings on a route with no safe state (transport grpc,
+// or shm with output-watchdog: 0). If naut stops, those outputs hold their
+// last values: nothing on the route takes them to a safe state. Measured
+// on an AXC F 2152 for shm with watchdog 0, where the firmware ignored
+// naut's session dropping (#863). For grpc it is inferred from that, not
+// measured. Holding can be the engineered choice, so it is a warning,
+// never an error.
+func (m Manifest) Warnings() []string {
+	if len(m.OutputNames()) == 0 || m.safeOnStop() {
+		return nil
+	}
+	route := "transport grpc"
+	if m.Transport == TransportShm {
+		route = "transport shm with output-watchdog " + m.OutputWatchdog
+	}
+	return []string{fmt.Sprintf("%s: if naut stops, the %d output binding(s) HOLD their last values "+
+		"(nothing on this route takes them to a safe state); "+
+		"for a safe state, use transport shm with output-watchdog > 0", route, len(m.OutputNames()))}
+}
+
 func (m Manifest) watchdog() time.Duration {
 	wd, _ := time.ParseDuration(m.OutputWatchdog)
 	return wd

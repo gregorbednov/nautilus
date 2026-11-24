@@ -6,6 +6,7 @@
 package server
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math"
 	"strconv"
@@ -30,6 +31,9 @@ type member struct {
 	// and every Value read goes through resolve; the members Browse lists
 	// (children, roots) are only ever named, never read.
 	absent bool
+	// wire is "ByteString" or "ByteArray" for a STRING of hex served as
+	// octets (a mapped node's Wire).
+	wire string
 }
 
 // walk resolves segs (ir.PathSegments form: member names and "[n]") below
@@ -137,17 +141,16 @@ func children(m member) []member {
 
 // compositeArray says whether an array's elements are themselves structs,
 // FBs or arrays — which OPC UA cannot carry as one array Variant, so the
-// array is exposed as an Object with one child per element instead.
+// array is exposed as an Object with one child per element instead. An
+// IEC array is homogeneous, so its first element decides; an empty one is
+// not composite.
 func compositeArray(v ir.Value) bool {
-	if v.Kind != ir.TypeArray {
+	if v.Kind != ir.TypeArray || len(v.Arr) == 0 {
 		return false
 	}
-	for _, e := range v.Arr {
-		switch e.Kind {
-		case ir.TypeStruct, ir.TypeFB, ir.TypeArray:
-			return true
-		}
-		return false
+	switch v.Arr[0].Kind {
+	case ir.TypeStruct, ir.TypeFB, ir.TypeArray:
+		return true
 	}
 	return false
 }
@@ -170,8 +173,24 @@ func isObject(m member) bool {
 // enumeration to Int32 (OPC UA enumerations are Int32-valued), TIME to
 // Duration (a Double of milliseconds). Everything else is the canonical
 // 64-bit type, which is also what Sparkplug publishes.
+// maxBytes is the most octets a ByteString or Byte[] node carries: an
+// IO-Link ISDU value is up to 232 octets and process data up to 32 (the
+// client's opcua.MaxBytes; a test holds the two equal).
+const maxBytes = 232
+
+// isByteArray is a STRING of hex served as Byte[] (ValueRank 1).
+func isByteArray(m member) bool { return m.wire == "ByteArray" && m.val.Kind == ir.TypeString }
+
 func dataType(m member) uint32 {
 	v, t := m.val, m.typ
+	if v.Kind == ir.TypeString {
+		switch m.wire {
+		case "ByteString":
+			return id.ByteString
+		case "ByteArray":
+			return id.Byte
+		}
+	}
 	if v.Kind == ir.TypeArray {
 		if len(v.Arr) > 0 {
 			var et *ir.Type
@@ -345,6 +364,19 @@ func variant(m member) (*ua.Variant, error) {
 		if isObject(m) {
 			return nil, fmt.Errorf("%s is an object, not a variable", m.addr)
 		}
+		if m.wire != "" && v.Kind == ir.TypeString {
+			raw, err := hex.DecodeString(v.S)
+			if err != nil {
+				return nil, fmt.Errorf("%s holds %q, which is not hex text: %w", m.addr, v.S, err)
+			}
+			if len(raw) > maxBytes {
+				return nil, fmt.Errorf("%s holds %d octets, more than the %d a byte value carries", m.addr, len(raw), maxBytes)
+			}
+			if m.wire == "ByteArray" {
+				return ua.NewVariant(ua.ByteArray(raw))
+			}
+			return ua.NewVariant(raw)
+		}
 		return ua.NewVariant(scalar(v, dt))
 	}
 	if compositeArray(v) {
@@ -413,14 +445,20 @@ func mapInts[T any](arr []ir.Value, f func(int64) T) []T {
 // still worth showing, which is exactly what Uncertain_LastUsableValue
 // means — and the two Bad qualities are Bad, so a client that only checks
 // the severity bit treats them the way an HMI treats a bad binding.
+// Substituted is Uncertain_SubstituteValue, the code OPC UA has for exactly
+// that (#707). A quality this build does not know is Bad, never Good.
 func statusOf(q nio.Quality) ua.StatusCode {
 	switch q {
+	case nio.Good:
+		return ua.StatusGood
 	case nio.Stale:
 		return ua.StatusUncertainLastUsableValue
 	case nio.Bad:
 		return ua.StatusBadDeviceFailure
 	case nio.NotConnected:
 		return ua.StatusBadNotConnected
+	case nio.Substituted:
+		return ua.StatusUncertainSubstituteValue
 	}
-	return ua.StatusGood
+	return ua.StatusBad
 }

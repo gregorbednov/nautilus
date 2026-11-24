@@ -254,18 +254,25 @@ metrics) or `spBv1.0/<group>/DCMD/<edge>/<device>` (device metrics), QoS
 
 ### Writes to a site that is down
 
-**A command to a dark site is delivered when it comes back, once, unless
-the site already reports that value.**
+**A command to a dark site is delivered when it comes back, once.**
 
 An operator who dials a setpoint on a site showing `__Online: false` has
 still asked for something, and the ask outlives the outage: the write is
 held per site (the latest value per tag, up to 256 tags) and delivered on
-that site's next `NBIRTH` — after the birth has settled what the site
-actually holds. If the site comes back already at the commanded value,
-the command is satisfied and nothing goes on the wire; if it comes back
-at anything else, one command goes out, and only for the members the
-operator touched. Write twice while the site is down and the second value
-is what lands, because that is what the operator asked for last.
+that site's next birth. Write twice while the site is down and the second
+value is what lands, because that is what the operator asked for last;
+the first, superseded one never goes out. Writing the setpoint back to
+its value from before the outage is a write like any other: for a plain
+output, that value goes out at the birth (below).
+
+- **A plain output:** the parked command always goes out at the birth.
+  A site that died or reborn may hold anything, and the host does not
+  read a plain output's value from the birth, so it does not assume the
+  command has already happened.
+- **A template member output:** the command settles against the value
+  the birth reports. If the site comes back already at the commanded
+  value nothing goes on the wire; if it comes back at anything else, one
+  command goes out, for the members the operator touched.
 
 A device works the same way. A command for a dark device is held even
 when its node is online, and goes out on that device's next `DBIRTH`. A
@@ -279,6 +286,29 @@ parked, `QueuedWrites` how many are waiting *right now* (per site in
 `/api/drivers`), and `WriteDrops` is reserved for commands that will
 never be sent at all — a node no topic addresses, or a site whose queue
 is full.
+
+### After a site restarts
+
+**After an edge node or device restarts, the host adopts the value it
+reports; the program's held command is not re-sent until it changes.**
+
+If a program holds a setpoint at 11 and the site reboots and births with
+50, the site stays at 50. Writing 11 again changes nothing, because the
+program's value didn't change; the next different value goes out as
+usual. A command written *while* the site
+was down is the case above, and is delivered when it comes back. To put a
+value back after a restart, write it again as a change (for example
+through a different value), or drive it from the site's own birth values
+in your program.
+
+The same goes for a command lost when the host loses its broker.
+Commands go out at QoS 0, as Sparkplug specifies, so the host can't tell
+whether one sent just as the broker closed its session ever arrived. If
+it didn't, the site's birth after the reconnect reports the old value,
+the host adopts it, and the program's command isn't sent again until it
+changes. To be sure a command took, read the value back from the site's
+data; a command the host couldn't send at all (no session) is still
+delivered once it reconnects.
 
 ## Writing template members
 
@@ -346,7 +376,15 @@ So the driver reads its output set as follows.
 
 - **The first snapshot after `Start` is the baseline.** It is recorded
   and published to nobody: it describes the world at t=0, it does not
-  command it.
+  command it. This differs on purpose from the Modbus and OPC UA
+  drivers, which compare each output's first computed value with what
+  their device holds and write it if it differs: those outputs drive
+  the controller's own field device. A host's outputs are commands into
+  *another* controller's state, and an edge node owns its setpoints, so
+  starting a host never writes over them. The consequence: a host's
+  first computed value is sent only when it changes afterwards. A value
+  your program computes once, and never changes, is not sent to a site
+  that holds something else.
 - **Thereafter only a value that actually moved is a command**, and it
   is published once, however many scans hand it back afterwards.
 - **A member output adopts the site's live value** the moment its parent

@@ -1,7 +1,7 @@
 // Command nautilus is the developer CLI for the nautilus SCADA framework.
 //
 //	naut lsp        run the IEC 61131-3 language server (stdio)
-//	naut check      compile .st/.fbd files and report diagnostics (CI-friendly)
+//	naut check      compile .st/.fbd/.ld/.sfc files and report diagnostics (CI-friendly)
 //	naut new        scaffold a new nautilus project (interactive)
 //	naut fbd graph  emit a .fbd file's diagram render model as JSON
 //
@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 
 	"github.com/joyautomation/nautilus/internal/lsp"
+	"github.com/joyautomation/nautilus/internal/project"
 )
 
 const usage = `nautilus — SCADA, built like software
@@ -21,8 +22,9 @@ const usage = `nautilus — SCADA, built like software
 Usage:
   naut lsp            Run the ST language server on stdio (used by the
                           VS Code extension; not meant to be run by hand).
-  naut check [path]   Compile every .st file under path (default ".")
-                          and print diagnostics. Exits 1 on any error.
+  naut check [path]   Compile every program under path (default "."): .st,
+                          .ld, .fbd and .sfc. Prints diagnostics and exits 1
+                          on any error.
   naut new [name]     Scaffold a new nautilus project. --template picks
                           the shape: demo (default) or minimal for a manifest
                           project — nautilus.yaml + IEC files, no toolchain —
@@ -44,7 +46,13 @@ Usage:
                           responses assert exactly (-run re, -v, -json).
   naut build [dir]    Emit a self-contained controller binary from a
                           manifest project (-o name). Ships like any compiled
-                          program; no Go toolchain involved.
+                          program; no Go toolchain involved. -runtime <naut>
+                          builds on another naut binary: a release's
+                          linux_arm64 naut makes an ARM64 controller.
+  naut deploy <cmd> <ssh-target>
+                      Install, update (rolled back if it does not start),
+                          roll back, back up or restore a controller on a
+                          Linux box with systemd, over SSH (naut deploy help).
 
                           run, test, and build take -m <manifest> to load one
                           other than nautilus.yaml. That is how one project
@@ -63,6 +71,9 @@ Usage:
                           is detectable, info; with a logixd agent, build,
                           drift and online edits. Experimental: write and
                           deploy a nautilus program to a Logix controller.
+  naut siemens <cmd>  Siemens S7-1500 (experimental): serve a running CPU on
+                          the runtime API over the PLC Web API; cert prints
+                          the CPU certificate's SHA-256 to pin.
   naut sparkplug <cmd> Sparkplug B host tools: import (listen to a group
                           and generate types + manifest + tag file), browse,
                           and tags (re-derive the tag file, no broker).
@@ -74,6 +85,13 @@ Usage:
                           manifest + tag file for the opcua driver),
                           browse (print its variables), tags (re-derive
                           the tag file, no server).
+  naut devices <cmd>  Virtual field devices (devices.yaml): up (serve each
+                          on the real device's protocol and register map,
+                          with simulators and a process model), check,
+                          profiles, show.
+  naut iolink <cmd>   IO-Link tools: import (check an IODD and copy it
+                          into the project's iodd/ folder) and show (what
+                          an IODD's process data and variables are).
   naut scene <cmd>    3D HMI scene tools: init (generate a starter
                           *.scene.json from the manifest's struct tags —
                           one node per UDT tag a kind can draw, laid out
@@ -87,6 +105,10 @@ Usage:
                           state and the process image, on the controller),
                           import (a manifest from the bus's device list)
                           and tags (the tag file for a plcnext manifest).
+  naut profinet <cmd> PROFINET IO device tools (offline): gsdml (the
+                          GSDML file the PLC's engineering tool imports)
+                          and tags (the tag file), both from the
+                          profinet_device.yaml the driver serves.
   naut snmp <cmd>     SNMP tools: import | browse | serve | tags (switches, PDUs, UPSes)
   naut redfish <cmd>  Redfish tools: import | browse | serve | tags (server BMCs)
   naut prometheus <cmd>  node_exporter tools: import | browse | serve | tags (hosts)
@@ -97,6 +119,10 @@ Usage:
                           and print every definition (-o yaml, -count,
                           -site, -priority). The auditable half of "a few
                           rules cover thousands of alarms".
+  naut alarms oncall  Who each on-call roster has on call (-at).
+  naut alarms escalation  What each escalation policy covers, and the
+                          steps one alarm would page (-id, -at).
+  naut params         Export and diff a controller's tuned setpoints
   naut pull           Pull a controller's online edits back into the
                           program file (--host <controller>). Inverse of the
                           VS Code "Download Program to Controller" command.
@@ -106,6 +132,19 @@ Usage:
                           What "Download Program to Controller" sends.
   naut historian      Archive a controller's tags into Postgres and
                           serve downsampled history (-source, -db).
+  naut witness        Run the witness of a redundant controller pair: the
+                          third voter, on its peer port (--listen, --state,
+                          --lease; needs NAUTILUS_PEER_TOKEN).
+  naut redundancy     A redundant pair's operator commands on the box:
+                          status, clear-duplicate <name> --copy-stopped.
+  naut audit verify   Check the runtime audit journal's hash chain
+                          (default dir: audit).
+  naut auth init      Turn on users, roles and sign-in: write a starter
+                          auth: block (--user <name>:<role>).
+  naut users          Local users and personal access tokens of a
+                          controller with an auth: block (on the box).
+  naut notes export   The operator notes and shift log, as JSON or CSV
+                          (on the box; naut notes help).
   naut fbd graph <f>  Emit a .fbd file's diagram render model as JSON
                           (used by the VS Code FBD preview).
   naut sfc check <f>  Parse a .sfc file and run its structural checks
@@ -118,9 +157,34 @@ func main() {
 	// rides embedded on the executable's tail, and running it hosts the
 	// scan loop directly (NAUTILUS_CLI=1 recovers the CLI).
 	if fsys, ok := embeddedProject(); ok {
-		if wantsHelp(os.Args[1:]) {
-			fmt.Print(builtUsage(filepath.Base(os.Args[0])))
-			os.Exit(0)
+		// Any argument is answered, or refused, without starting: run by
+		// hand next to its service, a controller must never start a second
+		// instance against the same I/O (#968).
+		// naut users, against the embedded manifest: run on the box, it
+		// never starts the controller (#708).
+		if len(os.Args) > 1 && os.Args[1] == "users" {
+			os.Exit(usersMain(os.Args[2:], func(string) (*project.Manifest, string, error) {
+				m, err := project.ReadManifest(fsys, embeddedManifest(fsys))
+				return m, "", err
+			}, false, os.Getenv, os.Stdin, os.Stdout, os.Stderr))
+		}
+		// naut alarms contacts|secrets, likewise (#715): who is paged and
+		// the channels' credentials live on the box.
+		if len(os.Args) > 2 && os.Args[1] == "alarms" && (os.Args[2] == "contacts" || os.Args[2] == "secrets") {
+			os.Exit(contactsMain(os.Args[2], os.Args[3:], func(string) (*project.Manifest, string, error) {
+				m, err := project.ReadManifest(fsys, embeddedManifest(fsys))
+				return m, "", err
+			}, false, os.Getenv, os.Stdin, os.Stdout, os.Stderr))
+		}
+		// naut notes export, likewise (#720): the notes are on the box.
+		if len(os.Args) > 1 && os.Args[1] == "notes" {
+			os.Exit(notesMain(os.Args[2:], func(string) (*project.Manifest, string, error) {
+				m, err := project.ReadManifest(fsys, embeddedManifest(fsys))
+				return m, "", err
+			}, false, os.Getenv, os.Stdout, os.Stderr))
+		}
+		if code, done := builtArgs(os.Args[1:], filepath.Base(os.Args[0]), os.Stdout, os.Stderr); done {
+			os.Exit(code)
 		}
 		os.Exit(runProject(fsys, embeddedManifest(fsys), "built", ""))
 	}
@@ -142,6 +206,8 @@ func main() {
 		os.Exit(runRun(os.Args[2:]))
 	case "build":
 		os.Exit(runBuild(os.Args[2:]))
+	case "deploy":
+		os.Exit(runDeploy(os.Args[2:]))
 	case "hmi":
 		os.Exit(runHMI(os.Args[2:]))
 	case "test":
@@ -154,16 +220,24 @@ func main() {
 		os.Exit(runEIP(os.Args[2:]))
 	case "logix":
 		os.Exit(runLogix(os.Args[2:]))
+	case "siemens":
+		os.Exit(runSiemens(os.Args[2:]))
 	case "sparkplug":
 		os.Exit(runSparkplug(os.Args[2:]))
 	case "modbus":
 		os.Exit(runModbus(os.Args[2:]))
 	case "opcua":
 		os.Exit(runOPCUA(os.Args[2:]))
+	case "devices":
+		os.Exit(runDevices(os.Args[2:]))
+	case "iolink":
+		os.Exit(runIOLink(os.Args[2:]))
 	case "optommp":
 		os.Exit(runOptommp(os.Args[2:]))
 	case "plcnext":
 		os.Exit(runPlcnext(os.Args[2:]))
+	case "profinet":
+		os.Exit(runProfinet(os.Args[2:]))
 	case "snmp":
 		os.Exit(runSnmp(os.Args[2:]))
 	case "redfish":
@@ -174,14 +248,32 @@ func main() {
 		os.Exit(runTags(os.Args[2:]))
 	case "scene":
 		os.Exit(runScene(os.Args[2:]))
+	case "notes":
+		os.Exit(runNotes(os.Args[2:]))
+	case "checkout":
+		os.Exit(runCheckout(os.Args[2:]))
+	case "camera":
+		os.Exit(runCamera(os.Args[2:]))
 	case "alarms":
 		os.Exit(runAlarms(os.Args[2:]))
 	case "pull":
 		os.Exit(runPull(os.Args[2:]))
+	case "params":
+		os.Exit(runParams(os.Args[2:]))
 	case "compose":
 		os.Exit(runCompose(os.Args[2:]))
 	case "historian":
 		os.Exit(runHistorian(os.Args[2:]))
+	case "witness":
+		os.Exit(runWitness(os.Args[2:]))
+	case "redundancy":
+		os.Exit(runRedundancy(os.Args[2:]))
+	case "audit":
+		os.Exit(runAudit(os.Args[2:]))
+	case "users":
+		os.Exit(runUsers(os.Args[2:]))
+	case "auth":
+		os.Exit(runAuth(os.Args[2:]))
 	case "fbd":
 		os.Exit(runFBD(os.Args[2:]))
 	case "ld":

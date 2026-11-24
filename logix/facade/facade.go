@@ -134,7 +134,7 @@ func New(ctx context.Context, o Options) (*Facade, error) {
 	sopts.Drivers = f.driverStatus
 	f.srv = server.New(rt, sopts)
 	if o.Program != nil {
-		f.prog = &programPlane{cfg: *o.Program, source: o.Program.Source, auth: f.srv.AuthorizeWrite}
+		f.prog = &programPlane{cfg: *o.Program, source: o.Program.Source, auth: func(r *http.Request, perm string) (int, string) { return f.srv.Authorize(r, perm, "") }}
 	}
 	return f, nil
 }
@@ -182,7 +182,9 @@ func (f *Facade) Handler() http.Handler {
 	mux.HandleFunc("GET /api/program/history", programGone)
 	mux.HandleFunc("POST /api/program/rollback", programLocked)
 	mux.HandleFunc("POST /api/program/activate", programLocked)
-	return mux
+	// The facade's own routes (the program source among them) keep the
+	// server's Host rule (#819), as the server's routes do.
+	return f.srv.GuardHost(mux)
 }
 
 // The messages are what the extension shows: it surfaces a refused

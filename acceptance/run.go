@@ -36,7 +36,12 @@ type Result struct {
 // Failure says what went wrong, where, and — for anything time-dependent —
 // what the process was actually doing when it did.
 type Failure struct {
-	Step int `json:"step"` // 1-based
+	Step int `json:"step"` // 1-based; the top-level step, as ever
+	// StepPath is the dotted position inside groups ("3.2"), empty for a
+	// top-level step. Repeat says which iteration of each enclosing
+	// `repeat:` failed ("7 of 24", outermost first), empty outside one.
+	StepPath string `json:"stepPath,omitempty"`
+	Repeat   string `json:"repeat,omitempty"`
 	// Line is the assertion that broke: the tag key (or ST expression)
 	// inside `expect:` / `always:`, or the `alarms:` key. It is where an
 	// editor anchors the failure.
@@ -55,12 +60,11 @@ type Failure struct {
 // "what did it actually do", which is the only question worth asking when
 // a settling or delay assertion fails.
 type TraceTag struct {
-	Name    string    `json:"name"`
-	Unit    string    `json:"unit,omitempty"`
-	Desc    string    `json:"desc,omitempty"`
-	At      []float64 `json:"atMs"`
-	Values  []string  `json:"values"`
-	stepped bool
+	Name   string    `json:"name"`
+	Unit   string    `json:"unit,omitempty"`
+	Desc   string    `json:"desc,omitempty"`
+	At     []float64 `json:"atMs"`
+	Values []string  `json:"values"`
 }
 
 // TB is the slice of *testing.T the Go tier needs. Kept as an interface so
@@ -138,6 +142,7 @@ type testRun struct {
 	rt     *runtime.Runtime
 	sch    *Scheduler
 	drv    *nio.Memory
+	dev    DeviceDriver // the virtual devices, when the suite runs against them
 	libs   []string
 	tol    float64
 	inputs map[string]bool // tags the driver produces — `given` routes there
@@ -149,6 +154,9 @@ type testRun struct {
 	// an acknowledgement in one test cannot leak into the next. Nil when
 	// the project declares no alarms.
 	alarms *alarm.Engine
+	// substitutes are the manifest's `substitutes:` rules, by address
+	// (WithSubstitutes).
+	substitutes []SubstituteRule
 }
 
 func runTest(s *Suite, t *Test, opts runtime.Options, cfg runOptions) (Result, error) {
@@ -161,12 +169,29 @@ func runTest(s *Suite, t *Test, opts runtime.Options, cfg runOptions) (Result, e
 	drv := nio.NewMemory()
 	o.Driver = drv
 
-	rt, sch, err := NewRuntime(o)
+	// A suite that asks for the virtual devices gets them in place of the
+	// stub: still no socket, but the project's own drivers' bindings are
+	// answered through each device's register map or address space.
+	var dev DeviceDriver
+	clk := NewClock()
+	if s.Devices {
+		if cfg.devices == nil {
+			return res, fmt.Errorf("%s: devices: true, but the project has no virtual devices (devices: in nautilus.yaml, or virtual-devices.yaml)", s.Path)
+		}
+		var err error
+		if dev, err = cfg.devices(clk); err != nil {
+			return res, fmt.Errorf("%s: devices: %w", s.Path, err)
+		}
+		o.Driver = dev
+	}
+	o.Clock = clk
+	rt, err := runtime.New(o)
 	if err != nil {
 		return res, fmt.Errorf("%s: compile: %w", s.Path, err)
 	}
+	sch := NewScheduler(rt, clk)
 	r := &testRun{
-		rt: rt, sch: sch, drv: drv, libs: o.Libraries,
+		rt: rt, sch: sch, drv: drv, dev: dev, libs: o.Libraries,
 		tol:    firstNonZero(deref(t.Tolerance), s.Tolerance),
 		inputs: inputSet(o),
 		known:  knownTags(o),
@@ -177,6 +202,7 @@ func runTest(s *Suite, t *Test, opts runtime.Options, cfg runOptions) (Result, e
 		meta:  rt.Meta(),
 		preds: map[string]*predicate{},
 	}
+	r.substitutes = cfg.substitutes
 	// The alarm engine registers itself on the runtime's post-scan hook,
 	// so it evaluates in lockstep with the scans the scheduler drives —
 	// which is what makes an on-delay walk exactly with `advance:`.
@@ -202,13 +228,22 @@ func runTest(s *Suite, t *Test, opts runtime.Options, cfg runOptions) (Result, e
 	if err != nil {
 		return res, err
 	}
-	for i, st := range steps {
+	_, err = walkSteps(steps, func(sr stepRun) (bool, error) {
+		st := sr.Step
 		fail, err := r.runStep(st)
 		if err != nil {
-			return res, fmt.Errorf("%s:%d: test %q: %w", s.Path, st.Line, t.Name, err)
+			return true, fmt.Errorf("%s:%d: test %q: %w", s.Path, st.Line, t.Name, err)
+		}
+		// A protocol fault is the reason, ahead of whatever expectation
+		// it made fail: the project asked a device for something the
+		// device does not have.
+		if fail == nil {
+			fail = r.deviceFault(st.Line)
+		} else if df := r.deviceFault(st.Line); df != nil {
+			fail = df
 		}
 		if fail != nil {
-			fail.Step = i + 1
+			fail.Step, fail.StepPath, fail.Repeat = sr.Index, sr.Path, sr.Repeat
 			fail.StepLine = st.Line
 			if fail.Line == 0 {
 				fail.Line = st.Line
@@ -216,8 +251,15 @@ func runTest(s *Suite, t *Test, opts runtime.Options, cfg runOptions) (Result, e
 			fail.AtMs = float64(fail.At) / float64(time.Millisecond)
 			res.Failure = fail
 			res.Elapsed, res.Scans = sch.Elapsed(), sch.ScanCount(runtime.MainTaskName)
-			return res, nil
+			return true, nil
 		}
+		return false, nil
+	})
+	if err != nil {
+		return res, err
+	}
+	if res.Failure != nil {
+		return res, nil
 	}
 
 	// The assertion nobody has to write: a scan that faulted fails the test
@@ -238,6 +280,47 @@ func runTest(s *Suite, t *Test, opts runtime.Options, cfg runOptions) (Result, e
 	return res, nil
 }
 
+// plant applies a step's `plant:` writes to the virtual devices, in name
+// order.
+func (r *testRun) plant(writes map[string]any) error {
+	if len(writes) == 0 {
+		return nil
+	}
+	pw, ok := r.dev.(PlantWriter)
+	if r.dev == nil || !ok {
+		return fmt.Errorf("plant: writes the virtual devices' plant, which needs devices: true at the top of the file")
+	}
+	names := make([]string, 0, len(writes))
+	for k := range writes {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		if err := pw.SetPlant(k, writes[k]); err != nil {
+			return fmt.Errorf("plant: %s: %w", k, err)
+		}
+	}
+	return nil
+}
+
+// deviceFault is a failure for the protocol faults the virtual devices saw,
+// nil when there were none (or the suite has no devices).
+func (r *testRun) deviceFault(line int) *Failure {
+	if r.dev == nil {
+		return nil
+	}
+	err := r.dev.Err()
+	if err == nil {
+		return nil
+	}
+	return &Failure{
+		At:     r.sch.Elapsed(),
+		Line:   line,
+		Reason: "virtual devices: the project's drivers asked for something the devices do not answer",
+		Detail: err.Error(),
+	}
+}
+
 // runStep applies the step's writes, spends its virtual time, and checks
 // what must hold. A nil Failure means it passed.
 func (r *testRun) runStep(st *Step) (*Failure, error) {
@@ -245,6 +328,12 @@ func (r *testRun) runStep(st *Step) (*Failure, error) {
 		return nil, err
 	}
 	if err := r.forces(st); err != nil {
+		return nil, err
+	}
+	if err := r.substitute(st); err != nil {
+		return nil, err
+	}
+	if err := r.plant(st.Plant); err != nil {
 		return nil, err
 	}
 	// The operator verbs land with `given:`, before the step spends its
@@ -584,6 +673,9 @@ func (r *testRun) apply(given map[string]any) error {
 		if err != nil {
 			return fmt.Errorf("given: %w", err)
 		}
+		if r.inputs[name] && r.dev != nil {
+			return fmt.Errorf("given: %s is delivered by a virtual device; set what the process model drives instead", name)
+		}
 		if r.inputs[name] {
 			if err := r.drv.WriteOutputs(nio.Values{name: v}); err != nil {
 				return err
@@ -667,6 +759,9 @@ func (r *testRun) applyFields(tag string, edits map[string]any) error {
 			return err
 		}
 		base = updated
+	}
+	if r.inputs[tag] && r.dev != nil {
+		return fmt.Errorf("given: %s is delivered by a virtual device; set what the process model drives instead", tag)
 	}
 	if r.inputs[tag] {
 		return r.drv.WriteOutputs(nio.Values{tag: base})

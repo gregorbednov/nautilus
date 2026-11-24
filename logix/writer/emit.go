@@ -212,6 +212,27 @@ func emitTags(b *strings.Builder, tags []tagDef) {
 			w(`</Tag>`)
 			continue
 		}
+		if t.DataType == "MESSAGE" {
+			// A READ or WRITE instance (msg.go): its parameters, no value.
+			w(`<Tag Name="%s" TagType="Base" DataType="MESSAGE" ExternalAccess="Read/Write">`, attr(t.Name))
+			if t.Desc != "" {
+				w(`<Description>`)
+				w(`%s`, cdata(t.Desc))
+				w(`</Description>`)
+			}
+			if m := t.Message; m != nil {
+				w(`<Data Format="Message">`)
+				cache := ""
+				if m.Cache != "" {
+					cache = fmt.Sprintf(` CacheConnections="%s"`, attr(m.Cache))
+				}
+				w(`<MessageParameters MessageType="%s" RemoteElement="%s" RequestedLength="%s" ConnectedFlag="%s" ConnectionPath="%s" CommTypeCode="0" LocalIndex="0" LocalElement="%s"%s/>`,
+					attr(m.Type), attr(m.Remote), m.Length, attr(m.Connected), attr(m.Path), attr(m.Local), cache)
+				w(`</Data>`)
+			}
+			w(`</Tag>`)
+			continue
+		}
 		radix := radixOf(t.DataType)
 		if t.AOI {
 			// An Add-On Instruction instance is a structure: a Radix on
@@ -310,7 +331,7 @@ func emitTags(b *strings.Builder, tags []tagDef) {
 		case t.Dim > 0:
 			w(`<Array DataType="%s" Dimensions="%d" Radix="%s">`, t.DataType, t.Dim, radix)
 			for i := 0; i < t.Dim; i++ {
-				w(`<Element Index="[%d]" Value="%s"/>`, i, zeroOf(t.DataType))
+				w(`<Element Index="[%d]" Value="%s"/>`, i, t.elem(i))
 			}
 			w(`</Array>`)
 		default:
@@ -340,6 +361,14 @@ func zeroOf(dt string) string {
 	default:
 		return "0"
 	}
+}
+
+// elem is an array element's initial value in Logix spelling.
+func (t tagDef) elem(i int) string {
+	if i < len(t.Elems) && t.Elems[i] != "" {
+		return t.Elems[i]
+	}
+	return zeroOf(t.DataType)
 }
 
 func decoratedValue(t tagDef) string {
@@ -381,9 +410,32 @@ func l5kValue(t tagDef) string {
 	if t.Dim == 0 {
 		return one()
 	}
+	if t.DataType == "BOOL" {
+		// L5K packs a BOOL array into 32-bit words: BOOL[32] with
+		// element 3 set is [8].
+		words := make([]int32, (t.Dim+31)/32)
+		for i, e := range t.Elems {
+			if e == "1" && i < t.Dim {
+				words[i/32] |= int32(uint32(1) << (i % 32))
+			}
+		}
+		out := make([]string, len(words))
+		for i, w := range words {
+			out[i] = strconv.FormatInt(int64(w), 10)
+		}
+		return "[" + strings.Join(out, ",") + "]"
+	}
 	elems := make([]string, t.Dim)
 	for i := range elems {
-		elems[i] = l5kZero(t.DataType)
+		switch {
+		case i >= len(t.Elems) || t.Elems[i] == "":
+			elems[i] = l5kZero(t.DataType)
+		case t.DataType == "REAL" || t.DataType == "LREAL":
+			f, _ := strconv.ParseFloat(t.Elems[i], 64)
+			elems[i] = l5kReal(f)
+		default:
+			elems[i] = t.Elems[i]
+		}
 	}
 	return "[" + strings.Join(elems, ",") + "]"
 }

@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -13,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joyautomation/nautilus/internal/project"
 	"github.com/joyautomation/nautilus/lang/l5x"
 	"github.com/joyautomation/nautilus/logix/deploy"
 	"github.com/joyautomation/nautilus/logix/facade"
@@ -48,7 +48,8 @@ Flags:
               "Program:MainProgram.*"). Default: every user tag except
               module I/O.
   --poll      Poll rate (default 250ms)
-  --listen    API address (default :8080)
+  --listen    API address (default localhost:8080); anything but
+              loopback needs NAUTILUS_TOKEN
   --l5x       An L5X export of the running project: its tag descriptions
               are served on /api/meta, which a live browse cannot recover.
   --project   A nautilus project directory with a target: logix section.
@@ -63,11 +64,14 @@ Flags:
               must say "yes": true; tag values are kept as by
               naut logix deploy --download unless the body says
               "resetValues": true), with progress streamed as NDJSON.
-              --host defaults to target.logix.host.
+              --host defaults to target.logix.host. The project's auth:
+              block decides every write and deploy, as under naut run;
+              each service token's secret is NAUTILUS_TOKEN_<NAME>.
 
-Writes are open to non-browser clients and same-origin pages, like
-` + "`naut run`" + `. Set NAUTILUS_TOKEN to require a bearer token — and do,
-before listening anywhere but loopback: a write here changes a running PLC.
+Writes are open to non-browser clients and same-origin pages on
+localhost, an IP address or a name in NAUTILUS_ALLOWED_HOSTS, like
+` + "`naut run`" + `. A write here changes a running PLC, so --listen on
+anything but loopback is refused without NAUTILUS_TOKEN.
 `
 
 func runLogixServe(args []string) int {
@@ -78,14 +82,23 @@ func runLogixServe(args []string) int {
 	port := fs.Int("port", 0, "EtherNet/IP TCP port")
 	tags := fs.String("tags", "", "comma-separated tag globs")
 	poll := fs.Duration("poll", 0, "poll rate")
-	listen := fs.String("listen", ":8080", "API address")
+	listen := fs.String("listen", "localhost:8080", "API address")
 	l5xPath := fs.String("l5x", "", "L5X export for tag descriptions")
 	projectDir := fs.String("project", "", "nautilus project with a target: logix section")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	// A write here changes a running PLC: beyond this machine it needs a
+	// token (#811).
+	if !loopbackListen(*listen) && os.Getenv("NAUTILUS_TOKEN") == "" {
+		fmt.Fprintf(os.Stderr, "naut logix serve: --listen %s reaches beyond this machine, and a write here changes a running PLC; set NAUTILUS_TOKEN to listen there (or listen on localhost)\n", *listen)
+		return 2
+	}
 	var plane *facade.ProgramPlane
 	release := func() {}
+	sopts := server.Options{AuthToken: os.Getenv("NAUTILUS_TOKEN")}
+	var tlsCfg *project.TLSConfig // the project's server.tls
+	var tlsState, tlsName string
 	if *projectDir != "" {
 		p, err := loadLogixProject(*projectDir)
 		if err != nil {
@@ -109,6 +122,17 @@ func runLogixServe(args []string) int {
 			fmt.Fprintln(os.Stderr, "naut logix serve: --project needs target.logix.comm-path, the FactoryTalk Linx path logixd deploys to")
 			return 2
 		}
+		// The project's auth: block decides its writes, deploys included,
+		// as under naut run (#708): a viewer token may not download.
+		tlsCfg = p.tls
+		tlsState, tlsName = p.stateDir, p.name
+		if err := withAuth(&sopts, p.auth, os.Getenv); err != nil {
+			fmt.Fprintln(os.Stderr, "naut logix serve: auth:", err)
+			return 2
+		}
+		if p.auth != nil {
+			fmt.Fprint(os.Stderr, authFacadeNotice)
+		}
 		client := logixd.New(agentURL, os.Getenv("NAUTILUS_LOGIXD_TOKEN"))
 		plane, release = logixProgramPlane(*projectDir, p, client)
 	}
@@ -116,6 +140,14 @@ func runLogixServe(args []string) int {
 	// keep warm; left open, logixd holds the project online until its idle
 	// reaper (30 minutes by default) gets to it.
 	defer release()
+	// HTTPS when the project has server.tls (or NAUTILUS_TLS_CERT/_KEY).
+	tlsSrc, terr := tlsSource(tlsSpecOf(tlsCfg, tlsState, tlsName, *listen, true,
+		func(s string) { fmt.Fprint(os.Stderr, "naut logix serve: "+s) }), *projectDir, os.Getenv)
+	if terr != nil {
+		fmt.Fprintln(os.Stderr, "naut logix serve:", terr)
+		return 2
+	}
+	sopts.TLS = tlsSrc
 	if *host == "" {
 		fmt.Fprint(os.Stderr, "naut logix serve: --host is required\n\n", logixServeUsage)
 		return 2
@@ -142,7 +174,7 @@ func runLogixServe(args []string) int {
 		Tags:    splitPatterns(*tags),
 		Poll:    *poll,
 		Meta:    meta,
-		Server:  server.Options{AuthToken: os.Getenv("NAUTILUS_TOKEN")},
+		Server:  sopts,
 		Program: plane,
 	})
 	cancel()
@@ -159,14 +191,15 @@ func runLogixServe(args []string) int {
 		fmt.Fprintln(os.Stderr, "naut logix serve:", err)
 		return 1
 	}
+	ln, scheme := facadeListener(ln, tlsSrc, *listen, "naut logix serve", os.Stderr)
 	go f.Run(ctx)
-	srv := &http.Server{Handler: f.Handler()}
+	srv := apiHTTPServer(f.Handler())
 	go func() {
 		<-ctx.Done()
 		_ = srv.Close()
 	}()
-	fmt.Printf("nautilus · Logix %s — %d tags on http://%s — Ctrl+C to stop\n",
-		*host, f.Tags(), displayAddr(ln.Addr()))
+	fmt.Printf("nautilus · Logix %s — %d tags on %s://%s — Ctrl+C to stop\n",
+		*host, f.Tags(), scheme, displayAddr(ln.Addr()))
 	if err := srv.Serve(ln); err != nil && ctx.Err() == nil {
 		fmt.Fprintln(os.Stderr, "naut logix serve:", err)
 		return 1

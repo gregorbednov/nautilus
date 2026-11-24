@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"time"
 
@@ -179,12 +180,18 @@ func (d *Driver) Start(ctx context.Context) {
 	go d.run(ctx)
 }
 
-// Stop publishes the STATE death certificate, waits for the token, and only
-// then tears the connection down — the TCK requires the host's own death
-// publish before both clean and unclean teardown, and the broker firing the
-// LWT is explicitly not a substitute (design §2). The DISCONNECT itself
-// happens in run's session cleanup, after the context is cancelled, so the
-// ordering death → DISCONNECT holds.
+// Stop publishes the STATE death certificate and only then tears the
+// connection down: the TCK requires the host's own death publish before
+// both clean and unclean teardown (design §2). The DISCONNECT happens in
+// run's session cleanup, after the context is cancelled, so the death
+// PUBLISH is on the stream before the DISCONNECT either way.
+//
+// Stop waits for the broker to acknowledge the death for at most
+// stopDeathWait (#942). A broker that has not by then is hung; Stop
+// disconnects anyway, so a stop fits a supervisor's budget, and the broker
+// fires the will (the same offline certificate) once it notices the
+// session gone, within its keepalive. On a broker that answers, nothing
+// changes: the death is acknowledged within milliseconds.
 func (d *Driver) Stop() {
 	if d.cancel == nil {
 		return
@@ -192,7 +199,18 @@ func (d *Driver) Stop() {
 	d.gateMu.Lock()
 	d.stopping = true
 	d.gateMu.Unlock()
-	d.publishStateDeath()
+	died := make(chan struct{})
+	go func() {
+		defer close(died)
+		d.publishStateDeath()
+	}()
+	select {
+	case <-died:
+	case <-time.After(stopDeathWait):
+		d.deathAbandoned.Store(true)
+		d.log.Warn("host: the broker did not take the STATE death certificate; disconnecting anyway (it fires the will)",
+			"broker", d.cfg.BrokerURL, "waited", stopDeathWait)
+	}
 	d.cancel()
 	<-d.done
 }
@@ -228,6 +246,81 @@ func (d *Driver) SetWriteGate(gate func() bool) {
 		d.replicaID = replicaIdentity()
 	}
 }
+
+// SetSendGate installs a pair's gate with its term (io.SendGated, design
+// §3.4): commands held across a closed gate (#943), or parked for a dark
+// site, are dropped when this replica finds itself leading under another
+// term than the one they were computed in (it lost the lease and won it
+// again), never published then (termMoved).
+func (d *Driver) SetSendGate(g nio.SendGate) {
+	d.gateMu.Lock()
+	d.sendGate = g
+	d.gateMu.Unlock()
+}
+
+var _ nio.SendGated = (*Driver)(nil)
+
+// termMoved looks at the pair's gate: true when it is open under another
+// term of the lease than the last look saw (the first term seen is only
+// recorded). Without a send gate it is always false.
+func (d *Driver) termMoved() bool {
+	d.gateMu.Lock()
+	g := d.sendGate
+	d.gateMu.Unlock()
+	if g == nil {
+		return false
+	}
+	open, _, term := g()
+	if !open || term == 0 {
+		return false
+	}
+	prev := d.leaseTerm.Load()
+	if prev == 0 {
+		d.leaseTerm.CompareAndSwap(0, term)
+		return false
+	}
+	if prev == term || mut("old_term_kept") {
+		return false
+	}
+	d.leaseTerm.Store(term)
+	return true
+}
+
+// dropEarlierTerm forgets every command held or parked under the earlier
+// term, and what the program last handed over, so the push answering the
+// takeover (the runtime hands every output over) is judged afresh against
+// what the edge reports. Logged once. Takes wmu.
+func (d *Driver) dropEarlierTerm() {
+	d.wmu.Lock()
+	d.termGen.Add(1)
+	n := len(d.pending)
+	for _, q := range d.queued {
+		n += len(q)
+	}
+	clear(d.pending)
+	clear(d.queued)
+	clear(d.lastOut)
+	d.wmu.Unlock()
+	if n > 0 {
+		d.log.Warn("host: commands from an earlier leadership dropped: this host lost the lease and won it again, and nothing computed under the earlier one is published", "count", n)
+	}
+}
+
+// PlainWriteGate marks the write gate as naut run's liveness gate
+// (io.PlainGated), closed while the scans are hung, in a project without
+// redundancy:. It stops commands (NCMD/DCMD) and nothing else: this host
+// stays the primary host, STATE stays as it is, and the client ID stays
+// the configured one (maintainer's decision, #943). Commands written while
+// it is closed are held as under a leadership gate and the latest goes out
+// when it reopens.
+func (d *Driver) PlainWriteGate() {
+	d.gateMu.Lock()
+	defer d.gateMu.Unlock()
+	d.plainGate = true
+	d.replicaID = "" // not a replica: SetWriteGate set it for a leadership gate
+}
+
+var _ nio.PlainGated = (*Driver)(nil)
 
 // replicaIdentity is this replica's name among its peers: POD_NAME (what
 // `naut run` hands the elector), else the hostname.
@@ -343,6 +436,9 @@ func (d *Driver) ReadInputsInto(dst nio.Values) error {
 // is baseline, not an edge, so a __Rebirth held TRUE (or retained) across a
 // restart does not rebirth every site each time the controller starts.
 func (d *Driver) WriteOutputs(vals nio.Values) error {
+	if d.termMoved() {
+		d.dropEarlierTerm()
+	}
 	d.wmu.Lock()
 	d.initWriteMapsLocked()
 	baseline := d.baseline
@@ -370,7 +466,12 @@ func (d *Driver) WriteOutputs(vals nio.Values) error {
 		// detected once rather than every scan from here on.
 		d.lastOut[name] = cv
 		if prev, ok := d.remote[name]; ok && sameValue(prev, cv) {
-			continue // the node already holds it
+			// The node already holds it, so nothing is owed: a command
+			// still queued for this tag (held by a closed gate or a lost
+			// session, or parked for a dark site) is superseded and must
+			// not go out later (#940).
+			d.withdrawLocked(name)
+			continue
 		}
 		if prev, ok := d.pending[name]; ok && sameValue(prev, cv) {
 			continue
@@ -383,6 +484,37 @@ func (d *Driver) WriteOutputs(vals nio.Values) error {
 		d.kickWriter()
 	}
 	return nil
+}
+
+// withdrawLocked drops every command still queued for name: pending, and
+// parked for its node. Caller holds wmu.
+func (d *Driver) withdrawLocked(name string) {
+	delete(d.pending, name)
+	if b, ok := d.byName[name]; ok {
+		delete(d.queued[b.Node], name)
+	}
+}
+
+// requeueLocked puts back the commands a failed publish took out of
+// pending, so they go out after the next connect: each one unless a newer
+// value is pending, or the program has moved the tag since (lastOut no
+// longer holds it), which supersedes it (#940). Caller holds wmu.
+//
+// gen is the term generation the flush took work under: after a term move
+// since, nothing is put back (it is the earlier leadership's).
+func (d *Driver) requeueLocked(names []string, work map[string]any, gen uint64) {
+	if d.termGen.Load() != gen && !mut("old_term_kept") {
+		return
+	}
+	for _, n := range names {
+		if _, exists := d.pending[n]; exists {
+			continue
+		}
+		if lo, ok := d.lastOut[n]; ok && !sameValue(lo, work[n]) {
+			continue
+		}
+		d.pending[n] = work[n]
+	}
 }
 
 // initWriteMapsLocked allocates the three write maps on first use. New fills
@@ -519,7 +651,11 @@ func irEqual(a, b ir.Value) bool {
 	case ir.TypeBool:
 		return a.B == b.B
 	case ir.TypeReal:
-		return a.F == b.F
+		// NaN is the same value as NaN here: a command is "the same" when
+		// sending it again would change nothing. Without this a NaN marked
+		// written was owed again, and re-sent every CommandInterval
+		// forever (#940).
+		return a.F == b.F || (math.IsNaN(a.F) && math.IsNaN(b.F))
 	case ir.TypeInt, ir.TypeTime:
 		return a.I == b.I
 	case ir.TypeString:

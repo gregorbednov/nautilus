@@ -16,6 +16,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	nio "github.com/joyautomation/nautilus/io"
@@ -285,6 +286,11 @@ type Driver struct {
 	// values is the snapshot ReadInputs returns: nautilus tag name → value.
 	// Values survive death — Sparkplug's last value *is* the value.
 	values nio.Values
+	// nulled marks, per data binding, what last arrived is_null: the whole
+	// metric (path "") or a template member (its dotted path). The edge has
+	// no value for it, so the binding reads Bad, its last value held, until
+	// a real value arrives for each (#941).
+	nulled map[string]map[string]bool
 	// unknown counts metrics seen but not bound, keyed by their manifest
 	// line, for Discovered() and /api/drivers extra.unknown.
 	unknown map[metricKey]*discovery
@@ -302,10 +308,15 @@ type Driver struct {
 	rebirthQ []nodeKey
 	// adoptQ accumulates member-output baseline adoptions raised while mu is
 	// held. It exists for the same reason rebirthQ does — the write maps are
-	// under wmu, and flushWrites already takes wmu before d.mu (nodeOnline),
-	// so taking wmu under d.mu would invert the order. flushAdopts drains it
+	// under wmu, and the lock order is wmu before d.mu, so taking wmu under
+	// d.mu would invert it. flushAdopts drains it
 	// with neither lock held and then takes wmu alone.
 	adoptQ []adoption
+	// forgetQ accumulates the nodes and devices whose site may no longer
+	// hold what the host last sent them (a death, a broker loss, a birth),
+	// raised while mu is held; flushForgets drains it under wmu alone and
+	// forgets their remote values (#940).
+	forgetQ []forgetSite
 	// degraded is set when the discovery policy is DiscoveryStrict and an
 	// unmanifested metric has been seen. /api/drivers reports "degraded".
 	degraded bool
@@ -390,13 +401,30 @@ type Driver struct {
 	done           chan struct{}
 
 	// ── leadership under redundancy: (driver.go SetWriteGate, mqtt.go) ──
+	// deathAbandoned is set when Stop stopped waiting for the STATE death
+	// (#942): its publish may still fail as the session goes, which is
+	// expected by then and logged as a warning, not an error.
+	deathAbandoned atomic.Bool
 	// gateMu guards this block.
 	gateMu sync.Mutex
-	// writeGate is the leadership gate `naut run` installs through
-	// SetWriteGate when — and only when — the manifest has a redundancy:
-	// section. nil (a single host) is always open. isLeader ANDs it with
-	// Config.Leader.
+	// writeGate is the gate `naut run` installs through SetWriteGate: the
+	// leadership gate when the manifest has a redundancy: section, else
+	// (plainGate) the liveness gate, open while the scans are live (#625).
+	// nil is always open. As a leadership gate isLeader ANDs it with
+	// Config.Leader; as a plain gate it decides only whether commands
+	// leave the driver (commandsAllowed), never who is primary (#943).
 	writeGate func() bool
+	// plainGate is set by PlainWriteGate: writeGate is a liveness gate.
+	plainGate bool
+	// sendGate is a pair's gate with its term (SetSendGate): a command is
+	// published only under the term of the lease it was computed in
+	// (termMoved). leaseTerm is the term the last look saw (0: none yet).
+	sendGate  nio.SendGate
+	leaseTerm atomic.Uint64
+	// termGen counts dropEarlierTerm, under wmu: a flush that took its
+	// work before one publishes, requeues and parks none of it after,
+	// whichever caller saw the term move (#1047 review).
+	termGen atomic.Uint64
 	// replicaID tells the replicas of a redundant pair apart on the broker:
 	// they run one manifest, so without it they would share an MQTT client
 	// ID and take each other's sessions over in a loop. Set alongside the
@@ -631,4 +659,11 @@ type Discovered struct {
 	Datatype                        string
 	Count                           int
 	YAML                            string
+}
+
+// forgetSite names a node (all its devices, all true) or one device whose
+// remote values the host can no longer vouch for.
+type forgetSite struct {
+	node, device string
+	all          bool
 }

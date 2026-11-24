@@ -7,6 +7,9 @@
 // stay props-in/callbacks-out), and the client degrades gracefully when the
 // controller was built with no alarm definitions at all (`GET /api/alarms`
 // 404s → `supported` flips to `false` rather than throwing).
+import { kitFetch } from './kitfetch.js';
+import { refusalMessage } from './auth.js';
+import { listOutOfService, returnToService, takeOutOfService, type OutOfService } from './outofservice.js';
 import type { FrameSource } from './realtime.svelte.js';
 
 /** ISA-18.2 priority, JSON lowercase. Ordered low → high for sorting. */
@@ -138,6 +141,97 @@ export interface AlarmInstance {
 	shelfBy?: string;
 	/** Activations since restart — flood/chatter indicator. */
 	count?: number;
+	/** The piece of equipment it belongs to: out of service takes all of its alarms at once (#715). */
+	equipment?: string;
+	/** While suppressed: `out-of-service`, `designed`, `substituted` or `unreadable`. */
+	suppression?: string;
+	/** Why it is suppressed, in the controller's words (an out-of-service reason too). */
+	reason?: string;
+	/** Who took it out of service, and the epoch ms that ends (out of service only). */
+	suppressedBy?: string;
+	suppressUntilMs?: number;
+	/** Set when its suppress-when could not be read, so it is shown. */
+	warning?: string;
+	/** Present only while the alarm is chattering (#1249). */
+	chatter?: AlarmChatter;
+	/** On an alarm whose last activation was seen as something came back
+	 * ("site RTU9 came back"): it began sometime while it could not be seen,
+	 * so `activeMs` is when it was seen, not when the fault began (#1249). */
+	seenWhen?: string;
+}
+
+/** An alarm's chattering episode (`alarm.Chatter` in Go). */
+export interface AlarmChatter {
+	/** Epoch ms the episode began, and of its last activation. */
+	sinceMs: number;
+	lastMs: number;
+	/** Activations in this episode; `episodes` counts every episode since the engine started. */
+	activations: number;
+	episodes: number;
+	/** The detection rule in force: `count` activations within `windowMs`. */
+	windowMs: number;
+	count: number;
+}
+
+/** An alarm flood in progress, counts only (`alarm.FloodBrief` in Go). */
+export interface AlarmFloodBrief {
+	id: string;
+	sinceMs: number;
+	/** Activations in the current window; `total` since the flood began; `peak` the most in any window. */
+	count: number;
+	total: number;
+	peak: number;
+	windowMs: number;
+	threshold: number;
+	/** The ring overflowed: `count` and `peak` read as at least that many. */
+	saturated?: boolean;
+}
+
+/** One piece of equipment's share of a flood. */
+export interface AlarmFloodGroup {
+	equipment: string;
+	area?: string;
+	count: number;
+}
+
+/** The flood with its first-out alarms and groups (`GET /api/alarms` `flood`). */
+export interface AlarmFlood extends AlarmFloodBrief {
+	/** The first activations of the flood, in time order. */
+	firstOut: AlarmBrief[];
+	/** The top equipment, most first. */
+	groups: AlarmFloodGroup[];
+}
+
+/** One chattering alarm and what would have helped it (`GET /api/alarms/chatter`). */
+export interface AlarmAdvice {
+	id: string;
+	name: string;
+	priority: Priority;
+	chatter: AlarmChatter;
+	/** The delays the alarm runs with now, in ms. */
+	onDelayMs: number;
+	offDelayMs: number;
+	/** Absent when no longer delay on the ladder would have stopped it. */
+	suggestion?: {
+		onDelayMs: number;
+		offDelayMs: number;
+		/** The most activations in one window, before and with the suggestion. */
+		before: number;
+		after: number;
+		bounces: number;
+		sinceMs: number;
+		why: string;
+	};
+	/** The suggestion as a tuning overlay row, ready to paste. */
+	row?: string;
+	/** The journal read for it was cut (or it is past the cap): no suggestion was made. */
+	cut?: boolean;
+}
+
+export interface AlarmAdviceAnswer {
+	alarms: AlarmAdvice[];
+	/** The limits of the replay, in words. */
+	note: string;
 }
 
 /** The newest unacknowledged alarm, carried on the summary for the banner
@@ -161,6 +255,10 @@ export interface AlarmSummary {
 	byPriority: Partial<Record<Priority, number>>;
 	worst?: Priority;
 	newest?: AlarmBrief;
+	/** Alarms chattering now; omitted when none (#1249). */
+	chattering?: number;
+	/** The flood in progress, numbers only; omitted when there is none. */
+	flood?: AlarmFloodBrief;
 	rev: number;
 }
 
@@ -173,7 +271,14 @@ export type AlarmEventKind =
 	| 'shelve'
 	| 'unshelve'
 	| 'suppress'
-	| 'unsuppress';
+	| 'unsuppress'
+	/** One notification an escalation policy sent or tried (#715); not a state change. */
+	| 'notify'
+	/** Detection rows (#1249); left out of a journal query unless named. */
+	| 'chatter'
+	| 'chatter-end'
+	| 'flood'
+	| 'flood-end';
 
 export interface AlarmEvent {
 	/** Epoch ms, from the runtime Clock — so acceptance tests replay deterministically. */
@@ -185,6 +290,28 @@ export interface AlarmEvent {
 	site?: string;
 	state?: AlarmState;
 	by?: string;
+	/** Which activation this row belongs to (#724): the key for the pictures kept when it activated. */
+	occurrence?: string;
+	/** Notify rows only (#715): the escalation level (1 first), who was
+	 * paged (a principal, never an address), the channel kind, the result
+	 * (`sent`, `failed`, `nobody-on-call`, and for #1249 `held` (a chattering
+	 * alarm's pages held, one notice per level) and `grouped` (listed on a
+	 * flood's grouped page)) and why when there is more to say. */
+	level?: number;
+	to?: string;
+	via?: string;
+	result?: string;
+	reason?: string;
+	/** Detection rows: activations counted, the most in any window, the
+	 * window in ms, and when the episode began (an end row's `ts` minus it
+	 * is its length). `standing` marks an `active` row that was not a new
+	 * activation; `seenWhen` says what the alarm was seen coming back from. */
+	count?: number;
+	peak?: number;
+	windowMs?: number;
+	sinceMs?: number;
+	standing?: boolean;
+	seenWhen?: string;
 }
 
 /** Query filters for `journal()` — mirrors `alarm.Filter` / the
@@ -204,7 +331,11 @@ export interface AlarmJournalResult {
 
 interface AlarmsGetResponse {
 	ts: number;
+	/** Every piece of equipment, quiet ones too (with ?suppressed=1). */
+	equipment?: string[];
 	summary: AlarmSummary;
+	/** Present only during a flood. */
+	flood?: AlarmFlood;
 	alarms: AlarmInstance[];
 }
 
@@ -268,6 +399,14 @@ export class AlarmClient {
 	 * engine. Starts `true` (optimistic) until the first response is in, so a
 	 * banner can simply render nothing while `supported` is still unknown. */
 	supported = $state(true);
+	/** Equipment out of service, the soonest to end first (`GET /api/alarms/out-of-service`). */
+	outOfService = $state<OutOfService[]>([]);
+	/** Every piece of equipment the alarms belong to, quiet ones too: what can be taken out of service. */
+	equipment = $state<string[]>([]);
+	/** The flood in progress, with first-out and groups; null when there is none. */
+	flood = $state<AlarmFlood | null>(null);
+	/** Delay suggestions for the alarms chattering now; null until asked for. */
+	advice = $state<AlarmAdviceAnswer | null>(null);
 	/** True while a fetch of the full list is in flight. */
 	loading = $state(false);
 	/** Last fetch/ack/shelve error message, if any. Cleared on the next
@@ -277,6 +416,7 @@ export class AlarmClient {
 	#url: string;
 	#token?: string;
 	#lastFetchedRev: number | null = null;
+	#adviceSeq = 0;
 	#unsub: (() => void) | null = null;
 
 	constructor(realtime: FrameSource<FrameWithAlarms> | null, opts: AlarmClientOptions = {}) {
@@ -289,7 +429,17 @@ export class AlarmClient {
 	}
 
 	get active(): AlarmInstance[] {
-		return this.instances.filter((a) => a.state !== 'shelved');
+		return this.instances.filter((a) => a.state !== 'shelved' && a.state !== 'suppressed');
+	}
+
+	/** Alarms chattering now, most activations first. */
+	get chattering(): AlarmInstance[] {
+		return this.instances.filter((a) => a.chatter).sort((a, b) => (b.chatter?.activations ?? 0) - (a.chatter?.activations ?? 0));
+	}
+
+	/** Alarms hidden by suppression (out of service, designed, substituted), with why. */
+	get suppressed(): AlarmInstance[] {
+		return this.instances.filter((a) => a.state === 'suppressed');
 	}
 
 	get shelved(): AlarmInstance[] {
@@ -308,27 +458,77 @@ export class AlarmClient {
 	async refresh(): Promise<void> {
 		this.loading = true;
 		try {
-			const res = await fetch(this.#url, { headers: authHeaders(this.#token, false) });
+			const res = await kitFetch(`${this.#url}?suppressed=1`, { headers: authHeaders(this.#token, false) });
 			if (res.status === 404) {
 				this.supported = false;
 				this.error = null;
 				return;
 			}
 			if (!res.ok) {
-				this.error = (await res.text()).trim() || `fetch failed (${res.status})`;
+				this.error = refusalMessage(res.status, await res.text(), `fetch failed`);
 				return;
 			}
 			const body = (await res.json()) as AlarmsGetResponse;
 			this.instances = body.alarms ?? [];
+			this.equipment = body.equipment ?? [];
+			this.flood = body.flood ?? null;
 			this.summary = body.summary ?? this.summary;
 			this.supported = true;
 			this.error = null;
 			this.#lastFetchedRev = body.summary?.rev ?? this.#lastFetchedRev;
+			await this.refreshOutOfService();
 		} catch {
 			this.error = 'fetch failed — controller unreachable';
 		} finally {
 			this.loading = false;
 		}
+	}
+
+	/** `GET /api/alarms/chatter`: what would have stopped each chattering alarm.
+	 * Advisory and read-only; a failed read keeps the last answer. */
+	async loadAdvice(): Promise<void> {
+		const seq = ++this.#adviceSeq;
+		try {
+			const res = await kitFetch(`${this.#url}/chatter`, { headers: authHeaders(this.#token, false) });
+			if (!res.ok) {
+				if (seq === this.#adviceSeq) this.error = refusalMessage(res.status, await res.text(), `suggestions failed`);
+				return;
+			}
+			const body = (await res.json()) as AlarmAdviceAnswer;
+			// only the newest ask counts: a slow answer must not overwrite a newer one
+			if (seq === this.#adviceSeq) this.advice = body;
+		} catch {
+			this.error = 'suggestions failed — controller unreachable';
+		}
+	}
+
+	/** Forget the suggestions (nothing chatters now); a read still in flight is dropped. */
+	clearAdvice(): void {
+		this.#adviceSeq++;
+		this.advice = null;
+	}
+
+	/** Read the out-of-service windows. A failed read keeps the last list. */
+	async refreshOutOfService(): Promise<void> {
+		const list = await listOutOfService(this.#url, authHeaders(this.#token, false));
+		if (list) this.outOfService = list;
+	}
+
+	/** `POST /api/alarms/out-of-service`: every alarm of `equipment` hidden for `seconds` (a week at most),
+	 * with a reason. Needs a fresh password; the kit's fetch asks for it. True when the controller took it. */
+	async takeOutOfService(equipment: string, seconds: number, reason: string, by: string): Promise<boolean> {
+		const r = await takeOutOfService(this.#url, { equipment, seconds, reason, by }, authHeaders(this.#token, true));
+		this.error = r.ok ? null : r.message;
+		if (r.ok) await this.refresh();
+		return r.ok;
+	}
+
+	/** `POST /api/alarms/in-service`. */
+	async returnToService(equipment: string, by: string): Promise<boolean> {
+		const r = await returnToService(this.#url, { equipment, by }, authHeaders(this.#token, true));
+		this.error = r.ok ? null : r.message;
+		if (r.ok) await this.refresh();
+		return r.ok;
 	}
 
 	/** `start()` mirrors `RealtimeClient` — call once on mount to seed the
@@ -347,13 +547,13 @@ export class AlarmClient {
 	async ack(ids: string[] | 'all', by: string): Promise<number> {
 		const body = ids === 'all' ? { all: true, by } : { ids, by };
 		try {
-			const res = await fetch(`${this.#url}/ack`, {
+			const res = await kitFetch(`${this.#url}/ack`, {
 				method: 'POST',
 				headers: authHeaders(this.#token, true),
 				body: JSON.stringify(body)
 			});
 			if (!res.ok) {
-				this.error = (await res.text()).trim() || `ack failed (${res.status})`;
+				this.error = refusalMessage(res.status, await res.text(), `ack failed`);
 				return 0;
 			}
 			this.error = null;
@@ -369,9 +569,14 @@ export class AlarmClient {
 	/** `POST /api/alarms/shelve` — `seconds` from now, converted to the ISO
 	 * `until` the server expects. Pick one of `DEFAULT_SHELVE_TIMES_S` (or the
 	 * project's own `shelveTimes` prop) for the duration picker. */
-	async shelve(id: string, seconds: number, by: string): Promise<AlarmInstance | null> {
+	async shelve(
+		id: string,
+		seconds: number,
+		by: string,
+		why?: { reason: string; via?: 'chatter' }
+	): Promise<AlarmInstance | null> {
 		const until = new Date(Date.now() + seconds * 1000).toISOString();
-		return this.#writeOne('shelve', { id, until, by });
+		return this.#writeOne('shelve', { id, until, by, ...(why ? { reason: why.reason, via: why.via } : {}) });
 	}
 
 	/** `POST /api/alarms/unshelve`. */
@@ -381,13 +586,13 @@ export class AlarmClient {
 
 	async #writeOne(action: 'shelve' | 'unshelve', body: Record<string, unknown>): Promise<AlarmInstance | null> {
 		try {
-			const res = await fetch(`${this.#url}/${action}`, {
+			const res = await kitFetch(`${this.#url}/${action}`, {
 				method: 'POST',
 				headers: authHeaders(this.#token, true),
 				body: JSON.stringify(body)
 			});
 			if (!res.ok) {
-				this.error = (await res.text()).trim() || `${action} failed (${res.status})`;
+				this.error = refusalMessage(res.status, await res.text(), `${action} failed`);
 				return null;
 			}
 			this.error = null;
@@ -413,9 +618,9 @@ export class AlarmClient {
 		if (filters.kinds?.length) q.set('kind', filters.kinds.join(','));
 		if (filters.limit) q.set('limit', String(filters.limit));
 		try {
-			const res = await fetch(`${this.#url}/journal?${q}`, { headers: authHeaders(this.#token, false) });
+			const res = await kitFetch(`${this.#url}/journal?${q}`, { headers: authHeaders(this.#token, false) });
 			if (!res.ok) {
-				this.error = (await res.text()).trim() || `journal fetch failed (${res.status})`;
+				this.error = refusalMessage(res.status, await res.text(), `journal fetch failed`);
 				return { events: [], truncated: false };
 			}
 			this.error = null;

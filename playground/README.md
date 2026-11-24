@@ -8,8 +8,12 @@ it at nautilus.joyautomation.com/playground/: `website/scripts/sync-playground.m
 copies `dist/` to `/playground/engine/`, and `docs.yml` builds and deploys
 both.
 
-    ./scripts/build.sh          # -> dist/: naut.wasm, wasm_exec.js, worker.js, memfs.js, client.js, sw.js, app/, hmi/
+    ./scripts/build.sh          # -> dist/: naut.wasm, naut-hmi.wasm, wasm_exec.js, worker.js, hmi-worker.js, memfs.js, client.js, sw.js, app/, hmi/
+    # naut-hmi.wasm (cmd/naut-wasm-hmi: esbuild + Svelte, the screen builder) is
+    # a second module in a worker of its own (src/hmi-worker.js), fetched only
+    # when a screen is first asked for; naut.wasm carries none of it.
     python3 -m http.server -d .. 8765   # then open /playground/dev/test.html
+    node --test playground/app/live.browser.test.mjs   # after build.sh: examples reach "nautilus: live" in headless Chrome
 
 ## What is different from `naut run`
 
@@ -67,6 +71,18 @@ database), with a size cap, a rate limit, and a way to take one down
 
     go run ./playground/share -data /tmp/shares -site website/dist -addr 127.0.0.1:5181
 
+## The interactive tutorial
+
+`/learn/interactive/<lesson>/` on the docs site (website/src/pages/learn/interactive/[id].astro)
+frames this app with `?tutorial=1` beside a lesson's text, with Check, Solve, Next and
+Start over. Lessons are folders in `website/lessons/<id>/` (`lesson.md`, `start/`,
+`solution/`, hidden `check/`), bundled by `website/scripts/sync-lessons.mjs`. In tutorial
+mode nothing is kept by keep.js (the page keeps the learner's files in localStorage) and
+`window.nautilusPlayground.lesson` (`lessonApi` in main.js) swaps the project in place:
+`load({files, open})`, `files()`, `check(tests)`. Check writes the hidden test files,
+runs the wasm test runner, and removes them. `node --test playground/app/tutorial.browser.test.mjs`
+drives it (the shell part needs `npm run build` in website/).
+
 ## Custom components
 
 A project's own `{Name}.svelte` components render in the mimic editor as
@@ -100,6 +116,17 @@ error shows.
 The examples carry their HMI sources (lift-station's `hmi/`) for this. Open
 HMI still shows the HMI built with the playground, so it does not follow
 edits to components.
+
+YAML files get completion, hover and validation from the schemas the
+extension declares (`nautilus.yaml`, `*_test.yaml`, `tags/`, `alarms/`,
+`sites/`), as on the desktop: `scripts/app.sh` fetches the web build of
+Red Hat's YAML extension (pinned, sha256-checked) into `dist/app/yaml-extension/`,
+and it loads when a YAML file first opens (about 350 KB gzipped). In a
+browser its server reads schemas over http(s) only, so `app/main.js` gives
+it the extension's schemas by their URLs here. Its telemetry and the
+schemastore.org catalog are off. `app/yaml-schema.browser.test.mjs` checks
+that in headless Chrome after a build: `node --test
+playground/app/yaml-schema.browser.test.mjs`.
 
 The app also gives the workbench a file search over the project
 (`app/fileSearch.js`): without it `workspace.findFiles` ignored its glob,

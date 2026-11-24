@@ -11,49 +11,92 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/tls"
+	"debug/elf"
 	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
+	"path"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/joyautomation/nautilus/acceptance"
+	"github.com/joyautomation/nautilus/alarm"
+	"github.com/joyautomation/nautilus/alarm/escalate"
+	"github.com/joyautomation/nautilus/alarm/oncall"
+	"github.com/joyautomation/nautilus/audit"
+	"github.com/joyautomation/nautilus/auth"
+	"github.com/joyautomation/nautilus/auth/users"
+	"github.com/joyautomation/nautilus/checkout"
+	"github.com/joyautomation/nautilus/devprofile"
+	"github.com/joyautomation/nautilus/internal/floatip"
 	"github.com/joyautomation/nautilus/internal/lsp"
 	"github.com/joyautomation/nautilus/internal/project"
 	"github.com/joyautomation/nautilus/internal/vcs"
 	nio "github.com/joyautomation/nautilus/io"
 	"github.com/joyautomation/nautilus/leader"
+	"github.com/joyautomation/nautilus/notes"
+	opcuaserver "github.com/joyautomation/nautilus/opcua/server"
 	"github.com/joyautomation/nautilus/retain"
 	"github.com/joyautomation/nautilus/runtime"
 	"github.com/joyautomation/nautilus/server"
+	"github.com/joyautomation/nautilus/sparkplug"
+	"github.com/joyautomation/nautilus/virtdev"
 )
 
 // electorFor builds the elector for a manifest with a `redundancy:` section
 // and wires the project to it (wireRedundancy); nil, and nothing wired, for
-// a manifest without one.
-func electorFor(proj *project.Project, addr string) (*leader.Elector, error) {
+// a manifest without one. A section with peers: makes this controller a
+// member of a redundant pair (pairrun.go): the member comes back too, its
+// peer listener already serving, for the caller to Close after the
+// election's last Release. dir is the project's checkout ("" for a built
+// controller).
+func electorFor(proj *project.Project, addr, dir string) (leader.Election, *pairMember, error) {
+	return electorWith(proj, addr, dir, osPairDeps())
+}
+
+// electorWith is electorFor with a pair member's environment and listen
+// call given (tests).
+func electorWith(proj *project.Project, addr, dir string, deps pairDeps) (leader.Election, *pairMember, error) {
+	if node := deps.getenv("NAUTILUS_NODE"); node != "" && !proj.Redundancy.Pair() {
+		// Set for a pair, but the manifest names none: each box would run
+		// as its own leader, and both would drive the I/O.
+		return nil, nil, fmt.Errorf("NAUTILUS_NODE=%s is set, but this manifest's redundancy: names no pair (peers: and witness:), so every box would run as its own leader against the same I/O: add the pair's section, or unset NAUTILUS_NODE", node)
+	}
 	if proj.Redundancy == nil {
-		return nil, nil
+		return nil, nil, nil
+	}
+	if proj.Redundancy.Pair() {
+		m, err := newPairMember(proj.Redundancy, addr, dir, deps)
+		if err != nil {
+			return nil, nil, err
+		}
+		wireRedundancy(proj, m.q)
+		proj.Member = string(m.o.Self)
+		return m.q, m, nil
 	}
 	el, err := leader.New(proj.LeaseName(), os.Getenv("POD_NAME"), selfAddr(addr))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	wireRedundancy(proj, el)
-	return el, nil
+	return el, nil, nil
 }
 
 // firstDecisionTimeout bounds how long runProject waits for the elector's
@@ -144,6 +187,15 @@ func wireRedundancy(proj *project.Project, el runtime.Coordinator) {
 	if g, ok := proj.Runtime.Driver.(interface{ SetWriteGate(func() bool) }); ok {
 		g.SetWriteGate(el.IsLeader)
 	}
+	// A pair's elector also has the send budget (design §3.4): a driver
+	// that checks before each send reads it instead, in one look.
+	if sg, ok := el.(interface {
+		SendGate() (bool, time.Duration, uint64)
+	}); ok {
+		if g, ok := proj.Runtime.Driver.(nio.SendGated); ok {
+			g.SetSendGate(sg.SendGate)
+		}
+	}
 	proj.WriteGate = el.IsLeader
 }
 
@@ -164,19 +216,46 @@ const localGateLease = 4 * time.Second
 // device's watchdog acts. The runtime stays uncoordinated (no takeover at
 // start, forces kept) and the gate is open from the start, so a healthy
 // project's drivers see what they saw without it.
-func gateOnLiveScans(proj *project.Project, el *leader.Elector, rt *runtime.Runtime, lease time.Duration) *leader.Elector {
+func gateOnLiveScans(proj *project.Project, el leader.Election, rt *runtime.Runtime, lease time.Duration) leader.Election {
 	gate := el
 	if gate == nil {
 		gate = leader.NewLocal(proj.Name, lease)
 		if proj.Runtime.Driver != nil {
-			// Only drivers whose gate is just a gate (io.PlainGated):
-			// optommp and a Sparkplug host read any gate as "one replica
-			// of a redundant set" and would change how they behave.
+			// Only drivers whose gate is just a gate (io.PlainGated), each
+			// told it is plain: optommp lets the unit's watchdog act on a
+			// hung scan (#865); a Sparkplug host holds its commands and
+			// stays the primary host (#943).
 			nio.SetPlainGate(proj.Runtime.Driver, gate.IsLeader)
 		}
 	}
 	gate.SetHealth(rt.Liveness)
 	return gate
+}
+
+// replicaReady is runProject's READY=1 rule: scanned, or as a replica
+// decided to stand by, or as a pair member up for firstDecisionTimeout.
+func replicaReady(scanned bool, el leader.Election, pair bool, up time.Duration) bool {
+	if scanned {
+		return true
+	}
+	if el == nil {
+		return false
+	}
+	select {
+	case <-el.Decided():
+		return !el.IsLeader()
+	default:
+		return pair && up >= firstDecisionTimeout
+	}
+}
+
+// runTLS is naut run's server.tls: the one command that renews a
+// self-signed certificate.
+func runTLS(proj *project.Project, dir, addr string) tlsSpec {
+	certFile, keyFile := proj.TLSFiles()
+	return tlsSpec{cert: certFile, key: keyFile, selfSigned: proj.TLSSelfSigned(),
+		stateDir: proj.AuthStateDir, name: proj.Name, devFallback: dir != "", listen: addr, renew: true,
+		say: func(s string) { fmt.Fprint(os.Stderr, "naut run: "+s) }}
 }
 
 // runProject hosts a loaded project: scan loop + tag API, Ctrl+C to stop.
@@ -190,21 +269,58 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 		fmt.Fprintln(os.Stderr, "naut run:", err)
 		return 1
 	}
-
+	// HTTPS (#708, server.tls): the certificate, re-read on renewal. Loaded
+	// first, so a bad one refuses the start before the pair or the I/O.
 	addr := proj.Addr
 	if env := os.Getenv("NAUTILUS_ADDR"); env != "" {
 		addr = env
 	}
+	tlsRun := runTLS(proj, dir, addr)
+	tlsSrc, err := tlsSource(tlsRun, dir, os.Getenv)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "naut run:", err)
+		return 1
+	}
+
+	// The tag API's port is bound first, before the elector, the retained
+	// state, a driver or a protocol server touches anything: it is what
+	// keeps a second instance of this controller (one started by hand next
+	// to the service, #968) from connecting to the same I/O. One that finds
+	// it held refuses to start, rather than running its I/O without an API.
+	apiLn, addr, err := bindAPI(addr, dir, proj.Redundancy != nil)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "naut run:", err)
+		return 1
+	}
+	apiUp := apiLn != nil
+	defer func() {
+		if apiLn != nil {
+			apiLn.Close() // an early return; an orderly stop closes it first (below)
+		}
+	}()
 
 	// Redundancy and retained state wire in before the runtime compiles,
 	// so the first scan already answers to the elector and sees what the
 	// last leader saved. Outside a cluster the elector is standalone
 	// (always leader) and the retain store is the JSON file — the same
 	// manifest runs on a bench and as a replica set.
-	el, err := electorFor(proj, addr)
+	deps := osPairDeps()
+	deps.creds = pairCredentials(proj, dir, tlsSrc, os.Getenv)
+	el, pair, err := electorWith(proj, addr, dir, deps)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "naut run: redundancy:", err)
 		return 1
+	}
+	if pair != nil {
+		// Registered first, so it runs last: the peer listener answers
+		// votes until the election below has stopped and released.
+		defer pair.Close()
+		// Until hot takeover (#710 S2) the opt-in is required (Load
+		// refuses a pair without it), and said out loud.
+		fmt.Fprintln(os.Stderr, "naut run: redundancy: WARNING: experimental pair: "+project.PairColdTakeover)
+		for _, h := range pair.untrustedAPIs(append(server.EnvAllowedHosts(), proj.Server.AllowedHosts...)) {
+			fmt.Fprintf(os.Stderr, "naut run: redundancy: the pair advertises a tag API at %s, which NAUTILUS_ALLOWED_HOSTS does not list: a browser HMI that follows the leader there is refused (403). Add it to NAUTILUS_ALLOWED_HOSTS on both controllers, or name the controllers by IP in redundancy.peers\n", h)
+		}
 	}
 	if proj.Retain != nil {
 		cm, file := proj.RetainNames()
@@ -216,11 +332,60 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 		fmt.Fprintln(os.Stderr, "naut run: compile:", err)
 		return 1
 	}
+	if pair != nil {
+		// The takeover hold (#710 (b2)): set before the first scan.
+		if err := pair.setupHold(rt, proj.Redundancy); err != nil {
+			fmt.Fprintln(os.Stderr, "naut run: redundancy:", err)
+			return 1
+		}
+		// Failback (#710 d2): its state keeper, before the first load.
+		pair.setupFailback(rt, proj.Redundancy)
+	}
 	// The write gate needs live scans, with redundancy or without (#621,
 	// #625). Set before gate.Run below.
 	gate := gateOnLiveScans(proj, el, rt, localGateLease)
+	// Under systemd (Type=notify), the watchdog heartbeat follows the same
+	// liveness verdicts the gate takes: recorded as the elector checks, not
+	// asked a second time. A verdict older than two leases (eight of the
+	// elector's ticks) counts as not live.
+	sd := newNotifier()
+	watch := &liveWatch{stale: 2 * localGateLease}
+	if sd != nil {
+		gate.SetHealth(watch.wrap(rt.Liveness))
+	}
 
-	alarms, err := startAlarms(proj, rt)
+	// The audit journal's system alarm reads the server, which is built
+	// after the alarms (it serves them): srvRef is set once it exists.
+	var srvRef atomic.Pointer[server.Server]
+	sysAlarms := systemAlarms(proj, pair, &srvRef)
+	proj.PushSend = pushChannel(&srvRef)
+	alarmStateDir, err := openAlarmContacts(proj, dir, os.Getenv, os.Stderr, proj.Runtime.Coordinator != nil)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "naut run: alarms:", err)
+		return 1
+	}
+	// Ack links (#715): the server mints them and answers them; a key
+	// that cannot be had leaves pages without one, said here, rather than
+	// stopping a controller that pages people.
+	ackLinks, err := ackLinkKeyring(proj, alarmStateDir, os.Getenv("NAUTILUS_PEER_TOKEN"), os.Stderr)
+	if err != nil {
+		what := "pages carry no ack link"
+		if proj.Alarms != nil && proj.Alarms.Oncall.Inbound != nil {
+			what += ", and SMS replies and keypresses are refused (alarms.oncall.inbound)"
+		}
+		fmt.Fprintf(os.Stderr, "naut run: warning: %s: %v\n", what, err)
+	}
+	if ackLinks != nil {
+		proj.AckLink, proj.AckCode = ackLinkHook(&srvRef), ackCodeHook(&srvRef)
+	}
+	// The plant's cameras (#724): built before the alarm engine, which hears the
+	// pictures they keep when an alarm activates.
+	camOpts, camClose := cameraOptions(proj, dir, rt, gate.IsLeader, os.Getenv, os.Stderr)
+	defer camClose()
+	if camOpts != nil && camOpts.Snaps != nil {
+		proj.AlarmNotifiers = append(proj.AlarmNotifiers, camOpts.AlarmNotifier())
+	}
+	alarms, err := startAlarms(proj, rt, sysAlarms...)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "naut run: alarms:", err)
 		return 1
@@ -229,8 +394,69 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 		defer alarms.Close()
 	}
 
+	// A pair's operator intent (substitutes, alarm acknowledgements and
+	// shelves) goes through its replicated log, mounted on the peer
+	// listener; a takeover catches it up before its first scan. After the
+	// alarms exist (the log replays its file into them), before the
+	// election and the scans run.
+	var subLog *server.SubstituteLog
+	var alarmLog *server.AlarmLog
+	var notesLog *server.NotesLog
+	if pair != nil {
+		var eng *alarm.Engine
+		if alarms != nil {
+			eng = alarms.Engine
+		}
+		// the I/O checkout (#719) keeps its runs in the log on a pair, for a
+		// project that turned it on and has users to sign for them
+		pair.wantCheckout = proj.CheckoutSheet() != nil && proj.Auth != nil && (proj.Auth.HasUsers() || proj.Auth.OIDC())
+		if subLog, alarmLog, notesLog, err = pair.startLog(rt, 0, eng); err != nil {
+			fmt.Fprintln(os.Stderr, "naut run: redundancy:", err)
+			return 1
+		}
+		// The state stream (#710 S1b): the leader's images to the standby,
+		// and the takeover's flush of the newest one before the store loads.
+		pair.setIOStatus(proj.DriverStatus(nil, nil)) // the field drivers: a switchover's standby I/O check
+		pair.startStream(rt, proj.Redundancy.StreamBudgetBytes(), proj.Redundancy.HotMaxAgeOr(-1))
+		if alarmLog != nil && alarms.Escalation != nil {
+			// The occurrences a takeover continues (#715): those an
+			// escalation policy covers, so a page goes on at its level.
+			alarmLog.SetOccurrenceMatch(alarms.Escalation.Covers)
+		}
+	}
+
+	// Live I/O configuration (#706): registered before the first scan, so
+	// a leadership edge (the process's first scan, or a takeover) re-applies
+	// what the retain store keeps before any logic runs or any output goes
+	// out. The /api/io routes are wired below.
+	ioc, err := project.NewIOConfig(proj, rt, fsys, manifest)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "naut run: live I/O configuration is off:", err)
+		ioc = nil
+	} else {
+		ioc.Gate = gate.IsLeader
+		if pair != nil {
+			ioc.PeersKeepIO = pair.peersKeepIO
+		}
+		if proj.Runtime.Retain != nil {
+			ioc.Keep = rt.SaveRetained
+			ioc.KeepStore = proj.Runtime.Retain.Kind()
+		}
+		rt.SetIO(ioc)
+	}
+
+	// Retained values go in before anything can read or write a tag: the
+	// tag API, OPC UA and the HMI all start below (nautilus#531's startup
+	// half). Standalone only; a replica loads the store on takeover.
+	rt.LoadRetained()
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// A standby follows what the leader applied while it stands by, so its
+	// takeover re-applies nothing (#706).
+	if ioc != nil && el != nil && proj.Runtime.Retain != nil {
+		go ioc.Follow(ctx, proj.Runtime.Retain.Load, el.IsLeader)
+	}
 	var dec decider
 	if el != nil {
 		dec = el
@@ -246,12 +472,20 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 	// local gate has no lease: Release does nothing).
 	elCtx, elCancel := context.WithCancel(context.Background())
 	elDone := make(chan struct{})
+	started := time.Now() // the election starts: READY's clock for a pair member
 	go func() { gate.Run(elCtx); close(elDone) }()
 	defer func() {
 		elCancel()
 		<-elDone
 		gate.Release()
 	}()
+	// The pair's floating address (#716): held while the gate is open. It is
+	// registered after the election's own stop, so on the way out it runs
+	// first: the watcher stops, the address is dropped, and only then does
+	// gate.Release hand the lease to the other controller.
+	if stop := startFloatingIP(proj, gate, floatip.System{}); stop != nil {
+		defer stop()
+	}
 	// Drivers with their own polling loop (eip, sparkplug-host, modbus)
 	// start here, after the elector's first decision.
 	if stop := startDriverWhenDecided(ctx, dec, firstDecisionTimeout, proj.Runtime.Driver); stop != nil {
@@ -274,11 +508,11 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 	if opc != nil {
 		// BuildInfo.SoftwareVersion is the version `naut version` prints.
 		opc.SetSoftwareVersion(lsp.Version)
-		if err := opc.Start(ctx); err != nil {
-			fmt.Fprintln(os.Stderr, "opcua:", err, "(continuing without it)")
-		} else {
-			defer opc.Stop()
+		if r := opcuaRedundancy(proj, el); r != nil {
+			opc.SetRedundancy(r)
 		}
+		// Started once the tag API's server exists (below): it signs OPC UA
+		// users in and journals their writes.
 	}
 
 	// Sparkplug B retransmission, when the manifest asks for it.
@@ -293,19 +527,42 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 		fmt.Fprintln(os.Stderr, "naut run:", msg)
 		return 1
 	}
-	sparkplugUp := false
-	if spNode != nil {
-		if err := spNode.Start(ctx); err != nil {
-			fmt.Fprintln(os.Stderr, "sparkplug:", err, "(continuing without it)")
-		} else {
-			defer spNode.Stop()
-			sparkplugUp = true
-		}
-	}
+	// Started once the tag API's server exists (below): under an auth:
+	// block it decides and journals the node's command writes.
 
 	sopts := proj.Server
 	if tok := os.Getenv("NAUTILUS_TOKEN"); tok != "" {
 		sopts.AuthToken = tok
+	}
+	// The auth: block (#708) and its service tokens' secrets, each from
+	// NAUTILUS_TOKEN_<NAME>: one that is unset, or shared, refuses to start
+	// rather than run with a token nobody can present or two that look
+	// alike.
+	if err := withAuth(&sopts, proj.Auth, os.Getenv); err != nil {
+		fmt.Fprintln(os.Stderr, "naut run: auth:", err)
+		return 1
+	}
+	// The local users' passwords and tokens (#708): the users file in the
+	// state directory, never the project, opened when the block grants a
+	// user a role. One that cannot be read, or that others may read,
+	// refuses to start.
+	if store, err := openUsers(proj, dir, os.Getenv); err != nil {
+		fmt.Fprintln(os.Stderr, "naut run: auth:", err)
+		return 1
+	} else if store != nil {
+		sopts.Users = store
+	}
+	// Sign-in at the OIDC provider (#708 PR 6), its secret from
+	// NAUTILUS_OIDC_SECRET.
+	oidcClient, err := withOIDC(&sopts, proj, os.Getenv)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "naut run: auth:", err)
+		return 1
+	}
+	if proj.Auth != nil {
+		for _, w := range proj.Auth.Warnings() {
+			fmt.Fprintln(os.Stderr, "auth: WARNING:", w)
+		}
 	}
 	if h := os.Getenv("NAUTILUS_HISTORIAN_URL"); h != "" {
 		sopts.HistorianURL = h
@@ -318,6 +575,86 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 	}
 	if el != nil {
 		sopts.Cluster = el
+		sopts.LeaderURLs = proj.Redundancy.LeaderURLs()
+	}
+	if subLog != nil {
+		sopts.SubstituteLog = subLog
+	}
+	if alarmLog != nil {
+		sopts.AlarmLog = alarmLog
+	}
+	if ackLinks != nil {
+		sopts.AckLinks, sopts.AckURL = ackLinks, proj.Alarms.Oncall.AckURL
+		sopts.AckLinkSignIn = proj.Alarms.Oncall.AckFrom() == escalate.AckBySignIn
+		sopts.Inbound = inboundOptions(proj)
+	}
+	if proj.Alarms != nil && proj.Alarms.Oncall.Inbound != nil && sopts.Inbound == nil && ackLinks != nil {
+		fmt.Fprintln(os.Stderr, "naut run: warning: alarms.oncall.inbound: this controller has no contacts store (no state directory), so SMS replies and keypresses are refused")
+	}
+	// Operator notes (#720): a pair's are an index of its log; alone, a file
+	// in the state directory, when anyone can sign in to write one.
+	switch {
+	case notesLog != nil:
+		sopts.NotesLog = notesLog
+		if pair != nil {
+			sopts.SessionLog = pair.sess
+		}
+	case proj.Auth != nil && (proj.Auth.HasUsers() || proj.Auth.OIDC()):
+		if ns, err := openNotes(proj, dir, os.Getenv); err != nil {
+			fmt.Fprintf(os.Stderr, "naut run: notes are off: %v\n", err)
+		} else {
+			sopts.Notes = ns
+			defer ns.Close()
+		}
+	}
+	// The I/O checkout (#719), only for a project that turned it on: a
+	// controller on its own keeps its runs in a file in the state directory.
+	// A pair refuses it (the server says so) until the results go through
+	// the log.
+	if sh := proj.CheckoutSheet(); sh != nil {
+		co := &server.CheckoutOptions{Sheet: sh, Signoff: proj.Checkout.SignoffRule(), Evidence: checkoutEvidence(fsys, manifest, dir, proj.Checkout.Attested())}
+		if pair != nil && pair.cl != nil {
+			// a pair: the runs are the log's, on both controllers
+			st := pair.cl.Store()
+			st.SetSheet(sh)
+			co.Store = st
+			if why := st.KeyError(); why != "" {
+				fmt.Fprintf(os.Stderr, "naut run: checkout: sealing is off here (results are still recorded): the signing key cannot be used: %s\n", why)
+			}
+			go pair.checkoutDuties(ctx, st, co.ReconcileForces, co.Demoted)
+		} else if pair == nil && proj.Auth != nil && (proj.Auth.HasUsers() || proj.Auth.OIDC()) {
+			if st, err := openCheckout(proj, dir, os.Getenv); err != nil {
+				fmt.Fprintf(os.Stderr, "naut run: the I/O checkout is off: %v\n", err)
+				co.OpenErr = err.Error()
+			} else {
+				co.Store = st
+				defer st.Close()
+				if why := st.KeyError(); why != "" {
+					fmt.Fprintf(os.Stderr, "naut run: checkout: sealing is off (results are still recorded): the signing key cannot be used: %s\n", why)
+				}
+				if st.KeyReplaced() {
+					fmt.Fprintln(os.Stderr, "naut run: checkout: the signing key was made new although sealed runs exist (checkout.key was deleted or lost): records sealed before still verify against their own key, but a key fingerprint written down earlier is no longer the controller's")
+				}
+				// a force does not survive the controller: one the file still
+				// says stands belonged to the process before
+				if n, err := st.InterruptStanding(); err != nil {
+					fmt.Fprintf(os.Stderr, "naut run: checkout: %v\n", err)
+				} else if n > 0 {
+					fmt.Fprintf(os.Stderr, "naut run: checkout: %d force(s) the last run left standing were recorded as interrupted\n", n)
+				}
+			}
+		}
+		// a standing force is let go in the table, and recorded as interrupted, when
+		// the controller shuts down: no timer or watch outlives it. This runs after
+		// the last scan, so the field is not written from here: a pair's new leader
+		// takes the outputs over, and a single controller's device holds what it was
+		// last given until the program runs again (the same as any stop)
+		defer co.Stop()
+		co.Install(&sopts)
+	}
+	// The plant's cameras (#724), when the manifest lists any.
+	if camOpts != nil {
+		camOpts.Install(&sopts)
 	}
 	// Program provenance: a built binary decodes the history its archive
 	// carries; a checkout captures live from git. Lazy (first request pays,
@@ -331,42 +668,140 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 		}
 		return project.Sources(snap, manifest)
 	}
+	// Live I/O configuration (#706): a changed device or driver staged,
+	// validated and applied over /api/io while the scan runs, and what runs
+	// against the manifest on every frame.
+	if ioc != nil {
+		// Closed before the drivers stop and the lease is given up (defers
+		// run last first): a revert under way still reaches its devices.
+		defer ioc.Close()
+		sopts.IO = ioc.Hook(func(sha string) (fs.FS, bool) {
+			snap, ok := vcs.SnapshotFS(hist(), sha)
+			return snap, ok
+		}, fsys)
+		// Saving an applied change as a commit where there is a worktree,
+		// or as a patch where there is not (#711).
+		wireConfigCommit(sopts.IO, fsys, dir)
+	}
+	// IO-Link device parameters (#705): the port devices' ISDU behind
+	// /api/iolink, when the project has any.
+	sopts.Params = proj.ParamHook()
 	// naut's own build of the HMI (an app with src/routes, or the default
 	// app from the mimics): served at "/", the dashboard moves to /_nautilus/
 	builtHMI := buildHMIForRun(proj, dir, os.Stderr)
 	if proj.Server.HMI != nil {
 		sopts.HMI = proj.Server.HMI
 	}
-	srv := server.New(rt, sopts)
-	go srv.Run(ctx)
-
-	apiUp := false
-	var apiLn net.Listener
-	ln, err := net.Listen("tcp", addr)
-	// On a bench (naut run from a project), a port another controller
-	// already holds moves this one to the next free port, said out loud,
-	// instead of running with no tag API, screen or dashboard at all. A
-	// built controller, an address from NAUTILUS_ADDR and a redundant
-	// replica keep the address they were given.
-	if err != nil && dir != "" && os.Getenv("NAUTILUS_ADDR") == "" && proj.Redundancy == nil && addrInUse(err) {
-		if alt, altLn := nextFreePort(addr); altLn != nil {
-			fmt.Fprintf(os.Stderr, "tag api: %s is in use (another naut run?), so this one is on %s\n", addr, alt)
-			addr, ln, err = alt, altLn, nil
+	if msg := authNotice(proj); msg != "" {
+		fmt.Fprint(os.Stderr, msg)
+	}
+	sopts.TLS = tlsSrc
+	// The audit journal (#709): every write through the tag API, accepted
+	// or refused, fsynced before it is answered. If it cannot be opened the
+	// controller still runs: setting forces and program edits are refused,
+	// operator actions are journalled in memory only, and the drivers block
+	// and the system alarm say so (#709, design §6 question 5).
+	j, err := openAudit(proj, os.Stderr)
+	sopts.AuditUnavailable = err
+	if pair != nil && j != nil {
+		pair.SetJournal(j)
+	}
+	stopCopy := func() {}
+	if j != nil {
+		sopts.Audit = j
+		// The journal's copy in Postgres (audit.sink: postgres, #709 PR 9).
+		copier, stop, gate, err := startAuditCopy(ctx, proj, j, os.Getenv, os.Stderr)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "audit:", err)
+			j.Close()
+			return 1
+		}
+		if copier != nil {
+			sopts.AuditCopy = copier.Status
+			stopCopy = stop
+		}
+		go pruneAudit(ctx, j, gate, os.Stderr)
+	}
+	// Tuned setpoints back to the repo (#718): a patch, or a commit where
+	// the controller runs from a git checkout.
+	if proj.WriteBack == project.WriteBackPatch || proj.WriteBack == project.WriteBackCommit {
+		var rec audit.Recorder
+		if j != nil {
+			rec = j
+		}
+		wb := newParamWriteBack(rt, proj.WriteBack, dir, manifest, fsys, rec)
+		sopts.ParamWriteBack = wb.hook()
+		if wb.g != nil {
+			go wb.Run(ctx)
+		} else if proj.WriteBack == project.WriteBackCommit {
+			fmt.Fprintln(os.Stderr, "naut run: parameters.writeBack is commit, but this controller does not run from a git checkout: tuned values are offered as a patch at GET /api/parameters/patch")
 		}
 	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "tag api: %v (continuing without it)\n", err)
-	} else {
-		apiUp = true
-		apiLn = ln
+	sopts.Push = pushOptions(proj, alarmStateDir, proj.Runtime.Coordinator != nil, os.Stderr)
+	srv := server.New(rt, sopts)
+	srvRef.Store(srv)
+	if j != nil {
+		// What the seam still owes (open refusal windows, entries kept
+		// through a failure) is written before the journal closes, and
+		// then copied.
+		defer func() {
+			srv.FlushAudit()
+			stopCopy()
+			j.Close()
+		}()
+	}
+	journalInsecureChannels(proj, srv)
+	go srv.Run(ctx)
+	sayOIDC(ctx, oidcClient, srv, tlsSrc != nil, apiLn.Addr().String(), os.Stderr)
+	// naut run alone renews a self-signed certificate, daily while it runs.
+	go keepSelfSignedFresh(ctx, tlsRun, dir, os.Getenv, time.Now, tlsRun.say)
+
+	sparkplugUp := false
+	if spNode != nil {
+		// With an auth: block, a command writes only what auth.sparkplug
+		// allows, and every command write is journalled, source sparkplug
+		// (#708 PR 8b). Without one, nothing changes. Set before Start: the
+		// node refuses every write under auth: until it has it.
+		if id := sparkplugIdentity(proj, srv); id != nil {
+			spNode.SetIdentity(id)
+		}
+		if err := spNode.Start(ctx); err != nil {
+			fmt.Fprintln(os.Stderr, "sparkplug:", err, "(continuing without it)")
+		} else {
+			defer spNode.Stop()
+			sparkplugUp = true
+		}
+	}
+
+	if opc != nil {
+		// With an auth: block, the same users file, sign-in throttle, auth:
+		// block and journal as the tag API's (#708 PR 8a): a UserName token
+		// is checked like a browser's sign-in, and every write is
+		// journalled, source opcua. Without one, nothing changes.
+		if id := opcuaIdentity(proj, srv); id != nil {
+			opc.SetIdentity(id)
+		}
+		if err := opc.Start(ctx); err != nil {
+			fmt.Fprintln(os.Stderr, "opcua:", err, "(continuing without it)")
+		} else {
+			defer opc.Stop()
+		}
+	}
+
+	if apiUp {
+		ln := apiLn
+		if tlsSrc != nil {
+			ln = tls.NewListener(apiLn, tlsSrc.Config())
+		}
+		fmt.Fprint(os.Stderr, listenNotice(addr, sopts.AuthToken != "", sopts.Auth != nil, tlsSrc != nil, len(sopts.TrustedProxies) > 0))
 		// The HTTP port is the first thing shutdown gives back: it is
 		// closed as soon as the stop arrives (below), before the wait for
 		// the last scan and the deferred stops above (OPC UA sessions, the
 		// Sparkplug death certificate, a driver's teardown), so a `naut
 		// run` started again meanwhile still gets its port (nautilus#423,
-		// #599). No defer: nothing returns between here and that close.
+		// #599). The deferred close above is only for an early return.
 		go func() {
-			if err := http.Serve(ln, srv.Handler()); err != nil && ctx.Err() == nil {
+			if err := apiHTTPServer(srv.Handler()).Serve(ln); err != nil && ctx.Err() == nil {
 				fmt.Fprintln(os.Stderr, "tag api:", err)
 			}
 		}()
@@ -377,7 +812,11 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 		banner += " (" + label + ")"
 	}
 	if apiUp {
-		banner += hmiBannerSuffix(proj, addr, builtHMI, os.Stderr)
+		suffix := hmiBannerSuffix(proj, addr, builtHMI, os.Stderr)
+		if tlsSrc != nil {
+			suffix = strings.Replace(suffix, "tag API on http://", "tag API on https://", 1)
+		}
+		banner += suffix
 		warnStaleHMI("naut run", fsys, proj, os.Stderr)
 	}
 	if sparkplugUp {
@@ -398,13 +837,28 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 	if el != nil {
 		banner += " — redundancy: " + el.Status().Mode
 	}
+	banner += schedBannerSuffix(settledSched(rt, 500*time.Millisecond))
 	fmt.Println(wrapBanner(banner+" — Ctrl+C to stop", consoleWidth(os.Stdout)))
-	<-ctx.Done()
+	// READY=1 once a scan has completed or, as a replica, once the elector
+	// has decided this one is a standby, which does not scan. A pair
+	// member is a voter too, and must stay up with no leader to vote for
+	// (a new pair waiting to be commissioned, a peer and witness both
+	// away): it is ready after firstDecisionTimeout either way, or systemd
+	// would restart it in a loop, each restart a new restart wait.
+	go systemdNotify(ctx, sd, watch, func() bool {
+		return replicaReady(rt.Stats().Count > 0, el, pair != nil, time.Since(started))
+	})
+	var restart <-chan struct{}
+	if pair != nil {
+		restart = pair.RestartRequested()
+	}
+	exit := awaitStop(ctx, restart, stop, os.Stderr)
 	// Give the HTTP port back first. Held through the wait below, a `naut
 	// run` started right after the stop lost the bind and ran without its
 	// tag API while this process finished its last scan (nautilus#599).
 	if apiLn != nil {
 		apiLn.Close()
+		apiLn = nil
 	}
 	// Wait for the last scan and the last retain save before the deferred
 	// teardown (the lease release, driver stops) runs, but not forever: a
@@ -415,7 +869,66 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 	case <-time.After(runStopTimeout):
 		fmt.Fprintf(os.Stderr, "naut run: the scan loop did not stop within %s; exiting without its last retain save\n", runStopTimeout)
 	}
-	return 0
+	return exit
+}
+
+// exitRestart is naut run's exit status when it asks its supervisor to
+// start it again (EX_TEMPFAIL): non-zero, so Restart=on-failure does.
+const exitRestart = 75
+
+// awaitStop waits for naut run's stop (the signal's ctx) or the pair's
+// restart request, and returns the exit status: 0, or exitRestart after
+// stopping the run the way a signal would. A superseded operator-intent
+// log moves aside only at a start (#1029 3c-3c-2a), so the supervisor
+// (Restart=on-failure) starts this controller again.
+func awaitStop(ctx context.Context, restart <-chan struct{}, stop func(), stderr io.Writer) int {
+	select {
+	case <-ctx.Done():
+		return 0
+	case <-restart:
+		fmt.Fprintln(stderr, "naut run: restarting to take the operator-intent log's newer history (the supervisor starts naut again)")
+		stop()
+		return exitRestart
+	}
+}
+
+// bindAPI binds the tag API's address before anything else starts (#968).
+// An address another process holds refuses the start: that is another
+// controller, maybe this one's own service, and two must never drive the
+// same I/O. On a bench (naut run from a project: dir set), with no
+// NAUTILUS_ADDR and no redundancy, it moves to the next free port instead,
+// said out loud. It returns the address actually bound.
+//
+// A built controller (dir "") must hold a fixed address, since that is its
+// only exclusion: port 0 (a new port each start) and any bind failure
+// refuse the start too. naut run, a bench tool, keeps running without its
+// tag API on another failure, as before.
+func bindAPI(addr, dir string, redundant bool) (net.Listener, string, error) {
+	const why = "a built controller needs its tag API on a fixed address: holding it is what keeps a second instance off the same I/O"
+	if _, port, err := net.SplitHostPort(addr); dir == "" && err == nil && port == "0" {
+		return nil, addr, fmt.Errorf("tag api address %s has port 0: %s; set server.addr or NAUTILUS_ADDR to a port", addr, why)
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil && addrInUse(err) {
+		if dir != "" && os.Getenv("NAUTILUS_ADDR") == "" && !redundant {
+			if alt, altLn := nextFreePort(addr); altLn != nil {
+				fmt.Fprintf(os.Stderr, "tag api: %s is in use (another naut run?), so this one is on %s\n", addr, alt)
+				return altLn, boundAddr(alt, altLn), nil
+			}
+		}
+		return nil, addr, fmt.Errorf("%s is in use: another controller (this one's service?) is running; refusing to start a second one against the same I/O", addr)
+	}
+	if err != nil && dir == "" {
+		return nil, addr, fmt.Errorf("tag api: %v: %s", err, why)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tag api: %v (continuing without it)\n", err)
+		return nil, addr, nil
+	}
+	// Name the port actually bound: with server.addr ":0" (or
+	// "127.0.0.1:0") the banner and the warnings would otherwise say port
+	// 0, and nothing could find the tag API.
+	return ln, boundAddr(addr, ln), nil
 }
 
 // runStopTimeout bounds how long an orderly stop waits for the scan loop's
@@ -425,14 +938,237 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 // TimeoutStopSec=10, Kubernetes' 30 s grace period, systemd's default 90 s.
 const runStopTimeout = 5 * time.Second
 
+// systemAlarms are the alarms nautilus raises itself for proj, beside the
+// manifest's: read from the server srv will hold, and from the pair member
+// (nil outside a pair).
+func systemAlarms(proj *project.Project, pair *pairMember, srv *atomic.Pointer[server.Server]) []project.SystemAlarm {
+	sys := []project.SystemAlarm{auditAlarm(srv)}
+	if proj.Auth != nil && (proj.Auth.HasUsers() || proj.Auth.OIDC()) {
+		sys = append(sys, usersAlarm(srv))
+	}
+	if proj.Alarms != nil && proj.Alarms.Channels != nil && proj.Alarms.Channels.Push != nil {
+		sys = append(sys, pushHeldAlarm(srv))
+	}
+	if proj.Alarms != nil && proj.Alarms.Oncall.Inbound.Takes("sms") {
+		sys = append(sys, smsAckSuspendedAlarm(srv))
+	}
+	if pair != nil && !mutNaut("witness_lease_no_alarm") {
+		sys = append(sys, witnessLeaseAlarm(pair))
+	}
+	sys = append(sys, holdAlarms(pair)...)
+	sys = append(sys, failbackAlarms(pair)...)
+	return sys
+}
+
+// AuditAlarmID is the system alarm raised while the audit journal could
+// not be opened or cannot be written (#709, design §6 question 5).
+const AuditAlarmID = "nautilus.audit-journal"
+
+// auditAlarm is the audit journal's system alarm, read from the server
+// srv will hold. Unshelvable and acknowledged: while it is up, forces and
+// program changes are refused and actions are journalled in memory only.
+func auditAlarm(srv *atomic.Pointer[server.Server]) project.SystemAlarm {
+	return project.SystemAlarm{
+		Def: alarm.Def{
+			ID: AuditAlarmID, Tag: "__nautilus.audit-journal-down",
+			Name:     "Audit journal cannot be written: setting forces and program edits are refused",
+			Priority: alarm.High, Class: "system",
+			AckRequired: true, AutoClear: true,
+		},
+		Active: func() bool {
+			s := srv.Load()
+			return s != nil && s.AuditJournalDown()
+		},
+	}
+}
+
+// UsersAlarmID is the system alarm raised while the controller's users
+// file cannot be read (#708): no local user can authenticate.
+const UsersAlarmID = "nautilus.users-file"
+
+// openNotes opens the notes file of a controller on its own, in its state
+// directory (#720).
+func openNotes(proj *project.Project, dir string, getenv func(string) string) (*notes.Store, error) {
+	sd, err := controllerStateDir("the operator notes", proj.AuthStateDir, proj.Name, dir, dir != "", getenv)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(sd, 0o700); err != nil {
+		return nil, err
+	}
+	return notes.Open(filepath.Join(sd, NotesFile))
+}
+
+// openCheckout opens the checkout runs file of a controller on its own, in
+// its state directory (#719).
+func openCheckout(proj *project.Project, dir string, getenv func(string) string) (*checkout.Store, error) {
+	sd, err := controllerStateDir("the I/O checkout", proj.AuthStateDir, proj.Name, dir, dir != "", getenv)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(sd, 0o700); err != nil {
+		return nil, err
+	}
+	return checkout.Open(filepath.Join(sd, CheckoutFile), nil)
+}
+
+// CheckoutFile is the name of the checkout runs file in the state directory.
+const CheckoutFile = "checkout.jsonl"
+
+// NotesFile is the name of the notes file in the state directory.
+const NotesFile = "notes.jsonl"
+
+// usersAlarm is the users file's system alarm, read from the server srv
+// will hold.
+func usersAlarm(srv *atomic.Pointer[server.Server]) project.SystemAlarm {
+	return project.SystemAlarm{
+		Def: alarm.Def{
+			ID: UsersAlarmID, Tag: "__nautilus.users-file-down",
+			Name:     "Users file cannot be read: no local user can sign in or use a token",
+			Priority: alarm.High, Class: "system",
+			AckRequired: true, AutoClear: true,
+		},
+		Active: func() bool {
+			s := srv.Load()
+			return s != nil && s.UsersFileDown()
+		},
+	}
+}
+
+// PushHeldAlarmID is the system alarm raised while the push subscriptions'
+// standing sweep is holding a mass revocation instead of deleting it.
+const PushHeldAlarmID = "nautilus.push-held"
+
+// pushHeldAlarm is raised while subscriptions are held: many people failed
+// standing at once, which a wrong users.json does.
+func pushHeldAlarm(srv *atomic.Pointer[server.Server]) project.SystemAlarm {
+	return project.SystemAlarm{
+		Def: alarm.Def{
+			ID: PushHeldAlarmID, Tag: "__nautilus.push-held",
+			Name:     "Push subscriptions held, not sent: many people stopped standing at once (check users.json, and the pair's users check)",
+			Priority: alarm.High, Class: "system",
+			AckRequired: true, AutoClear: true,
+		},
+		Active: func() bool {
+			s := srv.Load()
+			return s != nil && s.PushHeld() > 0
+		},
+	}
+}
+
+// WitnessLeaseAlarmID is the system alarm raised while the witness
+// refuses a pair member's votes for their lease (#710): the pair has no
+// fault tolerance left.
+const WitnessLeaseAlarmID = "nautilus.witness-lease"
+
+// witnessLeaseAlarm is raised while the witness refuses this controller's
+// lease (WitnessLeaseCondition), cleared once it takes it again.
+func witnessLeaseAlarm(m *pairMember) project.SystemAlarm {
+	return project.SystemAlarm{
+		Def: alarm.Def{
+			ID: WitnessLeaseAlarmID, Tag: "__nautilus.witness-lease",
+			Name:     "Redundancy: the witness refuses this pair's lease, so the pair has no fault tolerance (start the witness with this pair's --lease)",
+			Priority: alarm.High, Class: "system",
+			AckRequired: true, AutoClear: true,
+		},
+		Active: m.WitnessLeaseRefused,
+	}
+}
+
+// SMSAckSuspendedAlarmID is the system alarm raised while this controller
+// takes no SMS reply: too many wrong reply codes in a day (#715 inbound).
+const SMSAckSuspendedAlarmID = "nautilus.sms-ack-suspended"
+
+// smsAckSuspendedAlarm is raised while SMS acknowledgements are suspended:
+// someone may be guessing codes, and pages offer no reply until it ends.
+func smsAckSuspendedAlarm(srv *atomic.Pointer[server.Server]) project.SystemAlarm {
+	return project.SystemAlarm{
+		Def: alarm.Def{
+			ID: SMSAckSuspendedAlarmID, Tag: "__nautilus.sms-ack-suspended",
+			Name:     "SMS acknowledgements suspended for up to a day: too many wrong reply codes (someone may be forging replies); links and the HMI still acknowledge",
+			Priority: alarm.High, Class: "system",
+			AckRequired: true, AutoClear: true,
+		},
+		Active: func() bool {
+			s := srv.Load()
+			return s != nil && s.SMSAckSuspended()
+		},
+	}
+}
+
+// openAlarmContacts gives the project the contacts and secrets files in
+// the controller's state directory (#715) when alarms.channels configures
+// a channel that pages people. A file that cannot be read is not a reason
+// to stop a controller: it is said here, and each send that needs it
+// fails (journalled, class config) until it is fixed. No state directory
+// at all leaves the project without one, and NewAlarms refuses.
+func openAlarmContacts(proj *project.Project, dir string, getenv func(string) string, stderr io.Writer, paired bool) (string, error) {
+	if proj.Alarms == nil || len(proj.Alarms.Channels.Kinds()) == 0 {
+		return "", nil
+	}
+	sd, err := controllerStateDir("the alarm contacts", proj.AuthStateDir, proj.Name, dir, dir != "", getenv)
+	if err != nil {
+		return "", err
+	}
+	// The push key before the contacts are checked: a controller that is
+	// not half of a pair makes it here, and a pair is told to copy one.
+	if c := proj.Alarms.Channels; c != nil && c.Push != nil {
+		_, _ = loadPushKey(sd, "naut run", !paired, stderr) // a failure is said by pushOptions
+	}
+	st, err := oncall.Open(sd)
+	if err != nil {
+		fmt.Fprintf(stderr, "naut run: alarms: %v: pages that need it fail until it is fixed\n", err)
+	}
+	proj.AlarmDirectory = st
+	// What naut alarms contacts check finds, said at every start: each
+	// controller of a pair keeps its own files, and a standby's gaps show
+	// only when it leads. Warnings: a missing number fails that one page
+	// (no-contact), it does not stop a controller.
+	errs, _ := checkContacts(proj.Alarms, sd, true)
+	for _, e := range errs {
+		fmt.Fprintf(stderr, "naut run: warning: %s\n", e)
+	}
+	return sd, nil
+}
+
+// journalInsecureChannels journals, once at start, each alarm channel
+// configured with insecure: true (#715): it does not verify its server,
+// and an auditor must be able to find that it ran so.
+func journalInsecureChannels(proj *project.Project, srv interface {
+	RecordSystem(action, target string, detail map[string]any)
+}) {
+	if proj.Alarms == nil {
+		return
+	}
+	// A channel whose requests go through a proxy (HTTPS_PROXY, honouring
+	// NO_PROXY): TLS stays end to end through CONNECT, but an auditor
+	// should know the path. Its presence and host only, never credentials.
+	for _, p := range proj.Alarms.Channels.Proxied() {
+		fmt.Fprintf(os.Stderr, "naut run: alarms.channels.%s goes through the proxy %s\n", p.Kind, p.Host)
+		srv.RecordSystem("alarm.channel-proxy", p.Kind, map[string]any{"proxy": p.Host})
+	}
+	if o := proj.Alarms.Oncall; o.AckURL != "" && o.AckURLInsecure {
+		fmt.Fprintf(os.Stderr, "naut run: warning: alarms.oncall.ack-url-insecure: true: ack links cross the network in plaintext (%s)\n", o.AckURL)
+		srv.RecordSystem("alarm.ack-url-insecure", o.AckURL, map[string]any{
+			"reason": "alarms.oncall.ack-url-insecure: true: an ack link acknowledges as the person paged, and it is sent over http",
+		})
+	}
+	for _, k := range proj.Alarms.Channels.Insecure() {
+		fmt.Fprintf(os.Stderr, "naut run: warning: alarms.channels.%s has insecure: true: its server's certificate is not verified\n", k)
+		srv.RecordSystem("alarm.channel-insecure", k, map[string]any{
+			"reason": "alarms.channels." + k + ".insecure: true: the server's certificate is not verified, and with no credential to send it may run in plaintext",
+		})
+	}
+}
+
 // startAlarms builds the project's alarm engine over rt, before the scan
 // loop starts: the engine registers itself on the runtime's post-scan
 // hook, and SetAlarms hands it to the retain saver, so the first takeover
 // restores the acknowledgements the last leader saved rather than
 // re-annunciating them. Nil when the project has no alarms. Split out of
 // runProject, which blocks on Ctrl+C, so the wiring has a test.
-func startAlarms(proj *project.Project, rt *runtime.Runtime) (*project.Alarms, error) {
-	alarms, err := proj.NewAlarms(rt)
+func startAlarms(proj *project.Project, rt *runtime.Runtime, sys ...project.SystemAlarm) (*project.Alarms, error) {
+	alarms, err := proj.NewAlarms(rt, sys...)
 	if err != nil || alarms == nil {
 		return nil, err
 	}
@@ -446,6 +1182,21 @@ func startAlarms(proj *project.Project, rt *runtime.Runtime) (*project.Alarms, e
 // Ctrl+C, so it isn't a convenient thing to unit test directly) so this
 // decision — the same one `naut build` makes about its own warning — has
 // a testable entry point of its own.
+// boundAddr is the configured address with the port the listener actually
+// got: the host stays as written ("", "0.0.0.0", "localhost"), so the banner
+// reads like the manifest, and only a port 0 changes.
+func boundAddr(configured string, ln net.Listener) string {
+	host, _, err := net.SplitHostPort(configured)
+	if err != nil {
+		return ln.Addr().String()
+	}
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		return configured
+	}
+	return net.JoinHostPort(host, port)
+}
+
 func hmiBannerSuffix(proj *project.Project, addr, built string, stderr io.Writer) string {
 	switch {
 	case built != "":
@@ -590,12 +1341,24 @@ func runBuild(args []string) int {
 	fs := flag.NewFlagSet("build", flag.ContinueOnError)
 	out := fs.String("o", "", "output binary name (default: the manifest's name)")
 	manifest := fs.String("m", "", manifestFlagUsage)
+	runner := fs.String("runtime", "", "the naut binary the controller is built on (default: this one); a release's linux_arm64 naut builds an ARM64 controller from any machine")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	dir := "."
 	if fs.NArg() > 0 {
 		dir = fs.Arg(0)
+	}
+	// Check the runtime before the project, so a wrong path fails fast and
+	// before any HMI build spends its seconds.
+	var target string
+	if *runner != "" {
+		t, err := checkRuntime(*runner)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "naut build: -runtime:", err)
+			return 1
+		}
+		target = t
 	}
 
 	// The project must load AND compile before it ships.
@@ -646,10 +1409,13 @@ func runBuild(args []string) int {
 	if name == "" {
 		name = proj.Name
 	}
-	self, err := os.Executable()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "naut build:", err)
-		return 1
+	self := *runner
+	if self == "" {
+		var err error
+		if self, err = os.Executable(); err != nil {
+			fmt.Fprintln(os.Stderr, "naut build:", err)
+			return 1
+		}
 	}
 	// Provenance rides the artifact: capture the project's git history here,
 	// where .git exists, so the deployed controller can answer for its own
@@ -661,6 +1427,9 @@ func runBuild(args []string) int {
 		fmt.Fprintln(os.Stderr, "naut build:", err)
 		return 1
 	}
+	if target != "" {
+		note += " — for " + target
+	}
 	fmt.Printf("built %s — a self-contained controller (run it like any binary; NAUTILUS_ADDR/NAUTILUS_TOKEN apply)%s\n", name, note)
 	if archiveBytes > embedSizeWarning {
 		fmt.Fprintf(os.Stderr,
@@ -670,6 +1439,49 @@ func runBuild(args []string) int {
 			float64(archiveBytes)/(1024*1024), embedSizeWarning/(1024*1024))
 	}
 	return 0
+}
+
+// checkRuntime vets a -runtime path: it must be an executable, not the
+// release archive it came in (the likeliest mistake is passing
+// nautilus_<v>_linux_arm64.tar.gz). It returns the platform it targets
+// ("linux/arm64") for the build line when the file is ELF, which every
+// controller nautilus runs on is, and "" for another executable format.
+func checkRuntime(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if st, err := f.Stat(); err != nil {
+		return "", err
+	} else if !st.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is not a file", path)
+	}
+	var magic [4]byte
+	if _, err := io.ReadFull(f, magic[:]); err != nil {
+		return "", fmt.Errorf("%s is not an executable", path)
+	}
+	switch {
+	case magic == [4]byte{0x7f, 'E', 'L', 'F'}:
+		ef, err := elf.NewFile(f)
+		if err != nil {
+			return "", fmt.Errorf("%s: %v", path, err)
+		}
+		arch := map[elf.Machine]string{
+			elf.EM_AARCH64: "arm64", elf.EM_ARM: "arm", elf.EM_X86_64: "amd64",
+			elf.EM_386: "386", elf.EM_RISCV: "riscv64",
+		}[ef.Machine]
+		if arch == "" {
+			arch = ef.Machine.String()
+		}
+		return "linux/" + arch, nil
+	case magic[0] == 'M' && magic[1] == 'Z', // Windows
+		magic == [4]byte{0xcf, 0xfa, 0xed, 0xfe}: // Mach-O 64-bit
+		return "", nil
+	case magic[0] == 0x1f && magic[1] == 0x8b:
+		return "", fmt.Errorf("%s is a gzip archive: extract naut from it first (tar xzf %s naut)", path, filepath.Base(path))
+	}
+	return "", fmt.Errorf("%s is not an executable", path)
 }
 
 // embedSizeWarning is where `naut build` starts saying something: a
@@ -730,6 +1542,207 @@ func embeddedManifest(fsys fs.FS) string {
 	return strings.TrimSpace(string(raw))
 }
 
+// authNotice is what naut run says about the manifest's auth: block, so
+// nobody runs a controller believing a block protects it before it does.
+// It decides every read and write through the HTTP API, every OPC UA
+// write (a user's, or a certificate's it maps, #708 PR 8a) and every
+// Sparkplug command write (#708 PR 8b). Not covered yet: OPC UA reads.
+// A project whose sparkplug.writable opens tags while the block grants
+// Sparkplug nothing is told that every command write is now refused, and
+// how to allow them.
+func authNotice(proj *project.Project) string {
+	if proj.Auth == nil {
+		return ""
+	}
+	msg := authSurfacesNotice
+	if sparkplugGrantMissing(proj) {
+		msg += authSparkplugNotice
+	}
+	return msg
+}
+
+// sparkplugGrantMissing reports a project whose sparkplug.writable opens
+// tags while its auth: block grants Sparkplug commands no write anywhere
+// (no auth.sparkplug, or only roles without write, such as viewer): every
+// command write is refused (#708 PR 8b), which a project that had writes
+// before its auth: block (or before 8b) should be told.
+func sparkplugGrantMissing(proj *project.Project) bool {
+	return proj.Auth != nil && len(proj.SparkplugWritable()) > 0 && !proj.Auth.Holds(auth.Sparkplug(""), auth.Write)
+}
+
+// sparkplugIdentity is what naut run hands its Sparkplug node (#708 PR
+// 8b): the tag API's auth: block and journal, when the manifest has an
+// auth: block; nil without one, so a project without auth: runs its node
+// exactly as before (the write gate alone, no journal entries).
+func sparkplugIdentity(proj *project.Project, srv *server.Server) sparkplug.Identity {
+	if proj.Auth == nil {
+		return nil
+	}
+	return srv.Surface(audit.SourceSparkplug)
+}
+
+// opcuaIdentity is what naut run hands its OPC UA server (#708 PR 8a):
+// the tag API's sign-in, auth: block and journal, when the manifest has an
+// auth: block; nil without one, so a project without auth: runs its OPC UA
+// server exactly as before (no UserName tokens, no journal entries).
+func opcuaIdentity(proj *project.Project, srv *server.Server) opcuaserver.Identity {
+	if proj.Auth == nil {
+		return nil
+	}
+	return srv.Surface(audit.SourceOPCUA)
+}
+
+// authFacadeNotice is what naut logix serve --project and naut siemens
+// serve say about an auth: block: they have no users file, so no browser
+// sign-in, and a request without a token is anonymous.
+const authFacadeNotice = "auth: this serve has no browser sign-in: every request needs a token (Authorization: Bearer …),\n" +
+	"      reads included, unless the auth: block sets anonymous: viewer.\n"
+
+const authSurfacesNotice = "auth: OPC UA reads are not gated by the auth: block yet (#1131): a client that reaches the OPC UA server reads without a role.\n"
+
+// authSparkplugNotice is the line for a project whose sparkplug.writable
+// opens tags while its auth: block grants Sparkplug commands nothing.
+const authSparkplugNotice = "auth: sparkplug.writable opens tags, but the auth: block's sparkplug: grants no write (no grant, or a role without write such as viewer),\n" +
+	"      so every Sparkplug command write is refused. To allow them, set `sparkplug: operator` (or a role with write, with areas) under auth:, then restart naut run.\n"
+
+// openUsers opens the controller's users file when its auth: block grants
+// a user a role or signs browsers in at an OIDC provider (whose pins and
+// sign-outs live beside it) (nil, nil otherwise: no state directory is needed, so a
+// box not under systemd starts as before): auth.state-dir, else
+// $STATE_DIRECTORY, else (naut run in a checkout, outside systemd) the
+// developer's $XDG_STATE_HOME/nautilus/<name>. A built controller has no
+// checkout (dir is ""), so it never falls back to a home directory.
+func openUsers(proj *project.Project, dir string, getenv func(string) string) (*users.Store, error) {
+	if proj.Auth == nil || !proj.Auth.HasUsers() && !proj.Auth.OIDC() {
+		return nil, nil
+	}
+	path, err := usersFile(proj.AuthStateDir, proj.Name, dir, dir != "", getenv)
+	if err != nil {
+		return nil, err
+	}
+	return users.Open(path)
+}
+
+// withAuth puts the manifest's auth: block (#708) on sopts, with each
+// service token's secret from NAUTILUS_TOKEN_<NAME> (serviceTokenSecrets).
+// Nil (no block) leaves sopts as it is. naut run and naut logix serve
+// --project both serve a manifest that can hold the block, so both
+// enforce it through here.
+func withAuth(sopts *server.Options, pol *auth.Policy, getenv func(string) string) error {
+	if pol == nil {
+		return nil
+	}
+	secrets, err := serviceTokenSecrets(pol.ServiceTokens(), sopts.AuthToken, getenv)
+	if err != nil {
+		return err
+	}
+	sopts.Auth, sopts.ServiceTokens = pol, secrets
+	return nil
+}
+
+// serviceTokenSecrets reads each service token's secret from
+// NAUTILUS_TOKEN_<NAME>. A missing one is an error naming the variable
+// (never a value), and so is a secret that is NAUTILUS_TOKEN's or another
+// token's: a request presenting it would be two principals.
+func serviceTokenSecrets(names []string, authToken string, getenv func(string) string) (map[string]string, error) {
+	out := map[string]string{}
+	seen := map[string]string{}
+	if authToken != "" {
+		seen[authToken] = "NAUTILUS_TOKEN"
+	}
+	var missing []string
+	for _, name := range names {
+		env := "NAUTILUS_TOKEN_" + strings.ToUpper(name)
+		secret := getenv(env)
+		if secret == "" {
+			missing = append(missing, env)
+			continue
+		}
+		if other, dup := seen[secret]; dup {
+			return nil, fmt.Errorf("%s is the same secret as %s: give each token its own", env, other)
+		}
+		seen[secret] = env
+		out[name] = secret
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("service tokens without a secret: set %s", strings.Join(missing, ", "))
+	}
+	return out, nil
+}
+
+// openAudit opens the audit journal the manifest's audit: section places
+// (default ./audit). A failure is reported, not fatal: a read-only working
+// directory must not stop a controller, and the server keeps the entries
+// in memory instead.
+func openAudit(proj *project.Project, stderr io.Writer) (*audit.FileJournal, error) {
+	dir, keep := proj.AuditJournal()
+	j, err := audit.OpenFile(dir, audit.FileOptions{Keep: keep})
+	if err != nil {
+		fmt.Fprintf(stderr, "audit: ERROR: %v: actions are allowed but journalled in memory only, lost on restart (set audit.path in nautilus.yaml to a writable directory)\n", err)
+		return nil, err
+	}
+	// The retention in force, journalled at every open: every prune names
+	// it, and verify --anchor checks each prune against it (#709 PR 9b).
+	if _, err := j.RecordRetention(processUser()); err != nil {
+		fmt.Fprintf(stderr, "audit: recording the retention: %v\n", err)
+	}
+	return j, nil
+}
+
+// processUser names who started naut run, for the retention entry.
+func processUser() string {
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return ""
+}
+
+// pruneAudit removes journal files older than audit.keep-days, at start
+// and then daily. With a copy in Postgres (gate set), a prune waits while
+// a lowered retention is not yet anchored (waitToPrune).
+func pruneAudit(ctx context.Context, j *audit.FileJournal, gate func(context.Context) gateAnswer, stderr io.Writer) {
+	dir := j.Dir()
+	pruneAuditWith(ctx, j, gate, func() (float64, error) { return diskUsed(dir) }, stderr)
+}
+
+func pruneAuditWith(ctx context.Context, j *audit.FileJournal, gate func(context.Context) gateAnswer, used func() (float64, error), stderr io.Writer) {
+	t := time.NewTicker(24 * time.Hour)
+	defer t.Stop()
+	for {
+		// Every prune names the retention journalled before it: one that
+		// failed at open is tried again, and nothing is pruned without it.
+		if j.RetentionSeq() == 0 {
+			if _, err := j.RecordRetention(processUser()); err != nil {
+				fmt.Fprintf(stderr, "audit: prune skipped: the retention could not be journalled: %v\n", err)
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+				}
+				continue
+			}
+		}
+		prune := j.Prune
+		if gate != nil {
+			ok, unanchored := waitToPrune(ctx, gate, used, 2*time.Second, stderr)
+			if !ok {
+				return
+			}
+			if unanchored {
+				prune = j.PruneUnanchored
+			}
+		}
+		if _, err := prune(); err != nil {
+			fmt.Fprintf(stderr, "audit: prune: %v\n", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
 // embedSkipDirs names project subdirectories that never ship, however large
 // they are on disk: dependency trees a package manager can regenerate, not
 // project sources. This matters more once an hmi/ directory can sit inside
@@ -784,6 +1797,20 @@ func emitBinary(self, dir, out, manifest string, history []byte, hmi map[string]
 	// 2. the project archive.
 	zipStart := base
 	var archiveBytes int64
+	// The virtual devices are test fixtures, like the suites: they gate
+	// the deploy and do not ride along on the controller.
+	fixtures := map[string]bool{}
+	if set, err := loadVirtualDevices(dir, manifest); err == nil {
+		for _, f := range set.Files() {
+			if abs, err := filepath.Abs(f); err == nil {
+				fixtures[abs] = true
+			}
+		}
+	} else if _, serr := os.Stat(filepath.Join(dir, virtdev.FileName)); serr == nil {
+		if abs, err := filepath.Abs(filepath.Join(dir, virtdev.FileName)); err == nil {
+			fixtures[abs] = true
+		}
+	}
 	zw := zip.NewWriter(f)
 	err = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -805,6 +1832,19 @@ func emitBinary(self, dir, out, manifest string, history []byte, hmi map[string]
 		// ride along on the controller.
 		if strings.HasPrefix(rel, ".") || rel == out || rel == filepath.Base(out) ||
 			strings.HasSuffix(rel, acceptance.SuffixTest) {
+			return nil
+		}
+		if abs, err := filepath.Abs(p); err == nil && fixtures[abs] {
+			return nil
+		}
+		// A vendored profile ships (the project loads its devices from it);
+		// the simulator beside it is a test fixture and does not.
+		if strings.HasPrefix(rel, devprofile.ProjectDir+"/") && path.Ext(rel) != ".yaml" {
+			return nil
+		}
+		// The audit journal `naut run` keeps (./audit by default) is this
+		// machine's record, never part of the program.
+		if audit.IsJournalFile(d.Name()) || d.Name() == audit.LockName {
 			return nil
 		}
 		raw, err := os.ReadFile(p)
@@ -917,19 +1957,57 @@ func wantsHelp(args []string) bool {
 	return false
 }
 
+// builtArgs answers a built controller's arguments: help and its version,
+// each printed without starting it, and anything else refused, also
+// without starting (#968). done is false only with no arguments: then it
+// runs.
+func builtArgs(args []string, name string, stdout, stderr io.Writer) (code int, done bool) {
+	if len(args) == 0 {
+		return 0, false
+	}
+	switch {
+	case wantsHelp(args):
+		fmt.Fprint(stdout, builtUsage(name))
+		return 0, true
+	case args[0] == "version" || args[0] == "-v" || args[0] == "--version" || args[0] == "-version":
+		fmt.Fprintln(stdout, "nautilus", lsp.Version)
+		return 0, true
+	}
+	fmt.Fprintf(stderr, "%s: unknown argument %q: a built controller takes none (it starts with none; %s version prints its version, %s --help how it is configured)\n", name, args[0], name, name)
+	return 2, true
+}
+
 // builtUsage is what a built controller prints for --help: how it is
 // configured, since it has no flags to list.
 func builtUsage(name string) string {
 	return "usage: " + name + `
 
-A controller built by naut build. It takes no arguments: running it starts
-the scan loop, the dashboard, and the tag API, using the project embedded in
-this file.
+A controller built by naut build. Run with no arguments, it starts the scan
+loop, the dashboard, and the tag API, using the project embedded in this
+file. It refuses to start while another process holds its tag API address
+(another instance, or its own service): two must never drive the same I/O.
+
+  ` + name + ` version    print the naut version it was built with
+  ` + name + ` users …    the local users of its auth: block (naut users --help);
+                     it does not start the controller
+  ` + name + ` alarms contacts|secrets …
+                     who escalation pages and the channels' credentials, on
+                     this box (naut alarms contacts help); it does not
+                     start the controller
+  ` + name + ` --help     this
 
 Environment:
   NAUTILUS_ADDR            listen address, overriding server.addr in the manifest
-  NAUTILUS_TOKEN           bearer token the tag API and dashboard require
+  NAUTILUS_TOKEN           bearer token every write requires, and every
+                           request by a name not listed below
+  NAUTILUS_ALLOWED_HOSTS   host names (comma-separated) the controller
+                           answers by without the token, besides localhost
+                           and an IP address
   NAUTILUS_HISTORIAN_URL   historian the dashboard queries for trends
+  NAUTILUS_NODE            a or b: which controller of a redundant pair
+                           (redundancy: peers:) this one is
+  NAUTILUS_PEER_TOKEN      the secret every peer and witness request carries
+  NAUTILUS_CLUSTER         the pair's cluster ID, drawn when it is commissioned
   NAUTILUS_CLI=1           run the naut command line instead of the controller
 
 Retained state (the manifest's retain: block) is written to retain.json in the
@@ -965,4 +2043,171 @@ func embeddedProject() (fs.FS, bool) {
 	}
 	// f stays open for the process lifetime — the zip reads from it lazily.
 	return zr, true
+}
+
+// settledSched is the runtime's stats once every task that asked for a CPU
+// or a priority has been placed or refused (the loops do it as they start),
+// or after wait, whichever is first.
+func settledSched(rt *runtime.Runtime, wait time.Duration) runtime.ScanStats {
+	deadline := time.Now().Add(wait)
+	for {
+		s := rt.Stats()
+		pending := schedPending(s.Sched)
+		for _, t := range s.Tasks {
+			pending = pending || schedPending(t.Sched)
+		}
+		if !pending || time.Now().After(deadline) {
+			return s
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func schedPending(s runtime.SchedStats) bool {
+	return (len(s.CPUs) > 0 || s.Priority > 0) && !s.Applied && s.Error == ""
+}
+
+// schedBannerSuffix says, on the banner, which tasks did not get the CPU or
+// real-time priority they asked for: a refusal is in the log and the task's
+// scan.sched too, but a controller meant to run real-time that silently
+// does not is the kind of wrong to say at start (#836).
+func schedBannerSuffix(s runtime.ScanStats) string {
+	var realtime, pin []string
+	note := func(name string, sc runtime.SchedStats) {
+		switch {
+		case sc.Error == "":
+		case sc.Priority > 0:
+			realtime = append(realtime, name)
+		default: // cpu: alone, no priority asked
+			pin = append(pin, name)
+		}
+	}
+	note(runtime.MainTaskName, s.Sched)
+	for _, t := range s.Tasks {
+		note(t.Name, t.Sched)
+	}
+	out := ""
+	if len(realtime) > 0 {
+		out += " — REAL-TIME REFUSED for " + strings.Join(realtime, ", ")
+	}
+	if len(pin) > 0 {
+		out += " — CPU PIN FAILED for " + strings.Join(pin, ", ")
+	}
+	if out != "" {
+		out += " (see the log)"
+	}
+	// The runtime raised GOMAXPROCS for a task at a priority on a box with
+	// few cores (#830); an operator who set it, or a box with cores to
+	// spare, sees nothing here.
+	if s.Procs.RaisedFrom > 0 {
+		out += fmt.Sprintf(" — GOMAXPROCS %d (raised from %d: a task requests a real-time priority)", s.Procs.Value, s.Procs.RaisedFrom)
+	}
+	return out
+}
+
+// pairServiceLevel is the OPC UA ServiceLevel (Part 4 §6.6.2.4.5.2) a pair
+// member reports, read by a client that holds a session to each and keeps
+// the higher: 250 a leader with nothing standing against it, 200 a leader
+// with a warning (the pair is degraded, but it is the one driving), 100 a
+// standby that knows the leader and holds a synced operator log, 1 any
+// other standby (no leader known, or its log not synced: it could not take
+// over cleanly), 0 a controller that is a spare or held by a duplicate mark
+// (it does not take part). A leader is always at 200 or more, a standby
+// always less (#716).
+func pairServiceLevel(st leader.Status) byte {
+	switch {
+	case st.Spare || st.Held:
+		return 0
+	case st.IsLeader && len(st.Warnings) == 0:
+		return 250
+	case st.IsLeader:
+		return 200
+	case st.Leader != "" && (st.Log == nil || st.Log.Synced):
+		return 100
+	}
+	return 1
+}
+
+// opcuaRedundancy is a pair member's OPC UA redundancy (nil outside a pair):
+// RedundancySupport Cold (a takeover keeps the retained values the state
+// stream brought, not a running image: project.PairColdTakeover), both
+// members' ApplicationUris, and the ServiceLevel from the elector. A client
+// may sample the level every 100 ms; the elector's status copies several
+// slices under its tick lock, so the level is held for 250 ms.
+func opcuaRedundancy(proj *project.Project, el leader.Election) *opcuaserver.Redundancy {
+	uris := proj.OPCUAMemberURIs()
+	if uris == nil || el == nil {
+		return nil
+	}
+	return &opcuaserver.Redundancy{
+		Support:      1,
+		ServerURIs:   uris,
+		ServiceLevel: cachedServiceLevel(func() byte { return pairServiceLevel(el.Status()) }, 250*time.Millisecond, time.Now),
+	}
+}
+
+// cachedServiceLevel holds f's answer for ttl.
+func cachedServiceLevel(f func() byte, ttl time.Duration, now func() time.Time) func() byte {
+	var (
+		mu   sync.Mutex
+		at   time.Time
+		last byte
+		have bool
+	)
+	return func() byte {
+		mu.Lock()
+		defer mu.Unlock()
+		if t := now(); !have || t.Sub(at) >= ttl {
+			last, at, have = f(), t, true
+		}
+		return last
+	}
+}
+
+// floatingIPTick is how often the holder looks at the gate. The gate closes
+// the fence margin (d_net + m_send, 70 ms at the default lease; checkFence
+// allows as little as a couple of ms) before the lease ends and the other
+// controller cannot lead before that; the address goes within a tick of the
+// gate (plus a drop in flight), and anything the kernel keeps after a kill
+// is client routing only, because field writes are fenced by the gate.
+const floatingIPTick = 5 * time.Millisecond
+
+// startFloatingIP holds redundancy.floating-ip on this controller while the
+// write gate (g, the elector) is open: added after it opens, dropped when it
+// closes. The returned stop ends the watcher and then drops the address, for
+// an orderly stop to call before it releases the lease. Nil without the key.
+func startFloatingIP(proj *project.Project, g interface{ IsLeader() bool }, ops floatip.Ops) (stop func()) {
+	if proj.Redundancy == nil || proj.Redundancy.FloatingIP == nil || !proj.Redundancy.Pair() {
+		return nil
+	}
+	if _, off := ops.(floatip.System); off && goruntime.GOOS != "linux" {
+		fmt.Fprintln(os.Stderr, "naut run: redundancy.floating-ip needs Linux; the address is not held on this system")
+		return nil
+	}
+	fc, err := floatip.Parse(proj.Redundancy.FloatingIP.Address, proj.Redundancy.FloatingIP.Interface)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "naut run: redundancy.floating-ip:", err)
+		return nil
+	}
+	h := floatip.New(fc, ops)
+	h.Log = func(msg string, args ...any) { slog.Warn("redundancy: "+msg, args...) }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { h.Watch(ctx, g.IsLeader, floatingIPTick); close(done) }()
+	return func() {
+		cancel()
+		<-done
+		var err error
+		for i := 0; i < 3; i++ {
+			if err = h.Drop(); err == nil {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if err != nil {
+			slog.Error("redundancy: the floating IP could not be dropped before the lease was released; remove it by hand (ip addr del) or let the unit's ExecStopPost do it", "err", err)
+		} else {
+			slog.Info("redundancy: floating IP dropped", "address", fc.Address)
+		}
+	}
 }

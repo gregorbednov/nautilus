@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -20,6 +21,26 @@ const (
 	KindUnshelve   = "unshelve"
 	KindSuppress   = "suppress"
 	KindUnsuppress = "unsuppress"
+
+	// KindNotify is not a state change: it records one notification an
+	// escalation policy sent, or tried to (#715). Engine.Notified writes
+	// it; it never reaches Notifiers or OnEvent. The journal's HTTP view
+	// leaves it out unless a client asks for it by kind, so an HMI that
+	// predates it never sees a row it cannot label.
+	KindNotify = "notify"
+)
+
+// Notify results: Event.Result on a KindNotify row.
+const (
+	NotifySent         = "sent"
+	NotifyFailed       = "failed"
+	NotifyNobodyOnCall = "nobody-on-call"
+	// NotifyHeld marks a chattering alarm's held pages (#1249): the first
+	// bounce held in an episode, and the episode's end with the count.
+	NotifyHeld = "held"
+	// NotifyGrouped is an alarm a delivered grouped flood page listed
+	// (#1249): who was told about it, by which channel, at which level.
+	NotifyGrouped = "grouped"
 )
 
 // Event is one append-only journal row.
@@ -38,6 +59,48 @@ type Event struct {
 	Site     string   `json:"site,omitempty"`
 	State    string   `json:"state,omitempty"` // the state arrived at
 	By       string   `json:"by,omitempty"`    // operator string, unauthenticated
+	// Occurrence names the occurrence the event belongs to (#715): one
+	// runs from an activation out of normal to the next return to normal.
+	// Empty on rows written before occurrences, and on an alarm that has
+	// had none since the engine started.
+	Occurrence string `json:"occurrence,omitempty"`
+	// Standing marks an `active` row that is not a new activation (#1249):
+	// its condition stood through a re-baseline (the engine's start, a
+	// takeover's reset, a return from suppression) or it fell inside a
+	// standalone start's grace. Live detection did not count it, and
+	// neither do the reports (rationalize.Activations).
+	Standing bool `json:"standing,omitempty"`
+	// SeenWhen, on an `active` row, says the activation was seen as
+	// something came back ("site RTU9 came back", "equipment P101
+	// returned to service"): its condition read false before it could not
+	// be seen and true after, so it began sometime in between, not at TS.
+	SeenWhen string `json:"seenWhen,omitempty"`
+
+	// The rest are set only on a KindNotify row (#715): the escalation
+	// level (1 is the first), who was notified (a principal: a user name
+	// or oidc:<name>, never an address), the channel kind, the result
+	// (NotifySent, NotifyFailed, NotifyNobodyOnCall) and why, when there
+	// is more to say than the result ("joined late: …").
+	Level  int    `json:"level,omitempty"`
+	To     string `json:"to,omitempty"`
+	Via    string `json:"via,omitempty"`
+	Result string `json:"result,omitempty"`
+	Reason string `json:"reason,omitempty"`
+
+	// The rest are set only on a detection row (#1249: KindChatter,
+	// KindChatterEnd, KindFlood, KindFloodEnd): Count is the activations
+	// (a chatter row: in the episode so far; a flood start: in its
+	// window; a flood end: in the whole flood), Peak the most in any
+	// window of a flood, WindowMs the detection window, SinceMs when the
+	// episode began (an end row's TS minus it is its duration), Episode
+	// the flood's ID. A flood's start row names its first alarms in
+	// Reason ("first out: …"): the row stays comparable (no slice), and
+	// FloodEvent carries them as a list.
+	Count    int    `json:"count,omitempty"`
+	Peak     int    `json:"peak,omitempty"`
+	WindowMs int64  `json:"windowMs,omitempty"`
+	SinceMs  int64  `json:"sinceMs,omitempty"`
+	Episode  string `json:"episode,omitempty"`
 }
 
 // Time is the event's timestamp as a time.Time.
@@ -51,7 +114,10 @@ type Filter struct {
 	Priorities []string `json:"priorities,omitempty"`
 	IDs        []string `json:"ids,omitempty"`
 	Kinds      []string `json:"kinds,omitempty"`
-	Limit      int      `json:"limit,omitempty"`
+	// ExceptKinds drops these kinds; it is applied after Kinds. The HTTP
+	// journal view sets it to KindNotify when a client names no kind.
+	ExceptKinds []string `json:"exceptKinds,omitempty"`
+	Limit       int      `json:"limit,omitempty"`
 }
 
 // DefaultQueryLimit bounds a journal query that does not ask for a bound,
@@ -66,9 +132,14 @@ func (f Filter) limit() int {
 	return f.Limit
 }
 
+// Match reports whether e passes the filter (the limit aside): what an
+// offline reader applies to a journal it read whole.
+func (f Filter) Match(e Event) bool { return f.match(e) }
+
 func (f Filter) match(e Event) bool {
 	return inSet(f.Sites, e.Site) && inSet(f.IDs, e.ID) &&
-		inSet(f.Kinds, e.Kind) && inSet(f.Priorities, e.Priority.String())
+		inSet(f.Kinds, e.Kind) && inSet(f.Priorities, e.Priority.String()) &&
+		!slices.Contains(f.ExceptKinds, e.Kind)
 }
 
 func inSet(set []string, v string) bool {
@@ -272,6 +343,25 @@ func (j *FileJournal) Query(from, to time.Time, f Filter) ([]Event, error) {
 		events = append(events, got...)
 	}
 	return selectEvents(events, from, to, f), nil
+}
+
+// ReadFileJournal reads a FileJournal's events read-only, oldest first:
+// the rotated generation (<path>.1), if any, then the live file. Unlike
+// NewFile it never creates anything, so a mistyped path is an error and
+// not an empty journal. It is what the offline reports read.
+func ReadFileJournal(path string) ([]Event, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("no alarm journal at %s: %w", path, err)
+	}
+	var events []Event
+	for _, p := range []string{path + ".1", path} {
+		got, err := readJSONL(p)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, got...)
+	}
+	return events, nil
 }
 
 func readJSONL(path string) ([]Event, error) {

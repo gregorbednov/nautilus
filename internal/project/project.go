@@ -8,18 +8,33 @@
 package project
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
+	"net"
+	"net/netip"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/joyautomation/nautilus/alarm"
+	"github.com/joyautomation/nautilus/alarm/channel"
+	"github.com/joyautomation/nautilus/alarm/escalate"
+	"github.com/joyautomation/nautilus/auth"
+	"github.com/joyautomation/nautilus/devbind"
+	"github.com/joyautomation/nautilus/devprofile"
 	"github.com/joyautomation/nautilus/internal/dialect"
+	"github.com/joyautomation/nautilus/internal/floatip"
+	"github.com/joyautomation/nautilus/internal/plant"
 
 	"gopkg.in/yaml.v3"
 
@@ -48,7 +63,25 @@ type Manifest struct {
 	// "codesys" are reserved.
 	Dialect string       `yaml:"dialect"`
 	Server  ServerConfig `yaml:"server"`
-	Tasks   []TaskConfig `yaml:"tasks"`
+	// PWA names and themes the installed HMI (#722); every field is
+	// optional, and an HMI is installable without the section.
+	PWA *PWAConfig `yaml:"pwa"`
+	// pwaIcon is PWA.Icon's bytes, read by ReadManifest.
+	pwaIcon []byte
+	// Checkout is the I/O checkout (#719): the sheet's file and the
+	// sign-off rule. checkoutSheet is the sheet, read by ReadManifest.
+	Checkout      *CheckoutConfig `yaml:"checkout"`
+	checkoutSheet any             // the sheet (*checkout.Sheet), read by checkout.go: not in the browser build
+	// Cameras are the plant's cameras (#724): each bound to an asset the
+	// plant.yaml names; the controller relays them. Checked as rows by
+	// ReadManifest, against the plant by CheckCameras.
+	Cameras CameraRows `yaml:"cameras"`
+	// CameraSnapshots is how long and how much of the pictures kept when an
+	// alarm activates (#724): keep-days, max-count, max-mb.
+	CameraSnapshots CameraSnapshotsCfg `yaml:"camera-snapshots"`
+	// CameraStreams bounds the memory of all live video streams together (#724).
+	CameraStreams CameraStreamsCfg `yaml:"camera-streams"`
+	Tasks         []TaskConfig     `yaml:"tasks"`
 	// TagFiles names files holding additional tags — each a bare YAML
 	// sequence of the same tag entries as Tags. This is how a GENERATED
 	// tag set stays a separate reviewable artifact instead of a 500-line
@@ -67,14 +100,42 @@ type Manifest struct {
 	// plus an MQTT feed on the same controller. Each entry is the same
 	// shape as driver:, plus an optional name; setting both driver: and
 	// drivers: is an error. One entry behaves exactly like driver:.
-	Drivers   []DriverConfig   `yaml:"drivers"`
+	Drivers []DriverConfig `yaml:"drivers"`
+	// Devices declares field devices by profile (docs/design/device-library.md):
+	// each row derives a struct tag typed by its vendored profile, a command
+	// tag per writable point and its driver bindings, at load.
+	// Plant names the plant model file (plant.yaml, docs/design/plant-model.md):
+	// what is in the plant, what feeds what. Mimics and scenes reference its
+	// ids with `plant:`. Absent, nothing changes.
+	PlantFile string           `yaml:"plant"`
+	Devices   []devbind.Device `yaml:"devices"`
+	// devices is Devices resolved against profiles/ (ReadManifest).
+	devices   *devbind.Set     `yaml:"-"`
+	plant     *plant.Plant     `yaml:"-"`
 	Sparkplug *SparkplugConfig `yaml:"sparkplug"`
 	OPCUA     *OPCUAConfig     `yaml:"opcua"`
+	// Channels are the communication channels the programs' READ and
+	// WRITE blocks name by ID (IEC 61131-5): one peer each, reached by one
+	// protocol. A driver moves the same tags every scan; a channel moves
+	// one variable when a program asks.
+	Channels []ChannelConfig `yaml:"channels"`
 	// Retain persists operator state (setpoints, online edits) across
 	// restarts; Redundancy elects one scanning leader among replicas.
 	// Both are wired by `naut run` — check/build/LSP only validate.
 	Retain     *RetainConfig     `yaml:"retain"`
 	Redundancy *RedundancyConfig `yaml:"redundancy"`
+	// Parameters is how operator-tuned setpoint values get back to the
+	// repo (#718 slice 2). Absent, nothing is ever written to it.
+	Parameters *ParametersConfig `yaml:"parameters"`
+	// Audit places the runtime audit journal `naut run` always keeps
+	// (#709); absent takes the defaults.
+	Audit *AuditConfig `yaml:"audit"`
+	// Auth is who may do what (#708): roles, areas, users and service
+	// tokens. Absent, writes keep today's rule (the auth token when one is
+	// set, else a same-origin request).
+	Auth *AuthConfig `yaml:"auth"`
+	// authPolicy is Auth compiled (ReadManifest).
+	authPolicy *auth.Policy `yaml:"-"`
 	// Alarms turns BOOL tags into ISA-18.2 alarm state — the active list,
 	// acknowledge, shelve, and the journal behind /api/alarms. Absent (the
 	// default): no engine, and behaviour identical to before it existed.
@@ -84,9 +145,14 @@ type Manifest struct {
 	// ReadManifest, so check, run and the language server see one set.
 	Alarms     *AlarmsConfig `yaml:"alarms"`
 	AlarmFiles []string      `yaml:"alarm-files"`
+	// Substitutes names the driver-fed inputs a person may run the
+	// program on a chosen value for, while the real sensor is bad or
+	// wrong (#707): the value, the longest grant, the role.
+	Substitutes *SubstitutesConfig `yaml:"substitutes"`
 	// Target names a controller this project is DEPLOYED to instead of
-	// being run by the nautilus runtime: today, an Allen-Bradley Logix
-	// controller (docs/design/logix-authoring.md). With a target set,
+	// being run by the nautilus runtime: an Allen-Bradley Logix
+	// controller (docs/design/logix-authoring.md) or a Siemens S7-1500
+	// (docs/design/siemens-ide.md). With a target set,
 	// `naut check` also runs that target's rules, so a construct the
 	// target cannot take is a diagnostic on the keystroke that wrote it.
 	Target *TargetConfig `yaml:"target"`
@@ -152,10 +218,10 @@ func (c *CheckConfig) Structure() (lint.Config, error) {
 	return cfg, nil
 }
 
-// TargetConfig is the deploy target. One kind at a time; logix is the
-// only one so far.
+// TargetConfig is the deploy target. One kind at a time.
 type TargetConfig struct {
-	Logix *LogixTarget `yaml:"logix"`
+	Logix   *LogixTarget   `yaml:"logix"`
+	Siemens *SiemensTarget `yaml:"siemens"` // siemens.go
 }
 
 // LogixTarget is an Allen-Bradley Logix controller as a deploy target:
@@ -205,6 +271,11 @@ type LogixTarget struct {
 	// records it here so the write-back keeps its tag path
 	// (AcceptTmr.ACC, not Program:MainProgram.AcceptTmr.ACC).
 	ControllerScoped []LogixScoped `yaml:"controller-scoped"`
+	// Messages carries, per READ or WRITE instance, what a Logix MSG holds
+	// that the block and its channel do not, so the write-back gives the
+	// MESSAGE tag back as the import found it. Only what differs from the
+	// writer's defaults is listed.
+	Messages []LogixMessage `yaml:"messages"`
 	// Hardware is an L5X, relative to the project, whose <Modules> section
 	// is the controller's I/O configuration: the chassis, its modules, and
 	// the adapters and modules beyond it that alias: tags name. The writer
@@ -226,6 +297,16 @@ type LogixScoped struct {
 	Desc string `yaml:"desc"`
 }
 
+// LogixMessage is one target.logix.messages entry: MessageParameters
+// attributes, verbatim, for the MESSAGE tag a READ or WRITE instance is
+// written back as.
+type LogixMessage struct {
+	Name             string `yaml:"name"`
+	ConnectedFlag    string `yaml:"connected-flag"`    // default "2"
+	CacheConnections string `yaml:"cache-connections"` // default: absent
+	ConnectionPath   string `yaml:"connection-path"`   // default: from the channel
+}
+
 // LogixSide selects the side code.
 type LogixSide struct {
 	// Heartbeat names a controller DINT incremented once per task scan,
@@ -243,15 +324,537 @@ type RetainConfig struct {
 	ConfigMap string `yaml:"configmap"`
 }
 
-// RedundancyConfig turns on Lease-based leader election: replicas of this
-// controller elect one scanning leader, the rest stand by. Outside a
-// cluster the elector is standalone and always leader, so the same
-// manifest runs on a bench and in the cluster. `redundancy: {}` takes the
-// default lease name.
-type RedundancyConfig struct {
-	// Lease names the coordination.k8s.io Lease (default: the project name).
-	Lease string `yaml:"lease"`
+// ParametersConfig is the manifest's parameters: section (#718).
+type ParametersConfig struct {
+	// WriteBack: "off" (the default) keeps drift to a report; "patch" has
+	// GET /api/parameters/patch hand the plant-ahead values out as a patch
+	// to apply by hand; "commit" also has a controller that runs from a git
+	// checkout commit them to the repo, a commit per editor, after a quiet
+	// period.
+	WriteBack string `yaml:"writeBack"`
 }
+
+// WriteBack modes.
+const (
+	WriteBackOff    = "off"
+	WriteBackPatch  = "patch"
+	WriteBackCommit = "commit"
+)
+
+// WriteBackMode is the manifest's write-back mode, "off" when absent.
+func (m *Manifest) WriteBackMode() string {
+	if m.Parameters == nil || m.Parameters.WriteBack == "" {
+		return WriteBackOff
+	}
+	return m.Parameters.WriteBack
+}
+
+// AuditConfig places the runtime audit journal (#709). `naut run` always
+// keeps one: every action that changes something, accepted or refused,
+// one fsynced line, hash-chained (docs/design/identity-audit.md §4). This
+// section only moves it or changes how long its files are kept.
+type AuditConfig struct {
+	// Path is the journal's directory (default audit, in the working
+	// directory, as retain.json is).
+	Path string `yaml:"path"`
+	// KeepDays is how many days of files are kept (default 365); a
+	// negative number keeps every file.
+	KeepDays int `yaml:"keep-days"`
+	// Sink keeps a copy of the journal elsewhere. "postgres" tails the
+	// files into the audit_entries table, catching up after any outage;
+	// the files stay the source of truth (#709 PR 9).
+	Sink string `yaml:"sink"`
+	// DSNEnv names the ENVIRONMENT VARIABLE holding the copy's connection
+	// string, never the DSN itself (a manifest is committed). Default
+	// NAUTILUS_AUDIT_DB_URL, falling back to DATABASE_URL, the
+	// historian's.
+	DSNEnv string `yaml:"dsn-env"`
+	// AnchorEvery is how often the copy writes an anchor (the journal's
+	// head, where the controller's service user cannot rewrite it) when
+	// the copy has moved (default 5m). It also anchors at start, after
+	// every prune, and at a clean stop (#709 PR 9b).
+	AnchorEvery Duration `yaml:"anchor-every"`
+}
+
+// DefaultAuditAnchorEvery is audit.anchor-every's default.
+const DefaultAuditAnchorEvery = 5 * time.Minute
+
+// AuditAnchorEvery is how often the copy anchors the journal's head.
+func (p *Project) AuditAnchorEvery() time.Duration {
+	if p.Audit == nil || p.Audit.AnchorEvery == 0 {
+		return DefaultAuditAnchorEvery
+	}
+	return time.Duration(p.Audit.AnchorEvery)
+}
+
+// DefaultAuditDSNEnv / FallbackAuditDSNEnv are where the audit journal's
+// Postgres copy looks for its connection string when the manifest names
+// no variable.
+const (
+	DefaultAuditDSNEnv  = "NAUTILUS_AUDIT_DB_URL"
+	FallbackAuditDSNEnv = "DATABASE_URL"
+)
+
+func checkAudit(a *AuditConfig) error {
+	if a == nil {
+		return nil
+	}
+	switch a.Sink {
+	case "", "postgres":
+	default:
+		return fmt.Errorf("audit.sink %q: want postgres (omit it for the journal's files alone)", a.Sink)
+	}
+	if a.DSNEnv != "" && a.Sink == "" {
+		return errors.New("audit.dsn-env is set but audit.sink is not: add sink: postgres")
+	}
+	if a.AnchorEvery != 0 && a.Sink == "" {
+		return errors.New("audit.anchor-every is set but audit.sink is not: the anchor is written to the copy; add sink: postgres")
+	}
+	if a.AnchorEvery != 0 && time.Duration(a.AnchorEvery) < time.Second {
+		return fmt.Errorf("audit.anchor-every %s: want at least 1s", time.Duration(a.AnchorEvery))
+	}
+	return nil
+}
+
+// AuditCopyDSN is the connection string of the journal's Postgres copy:
+// "" when audit.sink is not postgres, and an error naming the variable
+// when it is and the variable is empty.
+func (p *Project) AuditCopyDSN(getenv func(string) string) (string, error) {
+	if p.Audit == nil || p.Audit.Sink != "postgres" {
+		return "", nil
+	}
+	env := p.Audit.DSNEnv
+	if env == "" {
+		env = DefaultAuditDSNEnv
+	}
+	dsn := getenv(env)
+	if dsn == "" && p.Audit.DSNEnv == "" {
+		dsn = getenv(FallbackAuditDSNEnv)
+		env += " (or " + FallbackAuditDSNEnv + ")"
+	}
+	if dsn == "" {
+		return "", fmt.Errorf("audit.sink: postgres, but %s is empty: the connection string is an environment variable, never the manifest", env)
+	}
+	return dsn, nil
+}
+
+// AuditJournal resolves the audit section's defaults: the journal's
+// directory and how long its files are kept (negative: forever).
+func (p *Project) AuditJournal() (dir string, keep time.Duration) {
+	dir, keep = "audit", 365*24*time.Hour
+	if p.Audit == nil {
+		return dir, keep
+	}
+	if p.Audit.Path != "" {
+		dir = p.Audit.Path
+	}
+	switch {
+	case p.Audit.KeepDays < 0:
+		keep = -1
+	case p.Audit.KeepDays > 0:
+		keep = time.Duration(p.Audit.KeepDays) * 24 * time.Hour
+	}
+	return dir, keep
+}
+
+// RedundancyConfig turns on leader election: replicas of this controller
+// elect one scanning leader, the rest stand by. It has two modes:
+//
+//   - The Kubernetes Lease (no peers:): replicas in a cluster elect through
+//     a coordination.k8s.io Lease. Outside a cluster the elector is
+//     standalone and always leader, so the same manifest runs on a bench
+//     and in the cluster. `redundancy: {}` takes the default lease name.
+//   - A redundant pair with a witness (peers: and witness:,
+//     docs/design/redundancy.md §2): two controllers and a third voter,
+//     without Kubernetes. NAUTILUS_NODE says which of the two this one is.
+type RedundancyConfig struct {
+	// Lease is the coordination.k8s.io Lease's name without peers:
+	// (default: the project name). With peers: it is the lease time
+	// (default 1s), a duration: a name there is
+	// refused. A pair with a lease of its own gives its witness the same
+	// --lease: the witness refuses a lease longer than its own.
+	Lease string `yaml:"lease"`
+	// Peers names the pair's two controllers, a and b, by their peer
+	// listeners (host:port). Both controllers run the same file.
+	Peers map[string]string `yaml:"peers"`
+	// Witness is the third voter's peer listener (host:port, `naut
+	// witness`). Required with peers:.
+	Witness string `yaml:"witness"`
+	// StateDir is where a pair member keeps its voter state (an absolute
+	// path). Default: $STATE_DIRECTORY, which systemd's StateDirectory=
+	// sets (naut deploy's /var/lib/nautilus). Never the project tree: a
+	// deploy replaces the project.
+	StateDir string `yaml:"state-dir"`
+	// NetDelay (d_net) is the plant network's assumed one-way delivery
+	// bound and SendMargin (m_send) the gap allowed between a send path's
+	// gate check and its send (design §3.4): the write gate closes their
+	// sum, the fence margin, before the lease ends, and every field write
+	// gets the lease left minus NetDelay as its deadline. Unset, both
+	// scale with the lease (50 ms and 20 ms at the default 1 s lease). Set,
+	// their sum must stay under a quarter of the lease. Pair only.
+	NetDelay   Duration `yaml:"net-delay"`
+	SendMargin Duration `yaml:"send-margin"`
+	// Experimental opts in to a pair before state streaming (#710 step
+	// 4): until then a takeover starts from the new leader's own retained
+	// values, so a setpoint the old leader took is lost. A pair without it
+	// is refused. It goes away when step 4 lands.
+	Experimental bool `yaml:"experimental"`
+	// PublicURLs are the pair's controllers as a browser reaches them, by
+	// node name ({a: https://plc-a.plant.lan, b: …}): where a standby
+	// refers a signed-in browser (#708). Without them it names no
+	// address: the peer addresses are the pair's, never a browser's.
+	PublicURLs map[string]string `yaml:"public-urls"`
+	// FloatingIP is an address the leader holds (#716, design §8): added
+	// after its write gate opens, with gratuitous ARP, and dropped when the
+	// gate closes. Optional for clients (they follow public-urls and the
+	// OPC UA ServiceLevel); a PROFINET device will need it. Pair only.
+	FloatingIP *FloatingIPConfig `yaml:"floating-ip"`
+	// PeerTLS is the pair's peer TLS (#710): on (the default, "" too) or
+	// off. On, every call on a peer port runs TLS 1.3, both ends keyed by
+	// the peer token. Off is for a lab bench: votes, the operator-intent
+	// log and the peer token cross the network in the clear, and the pair
+	// says so at every start and on /api/cluster. The witness takes the
+	// same setting as `naut witness --peer-tls`.
+	PeerTLS string `yaml:"peer-tls"`
+	// StreamBudget is the state stream's bytes a second (#710 S1b, design
+	// §4.1): the leader sends a full image at most every 100 ms, and an
+	// image too big for that at this budget stretches the interval, never
+	// drops images. A number of bytes a second, or with kB/s, MB/s, KiB/s
+	// or MiB/s (default 1MB/s). Pair only.
+	StreamBudget string `yaml:"stream-budget"`
+	// HotMaxAge is the oldest state image a takeover goes on from (#710
+	// S2, design §4.2): an image older at the election makes the takeover
+	// cold. Default 3 × lease + 2 × the stream's interval, which covers a
+	// crash, a kill and an isolation of the leader; 0 makes every takeover
+	// cold. Pair only.
+	HotMaxAge *Duration `yaml:"hot-max-age"`
+	// TakeoverHold holds the new leader's outputs after a takeover until
+	// the program sets its release tag (#710 (b2), design §4.6). Pair only.
+	TakeoverHold *TakeoverHoldConfig `yaml:"takeover-hold"`
+	// Failback fails back to the preferred controller once it has been
+	// ready for a while (#710 d2, design §4.8). Pair only; off when absent.
+	Failback *FailbackConfig `yaml:"failback"`
+}
+
+// TakeoverHoldConfig is redundancy.takeover-hold.
+type TakeoverHoldConfig struct {
+	// Release is the BOOL state tag the program sets TRUE to release the
+	// hold. Required. The hold sets it FALSE when it starts; only the
+	// program may write it.
+	Release string `yaml:"release"`
+	// Max is how long the hold holds before it raises its alarm (default
+	// 5s, at most 1m).
+	Max *Duration `yaml:"max"`
+	// On is when the hold holds: cold (the default) on a cold takeover, and
+	// on a hot one from a leader that was holding; always on every
+	// takeover.
+	On string `yaml:"on"`
+	// OnMax is what happens at max: hold (the default) keeps holding with
+	// the alarm raised until the program or an operator releases; release
+	// releases with the alarm raised.
+	OnMax string `yaml:"on-max"`
+	// Safe are values written to output tags when the hold starts, by tag.
+	Safe map[string]any `yaml:"safe"`
+}
+
+// HotMaxAgeOr is redundancy.hot-max-age, or def when the manifest sets
+// none.
+func (r *RedundancyConfig) HotMaxAgeOr(def time.Duration) time.Duration {
+	if r == nil || r.HotMaxAge == nil {
+		return def
+	}
+	return time.Duration(*r.HotMaxAge)
+}
+
+// FloatingIPConfig is redundancy.floating-ip. The process needs
+// CAP_NET_ADMIN and CAP_NET_RAW to add the address and announce it.
+type FloatingIPConfig struct {
+	// Address is the address with its prefix length, e.g. 10.0.0.50/24.
+	Address string `yaml:"address"`
+	// Interface is the network interface that carries it, e.g. eth0.
+	Interface string `yaml:"interface"`
+}
+
+// LeaderURLs is public-urls with no trailing slash, for the server.
+func (r *RedundancyConfig) LeaderURLs() map[string]string {
+	if r == nil || len(r.PublicURLs) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for n, u := range r.PublicURLs {
+		out[n] = strings.TrimSuffix(u, "/")
+	}
+	return out
+}
+
+// checkPublicURLs: each a or b, an absolute http(s) URL of a host, with
+// no path, query or credentials (it is an origin a browser is sent to).
+func checkPublicURLs(urls map[string]string) error {
+	for name, raw := range urls {
+		if name != "a" && name != "b" {
+			return fmt.Errorf("redundancy.public-urls: %q is not a controller of the pair: name them a and b", name)
+		}
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil ||
+			(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("redundancy.public-urls.%s %q: want the controller's address as a browser opens it, e.g. https://plc-%s.plant.lan:8443 (no path)", name, raw, name)
+		}
+	}
+	return nil
+}
+
+// PairColdTakeover is what an experimental pair says at every start: what
+// a takeover keeps, hot (#710 S2) or cold.
+const PairColdTakeover = "a takeover goes on hot from the leader's newest state image when the standby is in sync with it (timers, counters, SFC steps and state tags continue; FIRST_SCAN() is still TRUE on its first scan), and is cold otherwise (program state restarts from the field, the retained values kept); either way a setpoint written in the last stream interval before a crash (up to a lease before an isolation) is lost"
+
+// DefaultStreamBudget is the state stream's bytes a second when the
+// manifest names none (1 MB/s).
+const DefaultStreamBudget = 1_000_000
+
+// StreamBudgetBytes is the state stream's budget in bytes a second
+// (DefaultStreamBudget when unset). Load has checked it.
+func (r *RedundancyConfig) StreamBudgetBytes() int64 {
+	if r == nil || r.StreamBudget == "" {
+		return DefaultStreamBudget
+	}
+	n, err := parseByteRate(r.StreamBudget)
+	if err != nil {
+		return DefaultStreamBudget
+	}
+	return n
+}
+
+// parseByteRate reads a bytes-a-second figure: a number, or one with
+// B/s, kB/s, MB/s, KiB/s or MiB/s (the /s optional).
+func parseByteRate(s string) (int64, error) {
+	t := strings.TrimSuffix(strings.TrimSpace(s), "/s")
+	units := []struct {
+		suffix string
+		mul    float64
+	}{{"KiB", 1 << 10}, {"MiB", 1 << 20}, {"kB", 1e3}, {"KB", 1e3}, {"MB", 1e6}, {"B", 1}}
+	mul := 1.0
+	for _, u := range units {
+		if strings.HasSuffix(t, u.suffix) {
+			t, mul = strings.TrimSpace(strings.TrimSuffix(t, u.suffix)), u.mul
+			break
+		}
+	}
+	f, err := strconv.ParseFloat(t, 64)
+	if err != nil || f <= 0 || f*mul > 1e12 {
+		return 0, fmt.Errorf("want a positive rate such as 1MB/s, 500kB/s or 2000000")
+	}
+	return int64(f * mul), nil
+}
+
+// minStreamBudget is the lowest budget a pair takes: below it, even a
+// small image goes out seconds apart.
+const minStreamBudget = 10_000
+
+// Pair reports whether the section names a redundant pair (peers:)
+// rather than the Kubernetes Lease.
+func (r *RedundancyConfig) Pair() bool { return r != nil && len(r.Peers) > 0 }
+
+// DefaultPairLease is a pair's lease time when the manifest names none
+// (design §2): 1 s (#710; it was 2 s). It equals quorum/node's
+// DefaultLease, the witness's default --lease (cmd/naut tests it).
+const DefaultPairLease = time.Second
+
+// Bounds on a pair's lease: shorter, and a vote round with its fsync
+// (deadline lease/8) does not fit; longer, and a takeover waits minutes.
+const (
+	minPairLease = 200 * time.Millisecond
+	maxPairLease = time.Minute
+)
+
+// LeaseTime is a pair's lease (DefaultPairLease when unset). Load has
+// checked it.
+func (r *RedundancyConfig) LeaseTime() time.Duration {
+	d, err := time.ParseDuration(r.Lease)
+	if r.Lease == "" || err != nil {
+		return DefaultPairLease
+	}
+	return d
+}
+
+// checkRedundancy validates a pair's section: two named controllers, a
+// witness, a lease time, an absolute state directory. The Kubernetes mode
+// takes only lease:, so a witness or a state directory without peers: is
+// refused rather than ignored.
+func checkRedundancy(r *RedundancyConfig) error {
+	if r == nil {
+		return nil
+	}
+	if !r.Pair() {
+		switch {
+		case r.Peers != nil:
+			return errors.New("redundancy.peers is empty: a redundant pair names its two controllers, a and b (host:port of each peer listener)")
+		case r.Witness != "":
+			return errors.New("redundancy.witness needs peers: (the pair's two controllers, a and b); without peers: the section selects the Kubernetes Lease, which has no witness")
+		case r.StateDir != "":
+			return errors.New("redundancy.state-dir needs peers:; the Kubernetes Lease mode keeps no voter state")
+		case r.Experimental:
+			return errors.New("redundancy.experimental applies to a redundant pair (peers:); the Kubernetes Lease mode is not experimental")
+		case r.NetDelay != 0 || r.SendMargin != 0:
+			return errors.New("redundancy.net-delay and send-margin apply to a redundant pair (peers:): they set its write gate's fence margin")
+		case r.PublicURLs != nil:
+			return errors.New("redundancy.public-urls applies to a redundant pair (peers:): the pair's controllers as a browser reaches them")
+		case r.FloatingIP != nil:
+			return errors.New("redundancy.floating-ip applies to a redundant pair (peers:): the address the leader holds")
+		case r.PeerTLS != "":
+			return errors.New("redundancy.peer-tls applies to a redundant pair (peers:): the TLS of its controllers' and witness's peer ports")
+		case r.StreamBudget != "":
+			return errors.New("redundancy.stream-budget applies to a redundant pair (peers:): the bytes a second its leader streams its state to the standby at")
+		case r.HotMaxAge != nil:
+			return errors.New("redundancy.hot-max-age applies to a redundant pair (peers:): the oldest state image its takeover goes on from")
+		case r.TakeoverHold != nil:
+			return errors.New("redundancy.takeover-hold applies to a redundant pair (peers:): it holds the outputs after a takeover from the peer")
+		case r.Failback != nil:
+			return errors.New("redundancy.failback is for a redundant pair (peers:): there is no other controller to fail back to")
+		}
+		return nil
+	}
+	if !r.Experimental {
+		return errors.New("redundancy.peers: a redundant pair is experimental for now: " + PairColdTakeover + ". Set redundancy.experimental: true to run it knowing that")
+	}
+	for name := range r.Peers {
+		if name != "a" && name != "b" {
+			return fmt.Errorf("redundancy.peers: %q is not a controller of the pair: name them a and b (NAUTILUS_NODE says which one runs)", name)
+		}
+	}
+	for _, name := range []string{"a", "b"} {
+		if err := checkPeerAddr("redundancy.peers."+name, r.Peers[name]); err != nil {
+			return err
+		}
+	}
+	if r.Peers["a"] == r.Peers["b"] {
+		return fmt.Errorf("redundancy.peers: a and b are both %s: each controller has its own peer listener", r.Peers["a"])
+	}
+	switch r.PeerTLS {
+	case "", "on", "off":
+	default:
+		return fmt.Errorf("redundancy.peer-tls %q: want on (the default) or off (a lab bench only: peer traffic in the clear)", r.PeerTLS)
+	}
+	if r.Witness == "" {
+		return errors.New("redundancy.witness is required with peers:: the pair's third voter (host:port of `naut witness`)")
+	}
+	if err := checkPeerAddr("redundancy.witness", r.Witness); err != nil {
+		return err
+	}
+	if r.Lease != "" {
+		d, err := time.ParseDuration(r.Lease)
+		switch {
+		case err != nil:
+			return fmt.Errorf("redundancy.lease %q: with peers: the lease is a time (e.g. 2s), not a name; a Lease name belongs to the Kubernetes mode, which has no peers:", r.Lease)
+		case d < minPairLease || d > maxPairLease:
+			return fmt.Errorf("redundancy.lease %s: want between %s and %s", d, minPairLease, maxPairLease)
+		}
+	}
+	if r.FloatingIP != nil {
+		if fc, err := floatip.Parse(r.FloatingIP.Address, r.FloatingIP.Interface); err != nil {
+			return fmt.Errorf("redundancy.floating-ip: %w", err)
+		} else {
+			// peers: names each box's own address; the floating one moves
+			for name, ep := range r.Peers {
+				host := ep
+				if h, _, err := net.SplitHostPort(ep); err == nil {
+					host = h
+				}
+				if ip, err := netip.ParseAddr(host); err == nil && ip == fc.Address.Addr() {
+					return fmt.Errorf("redundancy.floating-ip %s is peers.%s: peers: names each box's own address, never the floating one (the standby could not bind it, and the leader's peer socket would go dark when it drops the address)", ip, name)
+				}
+			}
+		}
+	}
+	if err := checkFence(r); err != nil {
+		return err
+	}
+	if r.StreamBudget != "" {
+		n, err := parseByteRate(r.StreamBudget)
+		switch {
+		case err != nil:
+			return fmt.Errorf("redundancy.stream-budget %q: %v", r.StreamBudget, err)
+		case n < minStreamBudget:
+			return fmt.Errorf("redundancy.stream-budget %s: want at least 10kB/s", r.StreamBudget)
+		}
+	}
+	if r.HotMaxAge != nil && *r.HotMaxAge < 0 {
+		return fmt.Errorf("redundancy.hot-max-age %s: want 0 (every takeover cold) or more", time.Duration(*r.HotMaxAge))
+	}
+	if err := checkPublicURLs(r.PublicURLs); err != nil {
+		return err
+	}
+	if err := checkTakeoverHoldConfig(r.TakeoverHold); err != nil {
+		return err
+	}
+	if err := checkFailbackConfig(r); err != nil {
+		return err
+	}
+	// A controller's path, judged the same wherever Load runs (naut check
+	// on a Windows laptop): pair members are Linux-only.
+	if r.StateDir != "" && !strings.HasPrefix(r.StateDir, "/") {
+		return fmt.Errorf("redundancy.state-dir %q: want an absolute path (from /) outside the project (the voter state must outlive a deploy)", r.StateDir)
+	}
+	return nil
+}
+
+// checkFence refuses a fence margin set in the manifest that is negative,
+// or not under a quarter of the lease (design §3.4): the gate would close
+// for good between two renewals. Unset parts scale with the lease, under
+// it by construction (the elector's FenceDefaults).
+func checkFence(r *RedundancyConfig) error {
+	if r.NetDelay == 0 && r.SendMargin == 0 {
+		return nil
+	}
+	if r.NetDelay < 0 || r.SendMargin < 0 {
+		return fmt.Errorf("redundancy.net-delay %s, send-margin %s: want durations of zero or more", time.Duration(r.NetDelay), time.Duration(r.SendMargin))
+	}
+	dn, ms := r.FenceParts()
+	lease := r.LeaseTime()
+	if dn+ms >= lease/4 {
+		return fmt.Errorf("redundancy.net-delay %s + send-margin %s = %s: the fence margin must be under a quarter of the lease (%s), or the write gate closes before each renewal; lengthen the lease or shorten them", dn, ms, dn+ms, lease)
+	}
+	return nil
+}
+
+// FenceParts are a pair's net delay and send margin: the manifest's, or
+// the defaults scaled to the lease (quorum/node's FenceDefaults: at most
+// 50 ms and lease/8, 20 ms and lease/16).
+func (r *RedundancyConfig) FenceParts() (netDelay, sendMargin time.Duration) {
+	lease := r.LeaseTime()
+	netDelay, sendMargin = time.Duration(r.NetDelay), time.Duration(r.SendMargin)
+	if netDelay == 0 {
+		netDelay = min(50*time.Millisecond, lease/8)
+	}
+	if sendMargin == 0 {
+		sendMargin = min(20*time.Millisecond, lease/16)
+	}
+	return netDelay, sendMargin
+}
+
+// SendBudget is the least time a pair's write may take in normal running
+// (design §3.4): the leader renews every quarter lease, so the lease left
+// falls to about three quarters of it before each renewal, and a write's
+// deadline is that minus the net delay.
+func (r *RedundancyConfig) SendBudget() time.Duration {
+	dn, _ := r.FenceParts()
+	return r.LeaseTime()*3/4 - dn
+}
+
+// checkPeerAddr wants host:port with both parts.
+func checkPeerAddr(key, addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || host == "" {
+		return fmt.Errorf("%s %q: want host:port", key, addr)
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("%s %q: want a port from 1 to 65535", key, addr)
+	}
+	return nil
+}
+
+// maxDeviceDeathDelay bounds sparkplug.device-death-delay: a held death
+// hides a lost link from every host for that long.
+const maxDeviceDeathDelay = time.Minute
 
 // SparkplugConfig republishes the tag store as a Sparkplug B edge node —
 // the manifest form of sparkplug.Config + its options. The MQTT password
@@ -289,6 +892,10 @@ type SparkplugConfig struct {
 	// working directory, like bdseq-file. Empty (the default): memory only.
 	// Needs store-forward.
 	StoreForwardFile string `yaml:"store-forward-file"`
+	// DeviceDeathDelay holds a device's DDEATH until it has been unhealthy
+	// this long; a recovery inside it sends nothing (sparkplug.Config).
+	// Zero (the default) sends DDEATH at once.
+	DeviceDeathDelay Duration `yaml:"device-death-delay"`
 	// FlattenUDTs publishes each UDT member as a plain metric
 	// ("P101/Running") instead of the tag as one Sparkplug Template, for
 	// hosts that do not read Templates. Default false: Templates.
@@ -334,7 +941,71 @@ type ServerConfig struct {
 	// base URL) — server.hmi and the API are one process on one address,
 	// so there is no cross-origin URL to configure.
 	HMI string `yaml:"hmi"`
+	// TLS is the certificate the tag API serves (#708): PEM files the
+	// operator puts on the box, at absolute paths outside the project (a
+	// private key never belongs in git). NAUTILUS_TLS_CERT and
+	// NAUTILUS_TLS_KEY override them at start.
+	TLS *TLSConfig `yaml:"tls"`
+	// TrustedProxies are the addresses (or prefixes) of a TLS-terminating
+	// proxy in front of the controller (tailscale serve, nginx) whose
+	// X-Forwarded-Proto and X-Forwarded-For are believed. Empty: none.
+	TrustedProxies []string `yaml:"trusted-proxies"`
 }
+
+// TLSConfig is server.tls: the certificate and key files, or the scalar
+// self-signed: a certificate the controller makes itself, in its state
+// directory, on its first start (#708).
+type TLSConfig struct {
+	Cert string `yaml:"cert"`
+	Key  string `yaml:"key"`
+	// SelfSigned is server.tls: self-signed.
+	SelfSigned bool `yaml:"-"`
+}
+
+// TLSSelfSigned is server.tls's one scalar value.
+const TLSSelfSigned = "self-signed"
+
+// UnmarshalYAML takes self-signed or {cert, key}. It walks the mapping
+// itself, so a misspelt key is refused here as the strict decoder would.
+func (t *TLSConfig) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		if n.Value != TLSSelfSigned {
+			return fmt.Errorf("line %d: server.tls is %s, or {cert: <file>, key: <file>}, not %q", n.Line, TLSSelfSigned, n.Value)
+		}
+		t.SelfSigned = true
+		return nil
+	case yaml.MappingNode:
+		seen := map[string]bool{}
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k, v := n.Content[i], n.Content[i+1]
+			if seen[k.Value] {
+				return fmt.Errorf("line %d: %s is given twice in server.tls", k.Line, k.Value)
+			}
+			seen[k.Value] = true
+			switch k.Value {
+			case "cert":
+				if err := v.Decode(&t.Cert); err != nil {
+					return err
+				}
+			case "key":
+				if err := v.Decode(&t.Key); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("line %d: field %s not found in server.tls (cert, key; or server.tls: %s)", k.Line, k.Value, TLSSelfSigned)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("line %d: server.tls is %s, or {cert: <file>, key: <file>}", n.Line, TLSSelfSigned)
+}
+
+// errSelfSignedPair is the load's refusal of server.tls: self-signed on a
+// redundant pair: each controller would make its own certificate, and a
+// standby forwards to the leader only when the leader serves the
+// certificate it does (server.CertSource.Pinned).
+var errSelfSignedPair = errors.New("server.tls: self-signed cannot be used with redundancy: a pair serves ONE certificate (a standby forwards to the leader only when it serves the same one), and each controller would make its own. Make one certificate and key, copy both files to both controllers, and name them: server.tls: {cert: /abs/cert.pem, key: /abs/key.pem}")
 
 // TaskConfig is one program on its own scan. The FIRST task is the main
 // task: it owns field I/O and is the default online-edit target.
@@ -351,6 +1022,58 @@ type TaskConfig struct {
 	// that cpu: 0 is a request and an absent key is not.
 	CPU      *int `yaml:"cpu"`
 	Priority int  `yaml:"priority"`
+	// PriorityGuard bounds the task while it runs at Priority: past either
+	// bound it loses the priority until a restart (runtime/prioguard.go).
+	PriorityGuard *PriorityGuardConfig `yaml:"priority-guard"`
+	// ShareCPU pins to cpu: even where another program already runs a
+	// real-time thread above priority:, which is otherwise refused at start
+	// (a vendor runtime or I/O shim's core; runtime/preflight_linux.go).
+	ShareCPU bool `yaml:"share-cpu"`
+}
+
+// PriorityGuardConfig is a task's priority-guard: block. Zero takes the
+// default (overruns 50, scan-multiple 20).
+type PriorityGuardConfig struct {
+	Overruns     int     `yaml:"overruns"`      // scans in a row longer than the period
+	ScanMultiple float64 `yaml:"scan-multiple"` // one scan longer than this many periods
+	// RTLimit tightens the kernel's bound (RLIMIT_RTTIME) on a real-time
+	// thread running without blocking; one per process, the strictest
+	// asked for wins (runtime.PriorityGuard.RTLimit, #907).
+	RTLimit Duration `yaml:"rt-limit"`
+}
+
+// The priority-guard bounds a manifest may set: generous, but finite, so a
+// guard cannot be switched off by a huge number.
+const (
+	maxGuardOverruns     = 100000
+	maxGuardScanMultiple = 10000
+)
+
+// guard checks a task's priority-guard: block and converts it.
+func (t TaskConfig) guard() (runtime.PriorityGuard, error) {
+	g := t.PriorityGuard
+	if g == nil {
+		return runtime.PriorityGuard{}, nil
+	}
+	if g.Overruns < 0 || g.Overruns > maxGuardOverruns {
+		return runtime.PriorityGuard{}, fmt.Errorf("task %s: priority-guard: overruns %d: a count of scans from 1 to %d (or leave it out for %d)", t.Program, g.Overruns, maxGuardOverruns, runtime.DefaultGuardOverruns)
+	}
+	// NaN fails every comparison, so it is named; Inf fails the cap.
+	if m := g.ScanMultiple; m != 0 && (math.IsNaN(m) || m < 2 || m > maxGuardScanMultiple) {
+		return runtime.PriorityGuard{}, fmt.Errorf("task %s: priority-guard: scan-multiple %g: from 2 (below that, ordinary jitter would trip it) to %d (or leave it out for %g)", t.Program, m, maxGuardScanMultiple, runtime.DefaultGuardScanMultiple)
+	}
+	if d := time.Duration(g.RTLimit); d != 0 {
+		if d < runtime.MinRTLimit {
+			return runtime.PriorityGuard{}, fmt.Errorf("task %s: priority-guard: rt-limit %s: at least %s (shorter, an ordinary page fault would demote the task)", t.Program, d, runtime.MinRTLimit)
+		}
+		if d > runtime.DefaultRTLimit {
+			return runtime.PriorityGuard{}, fmt.Errorf("task %s: priority-guard: rt-limit %s: at most %s: rt-limit only tightens the default bound, never loosens it (NAUTILUS_RT_LIMIT_MS on the service does that)", t.Program, d, runtime.DefaultRTLimit)
+		}
+		if t.Priority <= 0 {
+			return runtime.PriorityGuard{}, fmt.Errorf("task %s: priority-guard: rt-limit bounds a task at a priority, and this task has no priority:", t.Program)
+		}
+	}
+	return runtime.PriorityGuard{Overruns: g.Overruns, ScanMultiple: g.ScanMultiple, RTLimit: time.Duration(g.RTLimit)}, nil
 }
 
 // TagConfig declares one tag by role — the manifest form of runtime.TagDef.
@@ -375,6 +1098,12 @@ type TagConfig struct {
 	// owns, such as run hours or a start count. Needs a retain: section.
 	// An input or an output cannot be retained.
 	Retain bool `yaml:"retain"`
+	// Min and Max bound what an external write may set on a setpoint (an
+	// HMI, the API, Sparkplug, OPC UA): a value outside is refused. A
+	// program's own writes are never refused. A setpoint only; its init
+	// must be inside (#718).
+	Min *float64 `yaml:"min"`
+	Max *float64 `yaml:"max"`
 }
 
 // MetaConfig is HMI documentation for a tag, kept separate from the tag's
@@ -422,6 +1151,13 @@ type DriverConfig struct {
 	ScanRate    Duration            `yaml:"scan-rate"`
 	ScanClasses map[string]Duration `yaml:"scan-classes"`
 	TagClasses  map[string][]string `yaml:"tag-classes"`
+	// Validate is how a live I/O configuration change checks this
+	// driver's devices (#706): live probes each changed one on a
+	// connection of its own before the apply, static checks the
+	// configuration only. A devices: row's own validate: overrides it.
+	// Default: the device profile's (static when it documents Modbus
+	// max-connections of 2 or fewer), else live.
+	Validate string `yaml:"validate"`
 
 	// sparkplug-host. The MQTT password is NEVER in the file — set
 	// NAUTILUS_MQTT_PASSWORD, the same rule the sparkplug: section keeps.
@@ -465,6 +1201,76 @@ type DriverConfig struct {
 	Security     string `yaml:"security"`      // policy: None, Basic256Sha256, … (default: strongest offered)
 	SecurityMode string `yaml:"security-mode"` // None, Sign, SignAndEncrypt (default: strongest of the policy)
 	PKIDir       string `yaml:"pki-dir"`       // client certificate dir, needed for any policy but None
+	// ReadMode is how values arrive: poll (default; one batched Read per
+	// scan class per tick) or subscribe (one subscription per scan class,
+	// notified on change). Both keep the same quality and reconnect rules.
+	ReadMode string `yaml:"read-mode"`
+	// ReassertOnReconnect: after the session is re-established every
+	// output is commanded once more, changed or not, since a server that
+	// restarted holds its reset values (default true).
+	ReassertOnReconnect *bool `yaml:"reassert-on-reconnect"`
+
+	// devices are the project's devices this driver carries (Load sets
+	// it on the Modbus driver, and on each OPC UA device's own driver);
+	// not a manifest key.
+	devices *devbind.Set `yaml:"-"`
+	// opcuaDevice is the OPC UA device an opcua-client driver Load made
+	// for a devices: row is; not a manifest key.
+	opcuaDevice string `yaml:"-"`
+
+	// Tags binds a `type: runtime` status driver's inputs to the
+	// runtime's own health (runtimestatus.go, #850).
+	Tags []RuntimeStatusConfig `yaml:"tags"`
+}
+
+// ChannelConfig is one entry of channels:. Type cip is a Logix controller
+// over EtherNet/IP; host is its address and slot, when set, routes to a
+// processor in that backplane slot behind it.
+type ChannelConfig struct {
+	Name    string   `yaml:"name"`
+	Type    string   `yaml:"type"`
+	Host    string   `yaml:"host"`
+	Slot    *int     `yaml:"slot"`
+	Port    int      `yaml:"port"`    // default 44818
+	Timeout Duration `yaml:"timeout"` // per request (default 5s)
+	Queue   int      `yaml:"queue"`   // waiting requests before STATUS -5 (default 64)
+}
+
+// buildChannels checks channels: and builds each one's transport.
+func buildChannels(m Manifest) ([]runtime.Channel, error) {
+	seen := map[string]bool{}
+	out := make([]runtime.Channel, 0, len(m.Channels))
+	for i, c := range m.Channels {
+		where := fmt.Sprintf("channels[%d]", i)
+		if c.Name != "" {
+			where += " (" + c.Name + ")"
+		}
+		switch {
+		case c.Name == "":
+			return nil, fmt.Errorf("%s: name is required (it is what a READ or WRITE's ID names)", where)
+		case seen[strings.ToLower(c.Name)]:
+			return nil, fmt.Errorf("%s: another channel has this name", where)
+		case c.Timeout < 0 || c.Queue < 0 || c.Port < 0 || (c.Slot != nil && *c.Slot < 0):
+			return nil, fmt.Errorf("%s: timeout, queue, port and slot cannot be negative", where)
+		}
+		seen[strings.ToLower(c.Name)] = true
+		switch strings.ToLower(c.Type) {
+		case "cip":
+			if c.Host == "" {
+				return nil, fmt.Errorf("%s: host is required", where)
+			}
+		case "":
+			return nil, fmt.Errorf("%s: type is required (cip)", where)
+		default:
+			return nil, fmt.Errorf("%s: unknown type %q (cip is the one kind so far)", where, c.Type)
+		}
+		io, err := buildChannel(c)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", where, err)
+		}
+		out = append(out, runtime.Channel{Name: c.Name, Channel: io, Timeout: time.Duration(c.Timeout), Queue: c.Queue})
+	}
+	return out, nil
 }
 
 // Duration parses "100ms" / "2s" yaml scalars.
@@ -495,6 +1301,13 @@ type Project struct {
 	Server    server.Options
 	sparkplug *SparkplugConfig
 	drivers   []nio.NamedDriver // the configured drivers, named; nil for the implicit memory loopback
+	devices   *devbind.Set      // devices: resolved; nil when none
+	// Plant is the plant model (plant:), nil when the manifest has none.
+	Plant *plant.Plant
+
+	// ioDiffers, set by NewIOConfig, says whether a driver runs a live I/O
+	// configuration other than the manifest's (the status row's differs).
+	ioDiffers func(driver string) bool
 
 	// Notices are what the platform changed about the project to run it:
 	// in the browser playground, the field drivers it simulated and the
@@ -523,12 +1336,48 @@ type Project struct {
 	// HMIScreens is a project with no server.hmi and *.mimic.json in it:
 	// the caller builds the default app, a page per mimic.
 	HMIScreens bool
+	// HMIPlant is a project with no server.hmi and no mimic, whose plant
+	// model has equipment: naut builds the asset and area pages from it.
+	HMIPlant bool
+
+	// PWA and PWAIcon are the manifest's pwa: section and its icon file's
+	// bytes (nil without one); the caller that builds the HMI gives them
+	// to the build.
+	PWA     *PWAConfig
+	PWAIcon []byte
+
+	// Checkout is the manifest's checkout: section (#719), nil without one;
+	// CheckoutSheet is the sheet it names.
+	Checkout *CheckoutConfig
+	// Cameras are the manifest's cameras: section (#724).
+	Cameras CameraRows
+	// CameraSnapshots is the manifest's camera-snapshots: policy (#724).
+	CameraSnapshots CameraSnapshotsCfg
+	// CameraStreams is the manifest's camera-streams: policy (#724).
+	CameraStreams CameraStreamsCfg
+	// AlarmNotifiers are heard by the alarm engine besides the manifest's
+	// alarms.notify: ones: what a controller composes in (the cameras'
+	// snapshot on alarm, #724).
+	AlarmNotifiers []alarm.Notifier
+	checkout       any // the sheet, see CheckoutSheet
 
 	// Retain/Redundancy carry the manifest's sections for `naut run`
 	// to wire; Load itself constructs nothing — check, build, and the LSP
 	// load projects too, and must not touch a cluster to do it.
 	Retain     *RetainConfig
 	Redundancy *RedundancyConfig
+	// WriteBack is parameters.writeBack: off, patch or commit (#718).
+	WriteBack string
+	Audit     *AuditConfig
+	// Auth is the compiled auth: block, or nil when the manifest has none.
+	Auth *auth.Policy
+	// AuthStateDir is the auth: block's state-dir (where the users file
+	// lives), "" when it names none.
+	AuthStateDir string
+	// AuthOIDC is the auth: block's oidc: (#708 PR 6), nil without one:
+	// naut run builds the provider's client from it.
+	AuthOIDC *AuthOIDC
+	tls      *TLSConfig // server.tls (TLSFiles)
 
 	// Alarms is the composed `alarms:` section (alarm-files folded in),
 	// or nil when the manifest declares none. Load composes and validates
@@ -536,6 +1385,10 @@ type Project struct {
 	// (see alarms.go) for the same reason Sparkplug is: Load must stay
 	// side-effect-free so check, build and the LSP can use it.
 	Alarms *AlarmsConfig
+
+	// substitutes is the manifest's `substitutes:` resolved against the
+	// input tags (Substitutes).
+	substitutes []SubstituteSpec
 
 	//OPCUA
 	OPCUA *OPCUAConfig
@@ -545,10 +1398,44 @@ type Project struct {
 	// `naut run` sets it with the elector (wireRedundancy); OPCUAServer
 	// hands it to the OPC UA server. Nil: always writable (no redundancy).
 	WriteGate func() bool
+	// Member names this controller within a redundant pair (a or b), set
+	// by `naut run`; "" outside a pair. The OPC UA server's ApplicationUri
+	// carries it, so the two controllers are two servers to a client
+	// (#716).
+	Member string
+
+	// AlarmDirectory is where escalation's channels find each person's
+	// address and their own credentials (#715): the contacts and secrets
+	// files in the controller's state directory (alarm/oncall). `naut run`
+	// sets it before NewAlarms when alarms.channels names a channel; nil
+	// with one configured is an error there.
+	AlarmDirectory channel.Directory
+
+	// PushSend pages a person's phones for alarms.channels.push (#722).
+	// `naut run` sets it before NewAlarms: it forwards to the server's
+	// sender, which does not exist yet when the alarms are built.
+	PushSend func(ctx context.Context, m escalate.Message) error
+	// AckLink mints the ack link a page carries (#715,
+	// escalate.Options.AckLink): naut run hands in the server's, since the
+	// server holds the key and answers the link. Nil: pages carry none.
+	AckLink func(m escalate.Message, via string) string
+	// AckCode makes an SMS page's reply code (#715 inbound,
+	// escalate.Options.AckCode), handed in by naut run as AckLink is.
+	AckCode func(m escalate.Message, via string) string
 }
 
 // RetainNames resolves the retain section's defaults against the project
 // name: (configMapName, filePath), ready for retain.New.
+// Drivers are the project's configured drivers, each with its name, as
+// Load built them (none dials until started): what a test that answers
+// them in process, with virtual devices, resolves its bindings from. Nil
+// for the implicit memory loopback.
+func (p *Project) Drivers() []nio.NamedDriver { return p.drivers }
+
+// Devices is the project's devices: resolved against profiles/; nil when
+// it declares none.
+func (p *Project) Devices() *devbind.Set { return p.devices }
+
 func (p *Project) RetainNames() (configMap, file string) {
 	configMap, file = p.Name+"-retain", "retain.json"
 	if p.Retain.ConfigMap != "" {
@@ -623,6 +1510,17 @@ func hasProgramDecl(src []byte) bool {
 // several — one per site — sharing the same programs and differing in which
 // tag files they compose.
 func ReadManifest(fsys fs.FS, name string) (*Manifest, error) {
+	return readManifest(fsys, name, false)
+}
+
+// ReadManifestForCheckoutInit is ReadManifest without reading the checkout
+// sheet (its settings are still checked): `naut checkout init` writes the sheet a manifest's checkout: section
+// asks for, so it must read a manifest whose sheet is not there yet.
+func ReadManifestForCheckoutInit(fsys fs.FS) (*Manifest, error) {
+	return readManifest(fsys, "", true)
+}
+
+func readManifest(fsys fs.FS, name string, noSheet bool) (*Manifest, error) {
 	if name == "" {
 		name = ManifestName
 	}
@@ -651,13 +1549,199 @@ func ReadManifest(fsys fs.FS, name string) (*Manifest, error) {
 	if _, err := m.Check.Structure(); err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
+	if len(m.Devices) > 0 {
+		set, err := devbind.Resolve(fsys, m.Devices)
+		if err != nil {
+			return nil, fmt.Errorf("%s: devices: %w", name, err)
+		}
+		m.devices = set
+	}
+	if m.PlantFile != "" {
+		pf, err := projectPath(m.PlantFile)
+		if err != nil {
+			return nil, fmt.Errorf("%s: plant: %w", name, err)
+		}
+		pl, err := plant.Read(fsys, pf)
+		if err != nil {
+			return nil, fmt.Errorf("%s: plant: %w", name, err)
+		}
+		m.plant = pl
+	}
+	if err := m.readPWA(fsys); err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	if err := m.readCheckout(fsys, !noSheet); err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	if err := validateCameras(m.Cameras, m.CameraSnapshots, m.CameraStreams); err != nil {
+		return nil, fmt.Errorf("%s: cameras: %w", name, err)
+	}
+	if m.Parameters != nil {
+		switch m.Parameters.WriteBack {
+		case "", WriteBackOff, WriteBackPatch, WriteBackCommit:
+		default:
+			return nil, fmt.Errorf("%s: parameters.writeBack %q is not one of off, patch, commit", name, m.Parameters.WriteBack)
+		}
+	}
 	if err := composeTags(fsys, &m, name); err != nil {
 		return nil, err
 	}
 	if err := composeAlarms(fsys, &m); err != nil {
 		return nil, err
 	}
+	if err := composeTuning(fsys, &m); err != nil {
+		return nil, err
+	}
+	if m.Auth == nil && authKeyNull(raw) {
+		return nil, fmt.Errorf("%s: %w", name, errAuthNull)
+	}
+	if m.authPolicy, err = compileAuth(m.Auth); err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	if m.Auth != nil && m.Auth.OIDC != nil && m.Redundancy != nil {
+		return nil, fmt.Errorf("%s: %w", name, errOIDCPair)
+	}
+	if m.Server.TLS != nil && m.Server.TLS.SelfSigned && m.Redundancy != nil {
+		return nil, fmt.Errorf("%s: %w", name, errSelfSignedPair)
+	}
+	if m.Auth != nil && m.OPCUA != nil && m.OPCUA.AnonymousWrites {
+		// Under auth: an OPC UA session writes as a user or as a mapped
+		// certificate; an anonymous session on None is neither, so the
+		// switch would open nothing. Refused rather than silently ignored.
+		return nil, fmt.Errorf("%s: opcua.anonymous-writes cannot be used with an auth: block: an OPC UA client writes as a user (a UserName token) or as a certificate mapped in auth.opcua-certificates", name)
+	}
 	return &m, nil
+}
+
+// DeviceSet is the manifest's devices: resolved against profiles/; nil
+// when it declares none.
+func (m *Manifest) DeviceSet() *devbind.Set { return m.devices }
+
+// AuthPolicy is the manifest's auth: block compiled (#708), or nil when
+// it has none: what a command serving the project without Load (naut
+// logix serve --project) enforces.
+func (m *Manifest) AuthPolicy() *auth.Policy { return m.authPolicy }
+
+// PWAConfig is the manifest's pwa: section (#722).
+type PWAConfig struct {
+	// Name is the installed app's name; "" is the project's name.
+	Name string `yaml:"name"`
+	// ShortName is the label under the icon; "" is Name.
+	ShortName string `yaml:"short-name"`
+	// ThemeColor is "#rrggbb": the browser chrome and splash color.
+	ThemeColor string `yaml:"theme-color"`
+	// Icon is a square PNG of 512 pixels or more, in the project.
+	Icon string `yaml:"icon"`
+}
+
+var pwaColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// CheckoutConfig is the manifest's checkout: section (#719).
+type CheckoutConfig struct {
+	// File is the sheet, relative to the project; checkout.yaml when empty.
+	File string `yaml:"file"`
+	// Signoff is who may seal a run: "two-person" (the default) needs a
+	// signer who recorded none of the run's results; "single" lets the
+	// person who recorded them sign. naut check warns on single, and the
+	// sealed record says so.
+	Signoff string `yaml:"signoff"`
+	// RealIO names the drivers and devices (as `naut check` and the sealed
+	// record name them) that reach real field I/O although the controller
+	// cannot tell from the endpoint: a driver that keeps its hosts in a manifest
+	// file, a local gateway on a loopback address. The controller refuses to
+	// sign off a run against what looks like virtual devices, or endpoints it
+	// cannot read, except for these names; the sealed record lists them. It
+	// waives nothing else: a project with no driver, or with another simulator
+	// beside them, is still refused.
+	RealIO []string `yaml:"real-io"`
+}
+
+// Checkout sign-off rules.
+const (
+	SignoffTwoPerson = "two-person"
+	SignoffSingle    = "single"
+)
+
+// Attested is the drivers and devices the manifest says reach real field I/O
+// (checkout: real-io).
+func (c *CheckoutConfig) Attested() []string {
+	if c == nil {
+		return nil
+	}
+	return c.RealIO
+}
+
+// SignoffRule is the sign-off rule in force: two-person unless the manifest
+// says single.
+func (c *CheckoutConfig) SignoffRule() string {
+	if c != nil && c.Signoff == SignoffSingle {
+		return SignoffSingle
+	}
+	return SignoffTwoPerson
+}
+
+// DefaultCheckoutFile is the sheet's name when the manifest names none.
+const DefaultCheckoutFile = "checkout.yaml"
+
+// readCheckout validates the checkout: section (the sign-off rule, the sheet's
+// path, which stays inside the project) and, when readSheet, reads and
+// validates the sheet.
+func (m *Manifest) readCheckout(fsys fs.FS, readSheet bool) error {
+	c := m.Checkout
+	if c == nil {
+		return nil
+	}
+	switch c.Signoff {
+	case "", SignoffTwoPerson, SignoffSingle:
+	default:
+		return fmt.Errorf("checkout.signoff %q is not one of two-person, single", c.Signoff)
+	}
+	file := c.File
+	if file == "" {
+		file = DefaultCheckoutFile
+	}
+	fp, err := projectPath(file)
+	if err != nil {
+		return fmt.Errorf("checkout.file: %w", err)
+	}
+	if !readSheet {
+		return nil
+	}
+	sh, err := loadCheckoutSheet(fsys, fp)
+	if err != nil {
+		return err
+	}
+	m.checkoutSheet = sh
+	return nil
+}
+
+// maxPWAIcon bounds the icon file read at load.
+const maxPWAIcon = 4 << 20
+
+func (m *Manifest) readPWA(fsys fs.FS) error {
+	p := m.PWA
+	if p == nil {
+		return nil
+	}
+	if p.ThemeColor != "" && !pwaColor.MatchString(p.ThemeColor) {
+		return fmt.Errorf("pwa.theme-color %q is not a color like \"#0f1419\"", p.ThemeColor)
+	}
+	if p.Icon == "" {
+		return nil
+	}
+	ip, err := projectPath(p.Icon)
+	if err != nil {
+		return fmt.Errorf("pwa.icon: %w", err)
+	}
+	b, err := fs.ReadFile(fsys, ip)
+	if err != nil {
+		return fmt.Errorf("pwa.icon: no %s in the project (a square PNG of 512 pixels or more), or remove pwa.icon to get a drawn one", ip)
+	}
+	if len(b) > maxPWAIcon {
+		return fmt.Errorf("pwa.icon: %s is over %d MB: use a 512 or 1024 pixel PNG", ip, maxPWAIcon>>20)
+	}
+	m.pwaIcon = b
+	return nil
 }
 
 // projectPath keeps a manifest-referenced file inside the project. The
@@ -705,6 +1789,9 @@ func composeTags(fsys fs.FS, m *Manifest, manifestName string) error {
 			if t.Name == "" {
 				continue
 			}
+			if ir.IsSystemFunction(t.Name) {
+				return fmt.Errorf("tag %q (%s) has the name of a nautilus system function (%s()): rename the tag", t.Name, src, ir.NameKey(t.Name))
+			}
 			if prev, dup := from[ir.NameKey(t.Name)]; dup {
 				if prev.name != t.Name {
 					return fmt.Errorf("tag %q (%s) and tag %q (%s) are one tag — "+
@@ -740,6 +1827,15 @@ func composeTags(fsys fs.FS, m *Manifest, manifestName string) error {
 			return err
 		}
 	}
+	for _, dt := range m.devices.TagsByDevice() {
+		var tags []TagConfig
+		for _, t := range dt.Tags {
+			tags = append(tags, TagConfig{Name: t.Name, Role: t.Role, Type: t.Type, Unit: t.Unit, Desc: t.Desc})
+		}
+		if err := add(tags, "devices: "+dt.Device); err != nil {
+			return err
+		}
+	}
 	if err := add(m.Tags, manifestName); err != nil {
 		return err
 	}
@@ -767,6 +1863,7 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
+	libFiles = withDeviceTypes(libFiles, m.devices)
 	libs := make([]string, len(libFiles))
 	for i, l := range libFiles {
 		libs[i] = l.ST
@@ -798,8 +1895,16 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 	opts.DtTag = main.DtTag
 	opts.LateThreshold = time.Duration(main.LateThreshold)
 	opts.CPUs, opts.Priority = cpuList(main.CPU), main.Priority
+	if opts.Guard, err = main.guard(); err != nil {
+		return nil, err
+	}
+	opts.ShareCPU = main.ShareCPU
 	for _, t := range m.Tasks[1:] {
 		src, err := readProgram(t)
+		if err != nil {
+			return nil, err
+		}
+		g, err := t.guard()
 		if err != nil {
 			return nil, err
 		}
@@ -818,6 +1923,8 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 			LateThreshold: time.Duration(t.LateThreshold),
 			CPUs:          cpuList(t.CPU),
 			Priority:      t.Priority,
+			Guard:         g,
+			ShareCPU:      t.ShareCPU,
 		})
 	}
 
@@ -830,11 +1937,46 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 	if opts.Driver, drivers, err = buildDrivers(fsys, m); err != nil {
 		return nil, err
 	}
+	if opts.Driver, err = pairRuntimeStatus(opts.Driver, taskNames(opts)); err != nil {
+		return nil, err
+	}
 	// Protocol inputs read as their init (or zero) until first delivered;
 	// local I/O keeps the loud fault. Per tag, by its driver — comms.go.
 	simulateDrivers(opts.Tags, opts.Driver)
 	markComms(opts.Tags, opts.Driver)
+	if err := checkDriverOutputs(opts.Tags, opts.Driver); err != nil {
+		return nil, err
+	}
+	markReplicas(opts.Driver, m.Redundancy != nil)
+	substitutes, err := resolveSubstitutes(m.Substitutes, opts.Tags)
+	if err != nil {
+		return nil, err
+	}
+	opts.Substitutable = substitutableRoots(substitutes)
 	if err := checkNetworkSections(m); err != nil {
+		return nil, err
+	}
+	if err := checkAudit(m.Audit); err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	if err := checkRedundancy(m.Redundancy); err != nil {
+		return nil, err
+	}
+	if m.Redundancy != nil {
+		if err := checkTakeoverHold(m.Redundancy.TakeoverHold, m.Tags, drivers); err != nil {
+			return nil, err
+		}
+		if m.Redundancy.Failback != nil && m.Retain == nil {
+			// Its state (suspended, and by whom) lives in the retain store:
+			// without one, a takeover could not know an operator's suspend.
+			return nil, errors.New("redundancy.failback needs a retain: section: whether failback is suspended (and by whom) is kept in the retain store, so a takeover keeps an operator's suspend")
+		}
+	}
+	if m.Redundancy.Pair() && m.Sparkplug != nil {
+		// #798: both controllers would publish as the same edge node.
+		return nil, errors.New("sparkplug: a redundant pair can't run a Sparkplug edge node yet: both controllers would publish as the same edge node, fighting over its session (#798). Remove sparkplug: from this project, or run the edge on one controller outside the pair")
+	}
+	if opts.Channels, err = buildChannels(m); err != nil {
 		return nil, err
 	}
 	if m.OPCUA != nil {
@@ -862,12 +2004,26 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 		if m.Sparkplug.StoreForwardFile != "" && m.Sparkplug.StoreForward <= 0 {
 			return nil, fmt.Errorf("sparkplug.store-forward-file needs store-forward: the file journals that buffer")
 		}
+		if d := time.Duration(m.Sparkplug.DeviceDeathDelay); d < 0 || d > maxDeviceDeathDelay {
+			return nil, fmt.Errorf("sparkplug.device-death-delay: %s: from 0 (DDEATH at once, the default) to %s", d, maxDeviceDeathDelay)
+		}
 	}
 	if m.Sparkplug != nil && m.Sparkplug.Device != "" {
 		return nil, fmt.Errorf("sparkplug.device: removed — each field connection is now its own Sparkplug device, named after its driver (eip, sparkplug-host) or its source id (modbus, snmp, redfish, prometheus); delete device: %s, and give a driver a name: to choose its device id", m.Sparkplug.Device)
 	}
 
 	addr := m.Server.Addr
+	proxies, err := server.ParseTrustedProxies(m.Server.TrustedProxies)
+	if err != nil {
+		return nil, fmt.Errorf("server: %w", err)
+	}
+	if t := m.Server.TLS; t != nil && !t.SelfSigned {
+		for _, f := range []struct{ what, path string }{{"cert", t.Cert}, {"key", t.Key}} {
+			if f.path == "" || !filepath.IsAbs(f.path) {
+				return nil, fmt.Errorf("server: tls: %s %q: give an absolute path on the box, outside the project (a private key never belongs in git)", f.what, f.path)
+			}
+		}
+	}
 	if addr == "" {
 		addr = "localhost:8080"
 	}
@@ -921,7 +2077,11 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 			hmiFS, hmiApp, hmiMissing = sub, "", false
 		}
 	}
-	screens := m.Server.HMI == "" && hmiFS == nil && hasMimics(fsys)
+	noApp := m.Server.HMI == "" && hmiFS == nil
+	mimics := noApp && hasMimics(fsys)
+	// a plant model with equipment is enough for the asset and area pages
+	plantPages := noApp && !mimics && m.plant != nil && len(m.plant.Equipment) > 0
+	screens := mimics
 	return &Project{
 		Notices: platformNotices(m),
 		Name:    projName,
@@ -932,18 +2092,72 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 			OnlineEdits:  m.Server.OnlineEdits,
 			HistorianURL: m.Server.Historian,
 			HMI:          hmiFS,
+			Substitutes:  serverSubstitutes(substitutes),
+
+			TrustedProxies: proxies,
 		},
-		sparkplug:  m.Sparkplug,
-		drivers:    drivers,
-		OPCUA:      m.OPCUA,
-		Retain:     m.Retain,
-		Redundancy: m.Redundancy,
-		Alarms:     m.Alarms,
-		HMIDir:     hmiDir,
-		HMIMissing: hmiMissing,
-		HMIApp:     hmiApp,
-		HMIScreens: screens,
+		sparkplug:       m.Sparkplug,
+		substitutes:     substitutes,
+		drivers:         drivers,
+		devices:         m.devices,
+		Plant:           m.plant,
+		OPCUA:           m.OPCUA,
+		Retain:          m.Retain,
+		WriteBack:       m.WriteBackMode(),
+		Audit:           m.Audit,
+		Auth:            m.authPolicy,
+		Redundancy:      m.Redundancy,
+		Alarms:          m.Alarms,
+		HMIDir:          hmiDir,
+		HMIMissing:      hmiMissing,
+		HMIApp:          hmiApp,
+		HMIScreens:      screens,
+		HMIPlant:        plantPages,
+		PWA:             m.PWA,
+		PWAIcon:         m.pwaIcon,
+		Checkout:        m.Checkout,
+		Cameras:         m.Cameras,
+		CameraSnapshots: m.CameraSnapshots,
+		CameraStreams:   m.CameraStreams,
+		checkout:        m.checkoutSheet,
+
+		AuthStateDir: m.authStateDir(),
+		AuthOIDC:     m.authOIDC(),
+		tls:          m.Server.TLS,
 	}, nil
+}
+
+// authStateDir is the auth: block's state-dir, "" without one.
+func (m *Manifest) authStateDir() string {
+	if m.Auth == nil {
+		return ""
+	}
+	return m.Auth.StateDir
+}
+
+// authOIDC is the auth: block's oidc:, nil without one.
+func (m *Manifest) authOIDC() *AuthOIDC {
+	if m.Auth == nil {
+		return nil
+	}
+	return m.Auth.OIDC
+}
+
+// AuthStateDir is the auth: block's state-dir, "" without one: where the
+// users file lives (naut users reads the manifest, not a Project).
+func (m *Manifest) AuthStateDir() string { return m.authStateDir() }
+
+// TLSSelfSigned reports server.tls: self-signed: the controller makes its
+// own certificate in its state directory (cmd/naut selfSignedTLS).
+func (p *Project) TLSSelfSigned() bool { return p.tls != nil && p.tls.SelfSigned }
+
+// TLSFiles are server.tls's certificate and key paths, "" without it (and
+// for self-signed).
+func (p *Project) TLSFiles() (cert, key string) {
+	if p.tls == nil {
+		return "", ""
+	}
+	return p.tls.Cert, p.tls.Key
 }
 
 // BuiltHMIDir is where `naut build` puts the HMI it built into a
@@ -1235,6 +2449,22 @@ func tagDefs(tags []TagConfig) ([]runtime.TagDef, error) {
 		if t.Desc != "" {
 			meta = append(meta, runtime.Desc(t.Desc))
 		}
+		if t.Min != nil || t.Max != nil {
+			if strings.ToLower(t.Role) != "setpoint" {
+				return nil, fmt.Errorf("tag %s: min/max bound a setpoint's external writes; this tag is role %q — remove them or make it a setpoint", t.Name, t.Role)
+			}
+			if t.Min != nil && t.Max != nil && *t.Min > *t.Max {
+				return nil, fmt.Errorf("tag %s: min %v is above max %v — swap them", t.Name, *t.Min, *t.Max)
+			}
+			if _, isText := t.Init.(string); isText {
+				return nil, fmt.Errorf("tag %s: min/max bound a number; init %q is text — give it a numeric init (a TIME in milliseconds) or remove the range", t.Name, t.Init)
+			}
+			if f, ok := numericInit(t.Init); ok &&
+				((t.Min != nil && f < *t.Min) || (t.Max != nil && f > *t.Max)) {
+				return nil, fmt.Errorf("tag %s: init %v is outside its range %s — change init: or the range", t.Name, f, runtime.TagRange{Min: t.Min, Max: t.Max})
+			}
+			meta = append(meta, runtime.Range(t.Min, t.Max))
+		}
 		var def runtime.TagDef
 		switch strings.ToLower(t.Role) {
 		case "input":
@@ -1269,6 +2499,21 @@ func tagDefs(tags []TagConfig) ([]runtime.TagDef, error) {
 		defs = append(defs, def)
 	}
 	return defs, nil
+}
+
+// numericInit reads a scalar init as a number, for the range check.
+func numericInit(v any) (float64, bool) {
+	switch x := v.(type) {
+	case int:
+		return float64(x), true
+	case int64:
+		return float64(x), true
+	case uint64:
+		return float64(x), true
+	case float64:
+		return x, true
+	}
+	return 0, false
 }
 
 // applyTagMeta layers a tag-meta: block onto the tags. A key matching a tag
@@ -1343,6 +2588,12 @@ func buildDrivers(fsys fs.FS, m Manifest) (nio.Driver, []nio.NamedDriver, error)
 		}
 		configs = []DriverConfig{m.Driver}
 	}
+	if m.devices.Len() > 0 {
+		var err error
+		if configs, err = withDevices(configs, m.devices); err != nil {
+			return nil, nil, err
+		}
+	}
 	names := driverNames(configs)
 	switch len(configs) {
 	case 0:
@@ -1359,6 +2610,7 @@ func buildDrivers(fsys fs.FS, m Manifest) (nio.Driver, []nio.NamedDriver, error)
 		if err != nil {
 			return nil, nil, err
 		}
+		labelCuts(d, c.Name, false)
 		return d, []nio.NamedDriver{{Name: c.Name, Driver: d}}, nil
 	}
 	named := make([]nio.NamedDriver, 0, len(configs))
@@ -1369,6 +2621,7 @@ func buildDrivers(fsys fs.FS, m Manifest) (nio.Driver, []nio.NamedDriver, error)
 		if err != nil {
 			return nil, nil, fmt.Errorf("drivers[%d] (%s): %w", i, name, err)
 		}
+		labelCuts(d, name, true)
 		named = append(named, nio.NamedDriver{Name: name, Driver: d})
 	}
 	multi, err := nio.NewMulti(named...)
@@ -1376,6 +2629,156 @@ func buildDrivers(fsys fs.FS, m Manifest) (nio.Driver, []nio.NamedDriver, error)
 		return nil, nil, fmt.Errorf("drivers: %w", err)
 	}
 	return multi, named, nil
+}
+
+// labelCuts tells a driver its name for the writes-cut counter (#710,
+// fence.CutLabel): among several drivers a source is "driver/id".
+func labelCuts(d nio.Driver, name string, multi bool) {
+	if l, ok := d.(interface{ SetCutLabel(string, bool) }); ok {
+		l.SetCutLabel(name, multi)
+	}
+}
+
+// withDeviceTypes makes the composed device types this manifest's:
+// stproject composes nautilus.yaml's devices:, and a project loaded with
+// another manifest (-m field.yaml) declares its own.
+func withDeviceTypes(libs []stproject.Library, set *devbind.Set) []stproject.Library {
+	out := make([]stproject.Library, 0, len(libs)+1)
+	for _, l := range libs {
+		if l.Path != devprofile.TypesPath {
+			out = append(out, l)
+		}
+	}
+	if src, _ := set.TypesST(); src != "" {
+		out = append(out, stproject.Library{Path: devprofile.TypesPath, ST: src})
+	}
+	return out
+}
+
+// withDevices hands the project's devices to their drivers: the Modbus
+// devices to the project's Modbus driver, adding one when it declares none,
+// and each OPC UA device to an opcua-client driver of its own, named after
+// it (an OPC UA client talks to one server). The configs are copied, not
+// changed.
+func withDevices(configs []DriverConfig, set *devbind.Set) ([]DriverConfig, error) {
+	out := append([]DriverConfig(nil), configs...)
+	if set.Modbus() {
+		at := -1
+		for i, c := range out {
+			if strings.EqualFold(c.Type, "modbus") {
+				if at >= 0 {
+					return nil, fmt.Errorf("devices: the project has more than one modbus driver; devices go to one, so keep one")
+				}
+				at = i
+			}
+		}
+		if at < 0 {
+			out = append(out, DriverConfig{Type: "modbus"})
+			at = len(out) - 1
+		}
+		out[at].devices = set
+		if err := liveOnOneConnection(out[at], set); err != nil {
+			return nil, err
+		}
+	}
+	taken := map[string]bool{}
+	for _, n := range driverNames(out) {
+		taken[strings.ToLower(n)] = true
+	}
+	// The opcua-client sections rows name in driver: are templates: each
+	// device's own driver is made from one, and the section itself is
+	// never built.
+	template := map[int]bool{}
+	for _, od := range set.OPCUARows() {
+		if taken[strings.ToLower(od.Name)] {
+			return nil, fmt.Errorf("devices: device %s is an OPC UA device, whose driver is named after it, and the project already has a driver %s: rename one", od.Name, od.Name)
+		}
+		c := DriverConfig{Type: "opcua-client", Security: od.Security, SecurityMode: od.SecurityMode}
+		if od.Driver != "" {
+			i, err := opcuaTemplate(out, od)
+			if err != nil {
+				return nil, err
+			}
+			template[i] = true
+			c = out[i]
+		}
+		c.Name, c.Endpoint, c.devices, c.opcuaDevice = od.Name, od.Endpoint, set, od.Name
+		out = append(out, c)
+	}
+	kept := out[:0:0]
+	for i, c := range out {
+		if !template[i] {
+			kept = append(kept, c)
+		}
+	}
+	return kept, nil
+}
+
+// templateKeys are the keys an opcua-client section a devices: row names
+// in driver: may set: how the device's driver connects. The row gives the
+// endpoint and the profile the manifest; a scan or tag class would match
+// binding names the device derives (a row selects its points instead).
+var templateKeys = map[string]bool{
+	"type": true, "name": true, "security": true, "security-mode": true,
+	"pki-dir": true, "username": true, "read-mode": true, "scan-rate": true,
+}
+
+// opcuaTemplate finds the section an OPC UA row's driver: names and
+// checks it is one a device's driver can be made from.
+func opcuaTemplate(configs []DriverConfig, od devbind.OPCUARow) (int, error) {
+	at := -1
+	for i, c := range configs {
+		if c.Name != "" && strings.EqualFold(c.Name, od.Driver) {
+			at = i
+		}
+	}
+	if at < 0 {
+		return 0, fmt.Errorf("devices: device %s: driver: %s is not a section of drivers: (an opcua-client section with the device's security, credentials and pki-dir)", od.Name, od.Driver)
+	}
+	c := configs[at]
+	if !strings.EqualFold(c.Type, "opcua-client") {
+		return 0, fmt.Errorf("devices: device %s: driver: %s is a %s driver; an OPC UA device's is an opcua-client section", od.Name, c.Name, c.Type)
+	}
+	var set []string
+	v := reflect.ValueOf(c)
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Type().Field(i)
+		key, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
+		if f.PkgPath != "" || key == "" || key == "-" || templateKeys[key] || v.Field(i).IsZero() {
+			continue
+		}
+		set = append(set, key)
+	}
+	if len(set) > 0 {
+		return 0, fmt.Errorf("devices: device %s: driver: %s is the section its connection is made from, which may set only security, security-mode, pki-dir, username, read-mode and scan-rate, not %s (the row gives the endpoint, the profile the manifest, and points: what is polled)", od.Name, c.Name, strings.Join(set, ", "))
+	}
+	return at, nil
+}
+
+// liveOnOneConnection refuses a driver's validate: live over a device whose
+// profile documents a single Modbus connection: a live check's own
+// connection would be the controller's (#706), as devbind refuses on the
+// device's row.
+func liveOnOneConnection(c DriverConfig, set *devbind.Set) error {
+	if c.Validate != devbind.ValidateLive {
+		return nil
+	}
+	profiles := map[string]*devprofile.Profile{}
+	for _, p := range set.Profiles() {
+		profiles[p.ID] = p
+	}
+	for _, r := range set.Rows() {
+		p := profiles[r.Profile]
+		if p == nil || p.Modbus == nil || p.Modbus.MaxConnections != 1 || r.Validate != "" {
+			continue
+		}
+		name := c.Name
+		if name == "" {
+			name = c.Type // the Modbus driver the devices were given, unnamed
+		}
+		return fmt.Errorf("driver %s: validate: live, but device %s's profile %s documents max-connections 1 (%s): a live check's connection would be the controller's; set validate: static on the driver, or on the rows that allow a second connection", name, r.Name, p.ID, p.Modbus.MaxConnectionsDoc)
+	}
+	return nil
 }
 
 // driverNames resolves each configured driver's name: its name: when it has

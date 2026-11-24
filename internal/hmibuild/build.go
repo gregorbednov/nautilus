@@ -51,8 +51,27 @@ type Options struct {
 	App string
 	// Title names the default app (the project's name).
 	Title string
+	// Assets are asset descriptors (the kit's AssetDescriptor, as JSON) for
+	// the default app's asset pages, beside those its mimics' equipment make:
+	// a device row's, from the caller.
+	Assets []json.RawMessage
+	// Areas are the plant model's areas ({id, label, assets: [ids]}) for the
+	// default app's area pages; one with a mimic named for it links to it.
+	Areas []json.RawMessage
 	// Minify the output (on for serving; off reads better when debugging).
 	Minify bool
+	// PWA names and themes the installed app (#722). nil still builds an
+	// installable HMI, named by Title; an app with its own
+	// static/manifest.webmanifest or static/sw.js keeps its own.
+	PWA *PWA
+	// NoPWA builds the HMI without the manifest and worker: for a build
+	// that is not served from the root of its own origin (the browser
+	// playground).
+	NoPWA bool
+	// Checkout adds the I/O checkout page, its screen entry and the standing
+	// force banner to the default app (#719): the project has a checkout:
+	// section. Off, nothing of it is built.
+	Checkout bool
 }
 
 // Result is a built app: its files, by slash path from the app's root.
@@ -114,7 +133,7 @@ func Build(o Options) (*Result, error) {
 			app.addComponentsPage(proj, root)
 		}
 	} else {
-		app, err = defaultApp(o.Project, o.Title)
+		app, err = defaultApp(o.Project, o.Title, o.Assets, o.Areas, o.Checkout)
 	}
 	if err != nil {
 		return nil, err
@@ -385,9 +404,30 @@ func (b *builder) bundle() (*Result, error) {
 	res.Warnings = append(res.Warnings, b.warnings...)
 	sort.Strings(res.Warnings)
 	_, css := res.Files["app.css"]
-	res.Files["index.html"] = []byte(b.app.html(css))
 	if err := b.app.copyStatic(res.Files); err != nil {
 		return nil, err
+	}
+	_, ownManifest := res.Files["manifest.webmanifest"]
+	_, ownWorker := res.Files["sw.js"]
+	installable := !ownManifest && !ownWorker && !b.opts.NoPWA
+	head := ""
+	if installable {
+		theme := DefaultTheme
+		if b.opts.PWA != nil && b.opts.PWA.ThemeColor != "" {
+			theme = strings.ToLower(b.opts.PWA.ThemeColor)
+		}
+		head = pwaHead(theme)
+	}
+	res.Files["index.html"] = []byte(b.app.html(css, head))
+	if installable {
+		title := b.opts.Title
+		if title == "" {
+			title = filepath.Base(b.app.dir)
+		}
+		// after index.html: the worker's version covers it
+		if err := pwaFiles(res.Files, title, b.opts.PWA); err != nil {
+			return nil, err
+		}
 	}
 	return res, nil
 }

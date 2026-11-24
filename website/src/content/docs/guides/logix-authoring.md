@@ -128,9 +128,11 @@ programs are not in the subset.
 | `Timers : ARRAY [0..3] OF TON` | one `TIMER[4]` tag |
 | BOOL, SINT, INT, DINT, REAL, LREAL | the same types |
 | `TIME` | a DINT of milliseconds, where it feeds a preset |
+| `t:TON(PT := TO_TIME(ms))`, `ms` a DINT | `MOVE(ms,t.PRE)` ahead of the timer's rung: a preset the logic computes, in milliseconds as `.PRE` is |
 | STRUCT types in a library | UDTs |
 | enumerations (`TYPE Mode : (Idle := 1, Run := 10);`) | `DINT` tags; a member (`Run`, `Mode#Run`) is its value, `10` — Logix has no enumerated type |
 | user FUNCTION_BLOCKs (ladder or ST) | Add-On Instructions |
+| ladder `rd:READ(ID := 'line2', VAR_1 := 'Remote', RD_1 := Local)`, `WRITE` likewise with `SD_1` | `MSG(rd)` on a `MESSAGE` tag of type CIP Data Table Read / Write, its path from the `cip` channel `line2` (`2, host[, 1, slot]`); `rd.NDR`/`DONE`→`rd.DN`, `rd.ERROR`→`rd.ER`, `rd.STATUS`→`rd.ERR`. Written back from an import and checked by round trip; not yet run on a controller |
 | ST: assignments, IF, CASE, FOR, WHILE, REPEAT, EXIT, operators, maths | Logix ST, close to as written |
 | ST conversions (`DINT_TO_INT`, `INT_TO_REAL`, `BOOL_TO_DINT`, `TRUNC_DINT`, …) | Logix that computes the same result: a narrowing wraps in integer arithmetic, an integer meets REAL as `(v * 1.0)` where it would otherwise divide as integers, a BOOL becomes a number through an `IF`, `REAL_TO_DINT(r)` as the whole right-hand side into a DINT is a plain store (the controller rounds halves to even, as nautilus does) |
 
@@ -167,7 +169,7 @@ message:
 | `logix/function-block` | user FUNCTIONs have no Logix form (inline them); an AOI cannot reach a controller tag |
 | `logix/var-section` | a program takes no parameters: only `VAR` and `VAR_EXTERNAL` |
 | `logix/time` | `TIME` only where it feeds a preset |
-| `logix/preset` | a preset is a literal or a declared variable |
+| `logix/preset` | a preset is a literal, a declared variable, or `TO_TIME` of an integer variable (milliseconds) |
 | `logix/reset` | a counter reset is a plain BOOL reference |
 | `logix/block-position` | a `TOF` or `CTU` sits on the rung itself, not inside a branch |
 | `logix/array-shape` | arrays start at 0, are one-dimensional; BOOL arrays are a multiple of 32 |
@@ -288,7 +290,14 @@ configuration: `hardware.L5X`, holding the export's `<Modules>` section
 unchanged, and `hardware: hardware.L5X` in the manifest, so the write-back
 carries the same modules and the alias tags land on them. (An export whose
 only module is the controller's own gets none: the writer generates that
-module from the processor.) A rung with no nautilus form is kept
+module from the processor.) A preset the logic writes, such as
+`MUL(DelaySec,1000,t.PRE)` ahead of the timer (common in Add-On
+Instructions), comes in as a DINT of its own, `t_PRE`, seeded with the
+export's `PRE`. The logic writes it, a read of `t.PRE` reads it, and the
+call runs on it (`t:TON(PT := TO_TIME(t_PRE))`), so the timer times what
+the logic computed rather than the export's value. An element at a literal
+index (`Ts[3].PRE`) gets `Ts_3_PRE`; one at a computed index is refused by
+name. A rung with no nautilus form is kept
 as a comment and reported, never guessed at. `--comm-path` and `--host`
 fill in how to reach the controller.
 
@@ -323,13 +332,16 @@ reported, because the write cannot create it.
 On the public yardstick, `examples/batch-skid/line/Line.L5X`, the
 comparison finds no differences.
 
-On a corpus of 52 real production exports, 98.0% of rungs import, 83% of
+On a corpus of 52 real production exports, 98.3% of rungs import, 83% of
 ladder routines import whole, and most complete routines write back
 identically or equivalently. `COP` and `CPS` import when they copy like
 for like (a whole array or structure, or a slice at constant indexes) and
-write back as the instruction they were. The largest remaining gap is
-messaging: `MSG` instructions and the byte-buffer copies (a `COP` from one
-type to another) that build their payloads.
+write back as the instruction they were. An `MSG` of type CIP Data Table
+Read or Write imports as a [`READ` or `WRITE`
+block](https://github.com/joyautomation/nautilus/blob/main/docs/functions.md#read-and-write-another-device)
+on a `channels:` entry for its peer, and writes back as the `MSG` it was.
+Socket messages (CIP Generic) and the byte-buffer copies that build their
+payloads stay refused.
 
 ## The loop
 
@@ -492,8 +504,8 @@ and the `resets`. The answer is a stream of JSON lines (`progress` events, then
 - **The numbers are the controller's.** A REAL is 32 bits on the
   controller and 64 in nautilus, so compare REALs with `near`. A REAL out
   of range for the integer it is stored into wraps silently on the
-  controller, where nautilus faults the scan. nautilus does not wrap an
-  integer at its declared width; the controller does.
+  controller, where nautilus faults the scan. An integer store wraps at its
+  declared width on both.
 - **The hardware configuration comes from Logix Designer.** The writer
   carries an exported `<Modules>` section; it does not create a module from
   a description (catalog number and slot) yet, so a new module is added in
@@ -508,8 +520,8 @@ and the `resets`. The answer is a stream of JSON lines (`progress` events, then
   controller's tags when it starts, so a tag a download adds shows in
   live values after a restart.
 - **Import is not complete.** A rung with no nautilus form stays a
-  comment and is reported; message instructions (`MSG`) and the
-  byte-buffer copies that feed them are the largest gap.
+  comment and is reported; socket messages (CIP Generic `MSG`) and the
+  byte-buffer copies that feed them stay refused.
 - **No runtime parity promise.** The subset is the set of constructs whose
   behaviour on both runtimes has been checked by running the same
   scenarios on each. Anything outside it is refused, not approximated.

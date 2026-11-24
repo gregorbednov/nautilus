@@ -1,0 +1,224 @@
+//go:build !js
+
+package project
+
+// What naut pull --io reads (#706 PR 5b): the project files a live I/O
+// apply differs in, and the per-driver differs flag on the status rows.
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func rowsDiffer(r *ioRig) bool {
+	for _, s := range r.p.DriverStatus(nil, nil)() {
+		if s.Differs {
+			return true
+		}
+	}
+	return false
+}
+
+// After an upload apply, Files hands back the bytes that run and the hash
+// of the file the controller booted from, and the driver's row says
+// differs; a restart whose manifest already says the same clears both.
+func TestIOFilesAfterAnApply(t *testing.T) {
+	s1, s2, s3 := newSlave(t, 4), newSlave(t, 7), newSlave(t, 9)
+	files := ioFiles(slavePort(s1), slavePort(s2), "")
+	r := startKeepRig(t, files, keepOpts{store: &memStore{}})
+	r.leading(t)
+	if f := r.io.Files(); len(f.Units) != 0 || len(f.Files) != 0 || !f.Leading {
+		t.Fatalf("before any apply Files = %+v, want leading and empty", f)
+	}
+	if rowsDiffer(r.ioRig) {
+		t.Fatal("a driver row differs before any apply")
+	}
+	r.applyMove(t, files, slavePort(s3), slavePort(s2), ApplyOptions{})
+	f := r.io.Files()
+	if len(f.Units) != 1 || f.Units[0].Device != "DEV_A" || f.Units[0].AppliedFrom != "upload" {
+		t.Fatalf("units = %+v, want DEV_A from upload", f.Units)
+	}
+	want := modbusYAML(slavePort(s3), slavePort(s2), "", "")
+	boot := sha256.Sum256(files["modbus.yaml"].Data)
+	if len(f.Files) != 1 || f.Files[0].Path != "modbus.yaml" || f.Files[0].Running != want || f.Files[0].Booted != hex.EncodeToString(boot[:]) {
+		t.Fatalf("files = %+v, want modbus.yaml: the bytes that run, booted from %x", f.Files, boot)
+	}
+	if f.NonIO || len(f.Conflicts) != 0 {
+		t.Fatalf("nonIO %v conflicts %v, want neither", f.NonIO, f.Conflicts)
+	}
+	eventually(t, "A_In from the moved device", func() bool { return r.value("A_In") == "9" })
+	if !rowsDiffer(r.ioRig) {
+		t.Fatal("no driver row differs after an apply")
+	}
+	r.stop()
+
+	// The applied files are deployed: the build says what runs.
+	deployed := withFile(files, "modbus.yaml", want)
+	r2 := startKeepRig(t, deployed, keepOpts{store: &memStore{}})
+	r2.leading(t)
+	if f := r2.io.Files(); len(f.Units) != 0 || len(f.Files) != 0 {
+		t.Fatalf("after deploying the change Files = %+v, want empty", f)
+	}
+	if rowsDiffer(r2.ioRig) {
+		t.Fatal("a row still differs once the manifest caught up")
+	}
+}
+
+// A standby is not the leader whose configuration is in force; an apply
+// that also changes non-I/O sections says so.
+func TestIOFilesStandbyAndNonIO(t *testing.T) {
+	s1, s2, s3 := newSlave(t, 4), newSlave(t, 7), newSlave(t, 9)
+	files := ioFiles(slavePort(s1), slavePort(s2), "")
+	coord := &keepCoord{}
+	coord.lead.Store(true)
+	coord.term.Store(1)
+	r := startKeepRig(t, files, keepOpts{store: &memStore{}, coord: coord, noFollow: true})
+	r.leading(t)
+	cand := withFile(files, "modbus.yaml", modbusYAML(slavePort(s3), slavePort(s2), "", ""))
+	cand = withFile(cand, "nautilus.yaml", strings.Replace(string(cand["nautilus.yaml"].Data), "name: io\n", "name: io2\n", 1))
+	c := r.io.Stage(cand, "upload", "tester")
+	if v := r.io.Validate(c); !v.Valid {
+		t.Fatalf("validate: %v %+v", failed(v), v.Checks)
+	}
+	if _, err := r.io.ApplyWith(r.ctx, c, "tester", ApplyOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	f := r.io.Files()
+	if !f.NonIO || !f.Leading {
+		t.Fatalf("nonIO %v leading %v, want a manifest that also changes the name, on the leader", f.NonIO, f.Leading)
+	}
+	coord.lead.Store(false)
+	if f := r.io.Files(); f.Leading {
+		t.Fatal("a standby reported leading")
+	}
+}
+
+// Two differing units holding one path with different contents are
+// reported, not merged.
+func TestIOFilesConflict(t *testing.T) {
+	s1, s2 := newSlave(t, 4), newSlave(t, 7)
+	files := ioFiles(slavePort(s1), slavePort(s2), "")
+	r := startKeepRig(t, files, keepOpts{store: &memStore{}})
+	r.leading(t)
+	r.io.mu.Lock()
+	for k, u := range r.io.running {
+		u.hash += "x"
+		u.files = map[string]string{"modbus.yaml": "from " + k}
+		r.io.running[k] = u
+	}
+	r.io.mu.Unlock()
+	if f := r.io.Files(); len(f.Conflicts) != 1 || f.Conflicts[0] != "modbus.yaml" {
+		t.Fatalf("conflicts = %v, want modbus.yaml", f.Conflicts)
+	}
+}
+
+// Several drivers compose in a Multi: only the driver whose unit differs
+// badges its row.
+func TestIODiffersFlagsOnlyTheDriverThatDiffers(t *testing.T) {
+	s1, s2, s3 := newSlave(t, 4), newSlave(t, 7), newSlave(t, 9)
+	ua := uaServer(t, 1.5)
+	files := ioFiles(slavePort(s1), slavePort(s2), ua)
+	r := startKeepRig(t, files, keepOpts{store: &memStore{}})
+	r.leading(t)
+	r.applyMove(t, files, slavePort(s3), slavePort(s2), ApplyOptions{})
+	var flagged, total int
+	for _, s := range r.p.DriverStatus(nil, nil)() {
+		total++
+		if s.Differs {
+			flagged++
+			if s.Kind != "modbus" {
+				t.Fatalf("the %s row differs, want only the modbus one", s.Kind)
+			}
+		}
+	}
+	if total < 2 || flagged != 1 {
+		t.Fatalf("%d of %d rows differ, want exactly the modbus row of several", flagged, total)
+	}
+}
+
+// ConfigFiles is what the config screens edit: the manifest and the file
+// each driver names, as what runs. Before an apply they are the boot copy;
+// after one, the applied bytes, and Differs names them.
+func TestConfigFilesFollowTheRunningConfiguration(t *testing.T) {
+	s1, s2, s3 := newSlave(t, 4), newSlave(t, 7), newSlave(t, 9)
+	files := ioFiles(slavePort(s1), slavePort(s2), "")
+	r := startKeepRig(t, files, keepOpts{store: &memStore{}})
+	r.leading(t)
+	c, err := r.io.ConfigFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Manifest != "nautilus.yaml" || !c.Leading || len(c.Differs) != 0 ||
+		c.Files["nautilus.yaml"] != string(files["nautilus.yaml"].Data) ||
+		c.Files["modbus.yaml"] != string(files["modbus.yaml"].Data) {
+		t.Fatalf("before an apply: %+v", c)
+	}
+	r.applyMove(t, files, slavePort(s3), slavePort(s2), ApplyOptions{})
+	c, err = r.io.ConfigFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := modbusYAML(slavePort(s3), slavePort(s2), "", ""); c.Files["modbus.yaml"] != want {
+		t.Errorf("modbus.yaml after an apply = %q, want the applied bytes", c.Files["modbus.yaml"])
+	}
+	if len(c.Differs) != 1 || c.Differs[0] != "modbus.yaml" {
+		t.Errorf("differs = %v, want [modbus.yaml]", c.Differs)
+	}
+	if c.Files["nautilus.yaml"] != string(files["nautilus.yaml"].Data) {
+		t.Error("nautilus.yaml changed though the apply did not touch it")
+	}
+}
+
+// A driver's manifest: names a file; only a YAML data file inside the
+// project, with no hidden component and no symbolic link on the way, is
+// served. A manifest cannot make the screens read .env, a program source,
+// a path outside the project, or what a link points at.
+func TestConfigFilesServeOnlySafeProjectFiles(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	write := func(p, s string) {
+		t.Helper()
+		full := filepath.Join(dir, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("nautilus.yaml", "name: x\ntasks:\n  - program: main.st\n    scan: 5ms\ntags:\n  - { name: A, role: input, type: DINT }\ndrivers:\n  - type: memory\n")
+	write("main.st", "PROGRAM main\nEND_PROGRAM\n")
+	write("ok.yaml", "fine: 1\n")
+	write(".env", "SECRET=1\n")
+	write("sub/.hidden.yaml", "h: 1\n")
+	if err := os.WriteFile(filepath.Join(outside, "pw.yaml"), []byte("password: hunter2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "pw.yaml"), filepath.Join(dir, "link.yaml")); err != nil {
+		t.Skip("no symlinks here:", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "linkdir")); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		path string
+		want bool
+	}{
+		{"ok.yaml", true},
+		{"main.st", false},
+		{".env", false},
+		{"sub/.hidden.yaml", false},
+		{"../x.yaml", false},
+		{"link.yaml", false},
+		{"linkdir/pw.yaml", false},
+	} {
+		_, got := readConfigFile(os.DirFS(dir), c.path, false)
+		if got != c.want {
+			t.Errorf("%s: served = %v, want %v", c.path, got, c.want)
+		}
+	}
+}

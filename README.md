@@ -61,6 +61,13 @@ examples/    four real plant projects — lift-station, batch-skid, remote-fleet
 | `hist.Sink` | where process history is archived — Postgres + `naut historian` ship in `hist/` |
 | `alarm.Journal` / `alarm.Notifier` | where alarm events land — a ring, rotated JSONL, and Postgres ship in `alarm/` |
 
+Those interfaces, and the `io`, `runtime`, `server` and `acceptance`
+packages a Go program imports, are the whole stable Go API; every other
+package is internal and can change in any release. See
+[CONTRIBUTING.md § Go API](CONTRIBUTING.md#go-api). Contributing,
+security reports and accessibility: [CONTRIBUTING.md](CONTRIBUTING.md),
+[SECURITY.md](SECURITY.md), [ACCESSIBILITY.md](ACCESSIBILITY.md).
+
 ## Getting started
 
 **New to PLCs or to nautilus? Start with the
@@ -226,8 +233,9 @@ Open **http://localhost:8080** for the built-in live dashboard, or
 `GET /api/state` for the raw tag snapshot. Setpoints are click-to-set right
 in the tag table (BOOLs get a toggle); inputs and outputs are not editable,
 because the driver rewrites one before every scan and the logic rewrites the
-other after. Reads are open; set `NAUTILUS_TOKEN=<secret>` to require a token
-on writes.
+other after. Set `NAUTILUS_TOKEN=<secret>` to require a token on writes.
+nautilus answers only requests addressed to `localhost`, an IP address, or
+a name in `NAUTILUS_ALLOWED_HOSTS`, unless the request carries the token.
 
 **4. Develop in VS Code**
 
@@ -557,9 +565,11 @@ scaffolded controller binds loopback by default; set `NAUTILUS_ADDR=0.0.0.0:8080
 to expose the tag API to other machines, and point the editor at it with the
 `nautilus.runtimeUrl` setting (`naut pull` takes `--host`). Exposing the
 API on the network also exposes its write surface, so set `NAUTILUS_TOKEN` on
-the controller and the matching `nautilus.token` in the editor — reads and
-`naut pull` stay open, but tag writes and online edits then require the
-token.
+the controller and the matching `nautilus.token` in the editor. Tag writes
+and online edits then require the token. Reads and `naut pull` need it only
+when they reach the controller by a name that isn't `localhost`, an IP
+address or in its `NAUTILUS_ALLOWED_HOSTS`; the editor and `naut pull` (from
+`NAUTILUS_TOKEN` in its environment) send it.
 
 **Forcing.** A tag can be held at a value against the field and the logic —
 the PLC force table — from the editor (**Force…**, an **F** on every forced
@@ -744,7 +754,8 @@ Tags: []runtime.TagDef{
     runtime.Setpoint("TempSP", 65.0, runtime.Unit("°C")),
 
     // Field output: the logic produces it, the driver consumes it.
-    // Init() any output the logic also READS — the seal-in latch.
+    // Init() any untyped output the logic also READS — the seal-in latch.
+    // (One declared with Typed starts at the zero of its type.)
     runtime.Output("PumpRun", runtime.Init(false), runtime.Desc("Pump run command")),
 
     // Logic-owned state that must survive read-before-write: latches,
