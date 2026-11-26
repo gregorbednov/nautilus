@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/joyautomation/nautilus/internal/hmibuild"
+	"github.com/joyautomation/nautilus/internal/nbhmi"
 	"github.com/joyautomation/nautilus/internal/project"
 	"github.com/joyautomation/nautilus/internal/stproject"
 	nio "github.com/joyautomation/nautilus/io"
@@ -629,8 +630,23 @@ func checkManifest(paths []string, manifestName string) (errs, warns int) {
 	for name := range rt.Globals() {
 		bound[ir.NameKey(name)] = true
 	}
+	nbBindings, err := nbhmi.ModelBindings(os.DirFS(dir), proj.HMIApp)
+	if err != nil {
+		errs++
+		fmt.Printf("%s: error: %s\n", loc.file, err)
+	}
+	hmiTags := map[string]bool{}
+	for _, name := range sortedNames(nbBindings) {
+		key := ir.NameKey(name)
+		if !declared[key] {
+			errs++
+			fmt.Printf("%s: error: %s references undeclared tag %q\n", loc.file, nbBindings[name], name)
+		}
+		hmiTags[key] = true
+	}
 	for _, d := range proj.Runtime.Tags {
-		if bound[ir.NameKey(d.Name)] {
+		key := ir.NameKey(d.Name)
+		if bound[key] || (hmiTags[key] && d.Role == runtime.RoleState) {
 			continue
 		}
 		// An INPUT no program binds is not a defect: the driver fills it and

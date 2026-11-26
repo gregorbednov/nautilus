@@ -326,9 +326,12 @@ func allowed(spec string) bool {
 }
 
 func (b *builder) bundle() (*Result, error) {
+	// The output is in memory. Give esbuild a native absolute path so its
+	// result can be relativized on Windows as well as on Unix.
+	outDir := filepath.Join(b.app.dir, ".naut-hmi-out")
 	opts := api.BuildOptions{
 		EntryPoints:       []string{"nx:entry"},
-		Outdir:            "/out",
+		Outdir:            outDir,
 		EntryNames:        "app",
 		ChunkNames:        "_app/[name]-[hash]",
 		AssetNames:        "_app/[name]-[hash]",
@@ -373,8 +376,11 @@ func (b *builder) bundle() (*Result, error) {
 	}
 	res := &Result{Files: map[string][]byte{}, Pages: b.app.pageIDs(), Compiled: b.compiled}
 	for _, f := range r.OutputFiles {
-		rel := strings.TrimPrefix(filepath.ToSlash(f.Path), "/out/")
-		res.Files[rel] = f.Contents
+		rel, err := filepath.Rel(outDir, f.Path)
+		if err != nil || !filepath.IsLocal(rel) || rel == "." {
+			return nil, fmt.Errorf("invalid HMI output path %q", f.Path)
+		}
+		res.Files[filepath.ToSlash(rel)] = f.Contents
 	}
 	for _, m := range r.Warnings {
 		if m.Location != nil && strings.HasPrefix(m.Location.File, b.packs) {

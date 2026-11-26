@@ -64,6 +64,18 @@
       "minItems": 1,
       "description": "Several field drivers on one scan \u2014 e.g. an EtherNet/IP poll plus a Sparkplug feed. Each entry is the same shape as driver:, plus an optional name to tell status rows apart. A tag may be owned by exactly one driver; a duplicate is a load-time error naming both. One entry behaves exactly like driver:. Do not set driver: as well."
     },
+    "nb-fins": {
+      "type": "object",
+      "description": "Opt-in Omron FINS/UDP connection for an imported NB HMI. It polls NB_CIO_ and NB_FINS_ bit tags using their declared aliases.",
+      "additionalProperties": false,
+      "required": ["endpoint", "source", "destination"],
+      "properties": {
+        "endpoint": { "type": "string", "description": "Unicast IPv4:port for the PLC" },
+        "source": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "integer", "minimum": 0, "maximum": 255 }, "description": "FINS source [network, node, unit]" },
+        "destination": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "integer", "minimum": 0, "maximum": 255 }, "description": "FINS destination [network, node, unit]" },
+        "write-allow": { "type": "array", "items": { "type": "string", "pattern": "^(CIO|W)[0-9]+\\.[0-9]+$" }, "description": "Explicit writeable CIO or W bit addresses. Writes also require NAUTILUS_TOKEN." }
+      }
+    },
     "opcua": {
       "$ref": "#/definitions/opcua",
       "description": "Serve the tag store as an OPC UA address space. Any OPC UA client browses, reads and subscribes to the tags; a trusted client also writes the tags writable opens. The section's presence turns the server on."

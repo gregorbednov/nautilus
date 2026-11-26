@@ -320,6 +320,9 @@ type Options struct {
 	// HTTPStatus() int method, which is how a writer reports a request that
 	// was wrong rather than a device that failed.
 	TagWriter func(name string, value any) error
+	// FieldTagWriter handles explicit operator writes to device-owned tags.
+	// Returning false lets the ordinary tag writer handle the request.
+	FieldTagWriter func(context.Context, string, any) (bool, error)
 }
 
 // DriverStatus is a field driver's or publisher's health, rendered by the
@@ -418,19 +421,20 @@ type DriverDevice struct {
 
 // Server fans runtime frames out to SSE clients and answers snapshot reads.
 type Server struct {
-	rt          *runtime.Runtime
-	interval    time.Duration
-	authToken   string
-	onlineEdits bool
-	drivers     func() []DriverStatus
-	cluster     interface{ Status() leader.Status }
-	historian   string
-	historyFn   func() *ProgramHistory
-	sourcesAt   func(sha string) (map[string]string, error)
-	hmi         fs.FS
-	alarms      *alarm.Engine
-	shelveTimes []time.Duration
-	tagWriter   func(name string, value any) error
+	rt             *runtime.Runtime
+	interval       time.Duration
+	authToken      string
+	onlineEdits    bool
+	drivers        func() []DriverStatus
+	cluster        interface{ Status() leader.Status }
+	historian      string
+	historyFn      func() *ProgramHistory
+	sourcesAt      func(sha string) (map[string]string, error)
+	hmi            fs.FS
+	alarms         *alarm.Engine
+	shelveTimes    []time.Duration
+	tagWriter      func(name string, value any) error
+	fieldTagWriter func(context.Context, string, any) (bool, error)
 
 	resync time.Duration
 	diag   time.Duration
@@ -507,6 +511,7 @@ func New(rt *runtime.Runtime, opts ...Options) *Server {
 		s.alarms = opts[0].Alarms
 		s.shelveTimes = opts[0].AlarmShelveTimes
 		s.tagWriter = opts[0].TagWriter
+		s.fieldTagWriter = opts[0].FieldTagWriter
 	}
 	if len(s.shelveTimes) == 0 {
 		s.shelveTimes = alarm.DefaultShelveTimes
@@ -600,6 +605,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/alarms/unshelve", s.handleAlarmUnshelve)
 	mux.HandleFunc("GET /api/stream", s.handleStream)
 	mux.HandleFunc("POST /api/tags", s.handleWriteTag)
+	mux.HandleFunc("GET /api/write-access", s.handleWriteAccess)
 	mux.HandleFunc("GET /api/program", s.handleGetProgram)
 	mux.HandleFunc("PUT /api/program", s.handlePutProgram)
 	mux.HandleFunc("POST /api/program/rollback", s.handleRollback)
@@ -1177,6 +1183,19 @@ func nonNilStrings(s []string) []string {
 // an endpoint keeps the same rule for it. 0 means allowed.
 func (s *Server) AuthorizeWrite(r *http.Request) (int, string) { return s.authorizeWrite(r) }
 
+func (s *Server) handleWriteAccess(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if s.authToken == "" {
+		http.Error(w, "Nautilus has no write token configured", http.StatusUnauthorized)
+		return
+	}
+	if code, msg := s.authorizeWrite(r); code != 0 {
+		http.Error(w, msg, code)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) authorizeWrite(r *http.Request) (int, string) {
 	if s.authToken != "" {
 		if tokenMatches(r, s.authToken) {
@@ -1254,17 +1273,14 @@ func (s *Server) handleWriteTag(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if s.tagWriter != nil {
-		if err := s.tagWriter(req.Name, req.Value); err != nil {
-			code := http.StatusBadGateway
-			var hs interface{ HTTPStatus() int }
-			if errors.As(err, &hs) {
-				code = hs.HTTPStatus()
-			}
-			http.Error(w, err.Error(), code)
+		respondTagWrite(w, s.tagWriter(req.Name, req.Value))
+		return
+	}
+	if s.fieldTagWriter != nil {
+		if owned, err := s.fieldTagWriter(r.Context(), req.Name, req.Value); owned {
+			respondTagWrite(w, err)
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
-		return
 	}
 	// A member write — a dotted name, or an object payload merging into a
 	// struct tag — resolves through the tag's own StructDef and is
@@ -1325,6 +1341,19 @@ func (s *Server) handleWriteTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.frontDoor(w, req, true)
+}
+
+func respondTagWrite(w http.ResponseWriter, err error) {
+	if err == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	code := http.StatusBadGateway
+	var hs interface{ HTTPStatus() int }
+	if errors.As(err, &hs) {
+		code = hs.HTTPStatus()
+	}
+	http.Error(w, err.Error(), code)
 }
 
 // frontDoor applies one write through the runtime's front door

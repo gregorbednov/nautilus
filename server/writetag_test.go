@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
@@ -354,6 +355,49 @@ func TestTagWriterTakesOverWrites(t *testing.T) {
 	fail = errors.New("controller unreachable")
 	if rec := postTag(t, srv, `{"name": "SP", "value": 1}`); rec.Code != 502 {
 		t.Errorf("device failure = %d, want 502", rec.Code)
+	}
+}
+
+func TestFieldTagWriterKeepsNormalTagPath(t *testing.T) {
+	rt := newUDTRuntime(t)
+	calls := 0
+	srv := New(rt, Options{AuthToken: "test-token", FieldTagWriter: func(_ context.Context, name string, value any) (bool, error) {
+		if name != "DeviceBit" {
+			return false, nil
+		}
+		calls++
+		if value != true {
+			return true, statusErr{403, "bit refused"}
+		}
+		return true, nil
+	}})
+	request := func(method, path, body string, authorized bool) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		if authorized {
+			req.Header.Set("X-Nautilus-Token", "test-token")
+		}
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	if got := request("POST", "/api/tags", `{"name":"DeviceBit","value":true}`, false).Code; got != 401 || calls != 0 {
+		t.Fatalf("unauthenticated field write: HTTP %d, calls %d", got, calls)
+	}
+	if got := request("GET", "/api/write-access", "", false).Code; got != 401 {
+		t.Fatalf("unauthenticated access check: HTTP %d", got)
+	}
+	if got := request("GET", "/api/write-access", "", true).Code; got != 204 || calls != 0 {
+		t.Fatalf("access check: HTTP %d, calls %d", got, calls)
+	}
+	if got := request("POST", "/api/tags", `{"name":"DeviceBit","value":true}`, true).Code; got != 204 || calls != 1 {
+		t.Fatalf("authorized field write: HTTP %d, calls %d", got, calls)
+	}
+	if got := request("POST", "/api/tags", `{"name":"DeviceBit","value":false}`, true).Code; got != 403 || calls != 2 {
+		t.Fatalf("field refusal: HTTP %d, calls %d", got, calls)
+	}
+	if got := request("POST", "/api/tags", `{"name":"SP","value":71.0}`, true).Code; got != 204 || rt.Tags().Real("SP") != 71 {
+		t.Fatalf("normal write: HTTP %d, SP %v", got, rt.Tags().Real("SP"))
 	}
 }
 

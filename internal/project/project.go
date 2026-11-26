@@ -23,6 +23,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/joyautomation/nautilus/internal/nbfins"
 	"github.com/joyautomation/nautilus/internal/stproject"
 	"github.com/joyautomation/nautilus/internal/writable"
 	nio "github.com/joyautomation/nautilus/io"
@@ -68,6 +69,7 @@ type Manifest struct {
 	// shape as driver:, plus an optional name; setting both driver: and
 	// drivers: is an error. One entry behaves exactly like driver:.
 	Drivers   []DriverConfig   `yaml:"drivers"`
+	NBFINS    *nbfins.Config   `yaml:"nb-fins"`
 	Sparkplug *SparkplugConfig `yaml:"sparkplug"`
 	OPCUA     *OPCUAConfig     `yaml:"opcua"`
 	// Retain persists operator state (setpoints, online edits) across
@@ -821,13 +823,19 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 		})
 	}
 
+	nbDriver, err := buildNBFINS(&m)
+	if err != nil {
+		return nil, err
+	}
 	if opts.Tags, err = tagDefs(m.Tags); err != nil {
 		return nil, err
 	}
 	opts.Tags = append(opts.Tags, gvlTags(libs, opts.Tags)...)
 	opts.Meta = applyTagMeta(opts.Tags, m.TagMeta)
 	var drivers []nio.NamedDriver
-	if opts.Driver, drivers, err = buildDrivers(fsys, m); err != nil {
+	if nbDriver != nil {
+		opts.Driver = nbDriver
+	} else if opts.Driver, drivers, err = buildDrivers(fsys, m); err != nil {
 		return nil, err
 	}
 	// Protocol inputs read as their init (or zero) until first delivered;
@@ -944,6 +952,26 @@ func Load(fsys fs.FS, name string) (*Project, error) {
 		HMIApp:     hmiApp,
 		HMIScreens: screens,
 	}, nil
+}
+
+func buildNBFINS(m *Manifest) (*nbfins.Driver, error) {
+	if m.NBFINS == nil {
+		return nil, nil
+	}
+	if !reflect.DeepEqual(m.Driver, DriverConfig{}) || len(m.Drivers) != 0 {
+		return nil, fmt.Errorf("nb-fins cannot be combined with driver or drivers")
+	}
+	var bindings []nbfins.Binding
+	for i := range m.Tags {
+		tag := &m.Tags[i]
+		name := strings.ToUpper(tag.Name)
+		if strings.HasPrefix(name, "NB_CIO_") || strings.HasPrefix(name, "NB_FINS_") {
+			tag.Role = "input"
+			tag.Init = false
+			bindings = append(bindings, nbfins.Binding{Tag: name, Alias: tag.Alias})
+		}
+	}
+	return nbfins.New(*m.NBFINS, bindings)
 }
 
 // BuiltHMIDir is where `naut build` puts the HMI it built into a

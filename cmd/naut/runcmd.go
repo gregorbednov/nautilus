@@ -190,6 +190,20 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 		fmt.Fprintln(os.Stderr, "naut run:", err)
 		return 1
 	}
+	sopts := proj.Server
+	if tok := os.Getenv("NAUTILUS_TOKEN"); tok != "" {
+		sopts.AuthToken = tok
+	}
+	if driver, ok := proj.Runtime.Driver.(interface {
+		Writable() bool
+		WriteTag(context.Context, string, any) (bool, error)
+	}); ok {
+		if driver.Writable() && sopts.AuthToken == "" {
+			fmt.Fprintln(os.Stderr, "naut run: nb-fins.write-allow requires NAUTILUS_TOKEN")
+			return 1
+		}
+		sopts.FieldTagWriter = driver.WriteTag
+	}
 
 	addr := proj.Addr
 	if env := os.Getenv("NAUTILUS_ADDR"); env != "" {
@@ -303,10 +317,6 @@ func runProject(fsys fs.FS, manifest, label, dir string) int {
 		}
 	}
 
-	sopts := proj.Server
-	if tok := os.Getenv("NAUTILUS_TOKEN"); tok != "" {
-		sopts.AuthToken = tok
-	}
 	if h := os.Getenv("NAUTILUS_HISTORIAN_URL"); h != "" {
 		sopts.HistorianURL = h
 	}

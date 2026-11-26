@@ -16,6 +16,7 @@ import (
 
 	"github.com/joyautomation/nautilus/internal/hmibuild"
 	"github.com/joyautomation/nautilus/internal/hmicheck"
+	"github.com/joyautomation/nautilus/internal/nbhmi"
 	"github.com/joyautomation/nautilus/internal/project"
 	"github.com/joyautomation/nautilus/runtime"
 	"github.com/joyautomation/nautilus/server"
@@ -96,6 +97,7 @@ func printBuildWarnings(w io.Writer, prefix string, warnings []string) {
 }
 
 const hmiUsage = `usage: naut hmi build [-o dir] [project]
+       naut hmi import-nb --out dir source-directory
 
 Build the project's operator screen the way naut run serves it, with no
 Node and no npm, and say what's wrong with it: the app server.hmi names (a
@@ -104,10 +106,16 @@ a page for each *.mimic.json. Imports resolve against the packages naut
 carries: ` + "svelte, @joyautomation/nautilus-hmi, @joyautomation/nautilus-hmi-3d, three, @threlte/core and @threlte/extras" + `.
 
   -o dir   also write the built files there (for any static host)
+
+import-nb converts an NB-Designer DBVersion 137 source directory to a
+Nautilus project. The destination must be new.
 `
 
 // runHMI is `naut hmi`.
 func runHMI(args []string) int {
+	if len(args) > 0 && args[0] == "import-nb" {
+		return runHMIImportNB(args[1:])
+	}
 	if len(args) == 0 || args[0] != "build" {
 		fmt.Fprint(os.Stderr, hmiUsage)
 		return 2
@@ -155,6 +163,28 @@ func runHMI(args []string) int {
 	}
 	fmt.Printf("built %s: %s (%s), %s, %d Svelte files compiled, in %s\n", src, plural(len(res.Pages), "page"),
 		strings.Join(res.Pages, " "), plural(len(res.Warnings), "warning"), res.Compiled, res.Took.Round(100*time.Millisecond))
+	return 0
+}
+
+func runHMIImportNB(args []string) int {
+	fl := flag.NewFlagSet("naut hmi import-nb", flag.ContinueOnError)
+	fl.SetOutput(os.Stderr)
+	fl.Usage = func() { fmt.Fprintln(os.Stderr, "usage: naut hmi import-nb --out dir source-directory") }
+	out := fl.String("out", "", "create a Nautilus project in this new directory")
+	if err := fl.Parse(args); err != nil {
+		return 2
+	}
+	if *out == "" || fl.NArg() != 1 {
+		fl.Usage()
+		return 2
+	}
+	result, err := nbhmi.Import(fl.Arg(0), *out)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "naut hmi import-nb:", err)
+		return 1
+	}
+	fmt.Printf("imported %s: %d windows, %d components, %d PLC tags into %s\n",
+		result.Source, result.Windows, result.Components, result.Tags, *out)
 	return 0
 }
 

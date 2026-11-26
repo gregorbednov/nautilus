@@ -4,6 +4,7 @@ package project
 
 import (
 	"github.com/joyautomation/nautilus/eip"
+	"github.com/joyautomation/nautilus/internal/nbfins"
 	nio "github.com/joyautomation/nautilus/io"
 	"github.com/joyautomation/nautilus/modbus"
 	"github.com/joyautomation/nautilus/opcua"
@@ -23,7 +24,7 @@ import (
 func commsDriver(d nio.Driver) bool {
 	switch d.(type) {
 	case *modbus.Driver, *eip.Driver, *sphost.Driver, *opcua.Driver,
-		*snmp.Driver, *redfish.Driver, *prom.Driver:
+		*snmp.Driver, *redfish.Driver, *prom.Driver, *nbfins.Driver:
 		return true
 	case *plcnext.Driver, *optommp.Driver, *replay.Driver, *nio.Memory:
 		return false
