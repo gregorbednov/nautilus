@@ -45,12 +45,20 @@ func (c *converter) parts(parent *element, parts *[]part) error {
 }
 
 func (c *converter) component(e *element) (part, error) {
+	ctrl := e.child("CtrlEx")
 	p := part{
 		Kind: e.attr("Type"), Name: e.attr("Name"), Bounds: partBounds(e.child("Position")),
 		Mode: number(e.value("Mode")), Interval: number(e.value("Interval")),
 		Function:  e.attr("Function"),
-		Confirm:   e.child("CtrlEx").attr("bOPConfirm") == "1",
-		AutoLogin: e.child("CtrlEx").attr("AutoPWD") == "1",
+		Confirm:   ctrl.attr("bOPConfirm") == "1",
+		AutoLogin: ctrl.attr("AutoPWD") == "1",
+	}
+	if raw := ctrl.attr("WaitTime"); p.Confirm && raw != "" {
+		wait, err := strconv.Atoi(raw)
+		if err != nil {
+			return p, fmt.Errorf("invalid operation confirmation timeout %q", raw)
+		}
+		p.ConfirmWaitSeconds = &wait
 	}
 	switch p.Kind {
 	case "Bit Lamp", "Word Lamp", "Switch", "Set Bit", "Word Set", "Number Input",
@@ -61,7 +69,7 @@ func (c *converter) component(e *element) (part, error) {
 	if e.child("Position") == nil || p.Bounds.W <= 0 || p.Bounds.H <= 0 {
 		return p, fmt.Errorf("invalid geometry")
 	}
-	if e.child("CtrlEx").attr("bMacro") == "1" || e.child("sound").attr("bUSeSound") == "1" {
+	if ctrl.attr("bMacro") == "1" || e.child("sound").attr("bUSeSound") == "1" {
 		return p, fmt.Errorf("active macro or sound")
 	}
 	if w := e.value("WindowID"); w != "" {
@@ -276,12 +284,16 @@ func (c *converter) address(e *element) (*register, error) {
 			c.plcID == "" || addr.value("PLCID") != c.plcID || count != 1 {
 			return nil, fmt.Errorf("invalid or unsupported CIO address %q for PLC %q", value, addr.value("PLCID"))
 		}
-		key := fmt.Sprintf("NB_CIO_%04d_%02d", word, bit)
+		key := cioBitTag(word, bit)
 		c.tags[key] = fmt.Sprintf("CIO%d.%02d", word, bit)
 		return &register{key, "CIO", word*16 + bit, 1}, nil
 	default:
 		return nil, fmt.Errorf("unsupported address area %q", area)
 	}
+}
+
+func cioBitTag(word, bit int) string {
+	return fmt.Sprintf("NB_CIO_%04d_%02d", word, bit)
 }
 
 func fontLabel(e *element, value string) label {

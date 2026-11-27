@@ -98,6 +98,8 @@ func printBuildWarnings(w io.Writer, prefix string, warnings []string) {
 
 const hmiUsage = `usage: naut hmi build [-o dir] [project]
        naut hmi import-nb --out dir source-directory
+       naut hmi nb-inspect package.pkg
+       naut hmi nb-build --offline [--target NB10W-TW01B] --reference seed.pkg --out test.pkg project
 
 Build the project's operator screen the way naut run serves it, with no
 Node and no npm, and say what's wrong with it: the app server.hmi names (a
@@ -109,12 +111,26 @@ carries: ` + "svelte, @joyautomation/nautilus-hmi, @joyautomation/nautilus-hmi-3
 
 import-nb converts an NB-Designer DBVersion 137 source directory to a
 Nautilus project. The destination must be new.
+
+nb-inspect validates the structure of an NB10W user project and lists its
+compiled screens.
+
+nb-build --offline builds an experimental NB10W-TW01B package for Omron's
+offline simulator with text, vector shapes, BMP/PNG/JPEG/WebP images,
+navigation, local decimal inputs, and LB or CIO lamps and toggle
+switches. Decimal inputs and toggles support the stock confirmation dialog.
 `
 
 // runHMI is `naut hmi`.
 func runHMI(args []string) int {
 	if len(args) > 0 && args[0] == "import-nb" {
 		return runHMIImportNB(args[1:])
+	}
+	if len(args) > 0 && args[0] == "nb-inspect" {
+		return runHMIInspectNB(args[1:])
+	}
+	if len(args) > 0 && args[0] == "nb-build" {
+		return runHMIBuildNB(args[1:])
 	}
 	if len(args) == 0 || args[0] != "build" {
 		fmt.Fprint(os.Stderr, hmiUsage)

@@ -120,29 +120,30 @@ type condition struct {
 }
 
 type part struct {
-	Kind       string            `json:"kind"`
-	Name       string            `json:"name"`
-	Bounds     bounds            `json:"bounds"`
-	Mode       int               `json:"mode,omitempty"`
-	Interval   int               `json:"interval,omitempty"`
-	Function   string            `json:"function,omitempty"`
-	Char       string            `json:"char,omitempty"`
-	Target     *int              `json:"target,omitempty"`
-	Keyboard   *int              `json:"keyboard,omitempty"`
-	Confirm    bool              `json:"confirm,omitempty"`
-	AutoLogin  bool              `json:"autoLogin,omitempty"`
-	Parameters []int             `json:"parameters,omitempty"`
-	Labels     []label           `json:"labels,omitempty"`
-	LabelBox   *bounds           `json:"labelBox,omitempty"`
-	Assets     map[int]string    `json:"assets,omitempty"`
-	Read       *register         `json:"read,omitempty"`
-	Write      *register         `json:"write,omitempty"`
-	Low        *register         `json:"low,omitempty"`
-	High       *register         `json:"high,omitempty"`
-	Visible    *condition        `json:"visible,omitempty"`
-	Enabled    *condition        `json:"enabled,omitempty"`
-	Drawing    *drawing          `json:"drawing,omitempty"`
-	Meta       map[string]string `json:"meta,omitempty"`
+	Kind               string            `json:"kind"`
+	Name               string            `json:"name"`
+	Bounds             bounds            `json:"bounds"`
+	Mode               int               `json:"mode,omitempty"`
+	Interval           int               `json:"interval,omitempty"`
+	Function           string            `json:"function,omitempty"`
+	Char               string            `json:"char,omitempty"`
+	Target             *int              `json:"target,omitempty"`
+	Keyboard           *int              `json:"keyboard,omitempty"`
+	Confirm            bool              `json:"confirm,omitempty"`
+	ConfirmWaitSeconds *int              `json:"confirmWaitSeconds,omitempty"`
+	AutoLogin          bool              `json:"autoLogin,omitempty"`
+	Parameters         []int             `json:"parameters,omitempty"`
+	Labels             []label           `json:"labels,omitempty"`
+	LabelBox           *bounds           `json:"labelBox,omitempty"`
+	Assets             map[int]string    `json:"assets,omitempty"`
+	Read               *register         `json:"read,omitempty"`
+	Write              *register         `json:"write,omitempty"`
+	Low                *register         `json:"low,omitempty"`
+	High               *register         `json:"high,omitempty"`
+	Visible            *condition        `json:"visible,omitempty"`
+	Enabled            *condition        `json:"enabled,omitempty"`
+	Drawing            *drawing          `json:"drawing,omitempty"`
+	Meta               map[string]string `json:"meta,omitempty"`
 }
 
 type converter struct {
