@@ -100,6 +100,8 @@ const hmiUsage = `usage: naut hmi build [-o dir] [project]
        naut hmi import-nb --out dir source-directory
        naut hmi nb-inspect package.pkg
        naut hmi nb-build --offline [--target NB10W-TW01B] --reference seed.pkg --out test.pkg project
+       naut hmi nb-probe --endpoint ipv4[:port]
+       naut hmi nb-download --endpoint ipv4[:port] package.pkg
 
 Build the project's operator screen the way naut run serves it, with no
 Node and no npm, and say what's wrong with it: the app server.hmi names (a
@@ -119,6 +121,10 @@ nb-build --offline builds an experimental NB10W-TW01B package for Omron's
 offline simulator with text, vector shapes, BMP/PNG/JPEG/WebP images,
 navigation, local decimal inputs, and LB or CIO lamps and toggle
 switches. Decimal inputs and toggles support the stock confirmation dialog.
+
+nb-probe reads an Omron panel's version over Ethernet.
+nb-download transfers an NB10W-TW01B user project and its required runtime
+resources over Ethernet. Both commands default to UDP port 21845.
 `
 
 // runHMI is `naut hmi`.
@@ -131,6 +137,12 @@ func runHMI(args []string) int {
 	}
 	if len(args) > 0 && args[0] == "nb-build" {
 		return runHMIBuildNB(args[1:])
+	}
+	if len(args) > 0 && args[0] == "nb-probe" {
+		return runHMINBNetwork(args[1:], false)
+	}
+	if len(args) > 0 && args[0] == "nb-download" {
+		return runHMINBNetwork(args[1:], true)
 	}
 	if len(args) == 0 || args[0] != "build" {
 		fmt.Fprint(os.Stderr, hmiUsage)

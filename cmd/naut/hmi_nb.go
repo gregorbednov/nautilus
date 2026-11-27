@@ -1,17 +1,67 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 
 	"github.com/joyautomation/nautilus/internal/nbhmi"
 	"github.com/joyautomation/nautilus/internal/nbhmi/nbpanel"
 )
+
+func runHMINBNetwork(args []string, download bool) int {
+	name, suffix, files := "naut hmi nb-probe", "", 0
+	if download {
+		name, suffix, files = "naut hmi nb-download", " package.pkg", 1
+	}
+	flags := flag.NewFlagSet(name, flag.ContinueOnError)
+	endpoint := flags.String("endpoint", "", "panel IPv4 address with optional UDP port")
+	flags.Usage = func() { fmt.Fprintf(os.Stderr, "usage: %s --endpoint ipv4[:port]%s\n", name, suffix) }
+	if err := flags.Parse(args); errors.Is(err, flag.ErrHelp) {
+		return 0
+	} else if err != nil {
+		return 2
+	}
+	if *endpoint == "" || flags.NArg() != files {
+		flags.Usage()
+		return 2
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	var err error
+	if download {
+		var pkg *nbpanel.Package
+		pkg, err = nbpanel.ReadPackage(flags.Arg(0))
+		if err == nil {
+			err = pkg.Download(ctx, *endpoint, func(name string, size int) {
+				fmt.Printf("transferred %s (%d bytes)\n", name, size)
+			})
+		}
+		if err == nil {
+			fmt.Printf("panel confirmed download of %s\n", flags.Arg(0))
+		}
+	} else {
+		var version nbpanel.PanelVersion
+		version, err = nbpanel.ProbeVersion(ctx, *endpoint)
+		if err == nil {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			err = enc.Encode(version)
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, name+":", err)
+		return 1
+	}
+	return 0
+}
 
 func runHMIInspectNB(args []string) int {
 	if len(args) != 1 {

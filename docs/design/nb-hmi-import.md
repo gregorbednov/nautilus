@@ -224,8 +224,9 @@ and
 
 ### Build and deploy a first project over Ethernet
 
-1. Build the Nautilus CLI from the repository. On Windows, run
-   `go build -o naut.exe ./cmd/naut` in PowerShell at the repository root.
+1. Build the Nautilus CLI at the repository root. Run
+   `go build -o naut.exe ./cmd/naut` on Windows or
+   `go build -o naut ./cmd/naut` on Linux and macOS.
 2. Keep a copy of the panel's current user project, such as `newhmi.pkg`.
    Select a compatible NB10W-TW01B PKGEXT 3 file as the build reference.
    The reference supplies the runtime, stock controls, existing screens,
@@ -277,17 +278,38 @@ and
    .\naut.exe hmi nb-inspect .\panel-test.pkg
    ```
 
-5. Open Omron's `NBManager.exe` directly. Set the connection type to
-   **Network** and enter the panel's management address and port. Use
-   **Download User Data** to open `panel-test.pkg`. In NBDownload, select
-   **HMI0** and **Data File**, clear the data-clearing options, and start
-   the download. Wait for the success message. This transfer replaces the
-   running user project. [Omron NBManager project transfer](https://automation-knowledge-base.omron.eu/support/solutions/articles/103000352732-download-and-upload-password-protected-projects-to-nb-hmi)
-6. Check that the start screen and the expected PLC indications appear.
-   For a rollback, transfer the saved `newhmi.pkg` the same way. If the
-   panel provides the **USB → HMI** system-menu operation, Omron documents
-   loading a `.pkg` from the USB host port. The trial below used Ethernet.
-   [Omron USB project transfer](https://automation-knowledge-base.omron.eu/support/solutions/articles/103000352752-how-to-use-usb-memory-sticks-on-nb-hmi)
+5. Enter the HMI's management IPv4 address. For a custom UDP port, enter
+   the address as `IPv4:port`. The default port is `21845`. Run the
+   read-only version query and check for model ID `122`. Then transfer
+   the package. The transfer replaces the running user project.
+
+   ```powershell
+   $panel = Read-Host 'HMI IPv4 address or IPv4:port'
+   .\naut.exe hmi nb-probe --endpoint $panel
+   .\naut.exe hmi nb-download --endpoint $panel .\panel-test.pkg
+   ```
+
+   On Linux and macOS use `./naut` and POSIX paths. Both commands use
+   the Nautilus binary and its UDP client.
+6. After the panel confirms the transfer, check that the start screen and
+   the expected PLC indications appear. To restore the previous project,
+   run `nb-download` on the saved `newhmi.pkg`. If confirmation is lost
+   during a flash write, check the panel state before repeating the transfer.
+
+### Native download support
+
+The Ethernet uploader handles the NB10W-TW01B single-terminal PKGEXT 3
+layout used by the package builder, with panel and package Servo versions
+at least `1164`. It writes the user project, fonts, and supporting runtime
+files from the package. It compares installed runtime and driver versions
+before replacing them.
+
+The stock NBDownload client and Nautilus completed the same transfer
+against a loopback receiver. The command sequence and the bytes of all
+11 transferred resources matched. The project integrity frames carried
+the same digest in different padding. The physical NB10W-TW01B answered
+the native read-only version query. Physical project playback below
+was verified after transfer with the Omron client.
 
 ### Supported project model
 
@@ -439,9 +461,9 @@ driver calling `sendto` and `recvfrom`
 `ev_68ac353cab6a4f84871c656e15c78f0f8b4857d41eaa2942eecc917e1785c90c`).
 The Nautilus build kept both the ARM ELF and Windows PE driver payloads
 byte for byte and moved their resource pointers by the increase in HMI size.
-The package growth test now checks this behavior. FINS/UDP on the panel
-requires a test of the ARM runtime. Project-wide configuration generation
-and direct deployment remain open.
+The package growth test now checks this behavior. The physical trial
+below verifies FINS/UDP reads from the ARM runtime. Project-wide
+configuration generation remains open.
 
 The control package and Nautilus prototype both dropped operations
 when the dialog timed out during automated UI verification. The final
