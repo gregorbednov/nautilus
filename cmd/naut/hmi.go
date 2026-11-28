@@ -98,6 +98,7 @@ func printBuildWarnings(w io.Writer, prefix string, warnings []string) {
 
 const hmiUsage = `usage: naut hmi build [-o dir] [project]
        naut hmi import-nb --out dir source-directory
+       naut hmi export-nb --out dir [--bindings tags.json] screen.mimic.json
        naut hmi nb-inspect package.pkg
        naut hmi nb-build --offline [--target NB10W-TW01B] --reference seed.pkg --out test.pkg project
        naut hmi nb-probe --endpoint ipv4[:port]
@@ -113,6 +114,9 @@ carries: ` + "svelte, @joyautomation/nautilus-hmi, @joyautomation/nautilus-hmi-3
 
 import-nb converts an NB-Designer DBVersion 137 source directory to a
 Nautilus project. The destination must be new.
+
+export-nb creates a new NB10W screen model from a Nautilus mimic. It
+requires explicit NB bit addresses for live tag bindings.
 
 nb-inspect validates the structure of an NB10W user project and lists its
 compiled screens.
@@ -131,6 +135,9 @@ resources over Ethernet. Both commands default to UDP port 21845.
 func runHMI(args []string) int {
 	if len(args) > 0 && args[0] == "import-nb" {
 		return runHMIImportNB(args[1:])
+	}
+	if len(args) > 0 && args[0] == "export-nb" {
+		return runHMIExportNB(args[1:])
 	}
 	if len(args) > 0 && args[0] == "nb-inspect" {
 		return runHMIInspectNB(args[1:])

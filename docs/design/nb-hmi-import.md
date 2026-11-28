@@ -222,6 +222,37 @@ and
 
 ## Experimental NB10W panel package build
 
+### Export a screen from the Mimic Editor
+
+Keep the `*.mimic.json` file as the source edited in VS Code. Export it to
+a new directory. Nautilus writes one screen with ID 0 to
+`hmi/src/lib/nb-hmi.json` and fits the canvas into 800×480 with its
+proportions preserved.
+
+The exporter supports static labels, static pipes with explicit points and
+direct or orthogonal routing, `Pump` running indicators, and `WriteToggle`.
+A pump is drawn as a marker with its caption. A running binding makes the
+marker an NB bit lamp. A toggle becomes an NB switch and must use the same
+tag in `props.tag` and `bind.value`. The panel uses its own lamp and switch
+graphics from the reference package.
+
+For live bindings, save a JSON object such as
+`{"PumpRunning":"CIO1.03","Enable":"LB20"}` in `tags.json`. Use the actual
+addresses for your project. A CIO binding uses the FINS/UDP PLC from the
+reference package. For a screen composed of static elements, omit
+`--bindings`.
+
+```sh
+naut hmi export-nb --bindings tags.json --out panel-hmi screens/pumps.mimic.json
+naut hmi nb-build --offline --reference newhmi.pkg --out panel-test.pkg panel-hmi
+naut hmi nb-inspect panel-test.pkg
+```
+
+The export reports the source element when it encounters an unsupported
+component or behavior. Examples include a momentary `CommandButton`, a
+read-only or inverted toggle, a live numeric label, and pipes with live
+bindings or port anchors.
+
 ### Build and deploy a first project over Ethernet
 
 1. Build the Nautilus CLI at the repository root. Run

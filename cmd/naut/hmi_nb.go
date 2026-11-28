@@ -15,6 +15,30 @@ import (
 	"github.com/joyautomation/nautilus/internal/nbhmi/nbpanel"
 )
 
+func runHMIExportNB(args []string) int {
+	flags := flag.NewFlagSet("naut hmi export-nb", flag.ContinueOnError)
+	out := flags.String("out", "", "new output directory for the NB screen model")
+	bindings := flags.String("bindings", "", "JSON mapping from Nautilus tags to NB bit addresses")
+	flags.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: naut hmi export-nb --out dir [--bindings tags.json] screen.mimic.json")
+	}
+	if err := flags.Parse(args); errors.Is(err, flag.ErrHelp) {
+		return 0
+	} else if err != nil {
+		return 2
+	}
+	if *out == "" || flags.NArg() != 1 || !strings.HasSuffix(strings.ToLower(flags.Arg(0)), ".mimic.json") {
+		flags.Usage()
+		return 2
+	}
+	if err := nbhmi.ExportMimic(flags.Arg(0), *bindings, *out); err != nil {
+		fmt.Fprintln(os.Stderr, "naut hmi export-nb:", err)
+		return 1
+	}
+	fmt.Printf("exported NB screen model to %s\n", filepath.Join(*out, "hmi", filepath.FromSlash(nbhmi.ModelPath)))
+	return 0
+}
+
 func runHMINBNetwork(args []string, download bool) int {
 	name, suffix, files := "naut hmi nb-probe", "", 0
 	if download {

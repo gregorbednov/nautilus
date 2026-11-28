@@ -363,8 +363,10 @@ func publish(destination string, files map[string][]byte) error {
 			return err
 		}
 	}
-	if err := os.WriteFile(filepath.Join(destination, "nautilus.yaml"), files["nautilus.yaml"], 0o644); err != nil {
-		return err
+	if manifest, ok := files["nautilus.yaml"]; ok {
+		if err := os.WriteFile(filepath.Join(destination, "nautilus.yaml"), manifest, 0o644); err != nil {
+			return err
+		}
 	}
 	complete = true
 	return nil

@@ -5,7 +5,6 @@ import "fmt"
 const (
 	bitLampComponent = 0x201
 	switchComponent  = 0x303
-	localBitLimit    = 9000
 	switchCaptionAt  = 172
 	lampRecordSize   = 108
 	vectorGraphicAt  = 28

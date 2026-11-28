@@ -5,6 +5,9 @@ import "fmt"
 // CIOBitLimit is the number of bit addresses in the supported CIO range.
 const CIOBitLimit = 6144 * 16
 
+// LocalBitLimit is the first local bit reserved for system use.
+const LocalBitLimit = 9000
+
 func encodeBitAddress(reference []byte, bit BitControl) ([16]byte, error) {
 	var address [16]byte
 	area := uint32(0xfe00) // Local LB.
@@ -18,8 +21,8 @@ func encodeBitAddress(reference []byte, bit BitControl) ([16]byte, error) {
 		}
 		little.PutUint32(address[:], device)
 		area = 0x3200 // The Omron HMI's CIO bit selector.
-	} else if bit.Index < 0 || bit.Index >= localBitLimit {
-		return address, fmt.Errorf("expected a user LB register below LB%d", localBitLimit)
+	} else if bit.Index < 0 || bit.Index >= LocalBitLimit {
+		return address, fmt.Errorf("expected a user LB register below LB%d", LocalBitLimit)
 	}
 	little.PutUint32(address[4:], area)
 	little.PutUint32(address[8:], uint32(bit.Index))
